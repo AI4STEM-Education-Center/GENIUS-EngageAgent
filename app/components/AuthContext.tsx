@@ -194,7 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       await Promise.resolve();
-      setState({ user: null, loading: false, error: "No SSO token provided." });
+      setState({ user: null, loading: false, error: null });
     };
     run();
   }, []);
