@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "./components/AuthContext";
+import GeniusSignIn from "./components/GeniusSignIn";
 import TeacherView from "./components/TeacherView";
 import StudentView from "./components/StudentView";
 
@@ -19,19 +20,7 @@ export default function Home() {
   }
 
   if (error || !user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <div className="max-w-md rounded-2xl border border-rose-200 bg-white p-8 text-center shadow-sm">
-          <p className="text-lg font-semibold text-slate-900">Authentication Required</p>
-          <p className="mt-2 text-sm text-slate-500">
-            {error ?? "Please access this application through the GENIUS Learning Platform."}
-          </p>
-          <p className="mt-4 text-xs text-slate-400">
-            The Engage Agent requires a valid SSO token from the GENIUS platform.
-          </p>
-        </div>
-      </div>
-    );
+    return <GeniusSignIn error={error} />;
   }
 
   if (user.role === "student" || user.role === "guest") {
