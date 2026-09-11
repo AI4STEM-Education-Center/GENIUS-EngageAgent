@@ -41,3 +41,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 data/engage-nosql.json
+data/workspace.json
+data/workspace.json.tmp

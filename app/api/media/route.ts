@@ -17,6 +17,8 @@ import { getMedia, listMedia, setActiveMediaVersion } from "@/lib/nosql";
  * Otherwise returns a list of matching media records.
  */
 export async function GET(request: NextRequest) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   const params = request.nextUrl.searchParams;
   const classId = params.get("classId");
   const assignmentId = params.get("assignmentId");
@@ -74,6 +76,8 @@ export async function GET(request: NextRequest) {
  * Used when the teacher navigates image history.
  */
 export async function PUT(request: NextRequest) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   try {
     const { classId, assignmentId, studentId, contentItemId, mediaType, versionIndex } =
       (await request.json()) as {
@@ -104,3 +108,4 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+import { guardWorkspaceRequest } from "@/lib/workspace-access";

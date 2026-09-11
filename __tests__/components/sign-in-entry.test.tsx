@@ -5,6 +5,8 @@ import Home from "@/app/page";
 import DashboardPage from "@/app/dashboard/page";
 import { useAuth } from "@/app/components/AuthContext";
 import type { UserContext } from "@/lib/auth";
+const { replace } = vi.hoisted(() => ({ replace: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace }) }));
 
 vi.mock("@/app/components/AuthContext", () => ({ useAuth: vi.fn() }));
 vi.mock("@/app/components/TeacherView", () => ({ default: () => <p>Teacher workflow</p> }));
@@ -17,6 +19,7 @@ const user: UserContext = {
 };
 
 beforeEach(() => {
+  replace.mockClear();
   vi.mocked(useAuth).mockReturnValue({ user: null, loading: false, error: null });
 });
 afterEach(cleanup);
@@ -31,9 +34,9 @@ describe.each([
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByText("No SSO token provided.")).toBeNull();
     expect(screen.queryByText("Authentication Required")).toBeNull();
-    const link = screen.getByRole("link", { name: "Continue in GENIUS" });
-    expect(link.getAttribute("href")).toBe("https://learn.ai4genius.org/login");
-    expect(link.getAttribute("target")).toBe("_blank");
+    const link = screen.getByRole("link", { name: "Sign in with GENIUS" });
+    expect(link.getAttribute("href")).toBe("/api/auth/start");
+    expect(link.getAttribute("target")).toBeNull();
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
     expect(link.getAttribute("referrerPolicy")).toBe("no-referrer");
     expect(screen.queryByText(/Teacher workflow|Student workflow|Teacher dashboard/)).toBeNull();
@@ -44,18 +47,24 @@ describe.each([
     render(<Page />);
     expect(screen.getByRole("alert").textContent).toContain("session could not be verified");
     expect(screen.queryByText("signature verification failed")).toBeNull();
-    expect(screen.getByRole("link", { name: "Continue in GENIUS" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Sign in with GENIUS" })).toBeTruthy();
   });
 
   it("waits for verification instead of showing sign-in while loading", () => {
     vi.mocked(useAuth).mockReturnValue({ user: null, loading: true, error: null });
     render(<Page />);
     expect(screen.getByText("Authenticating...")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Continue in GENIUS" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Sign in with GENIUS" })).toBeNull();
   });
 });
 
 describe("authenticated routing", () => {
+  it.each(["teacher", "student", "guest"] as const)("opens the independent %s workspace without an assignment", role => {
+    vi.mocked(useAuth).mockReturnValue({ user: { ...user, role, classId: undefined, assignmentId: undefined }, loading: false, error: null });
+    render(<Home />);
+    expect(replace).toHaveBeenCalledWith(role === "teacher" ? "/teacher/classes" : "/student/classes");
+    expect(screen.queryByText(/Teacher workflow|Student workflow/)).toBeNull();
+  });
   it("preserves the teacher home workflow", () => {
     vi.mocked(useAuth).mockReturnValue({ user, loading: false, error: null });
     render(<Home />);

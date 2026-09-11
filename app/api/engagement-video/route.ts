@@ -29,6 +29,8 @@ Do not add narration or lesson explanation.
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   const xaiKey = process.env.GROK_API_KEY;
   if (!xaiKey) {
     return NextResponse.json(
@@ -93,3 +95,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+import { guardWorkspaceRequest } from "@/lib/workspace-access";

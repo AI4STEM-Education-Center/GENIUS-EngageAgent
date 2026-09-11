@@ -5,6 +5,7 @@ import { recordTeacherAnnotation } from "@/lib/nosql";
 export const runtime = "nodejs";
 
 type AnnotationRequest = {
+  classId?: string;
   studentName?: string | null;
   assignment?: string | null;
   overallRecommendation?: string;
@@ -17,6 +18,8 @@ type AnnotationRequest = {
 };
 
 export async function POST(request: Request) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   try {
     const payload = (await request.json()) as AnnotationRequest;
     const overallRecommendation = payload.overallRecommendation?.trim();
@@ -40,6 +43,7 @@ export async function POST(request: Request) {
     }
 
     const record = await recordTeacherAnnotation({
+      ...(payload.classId?.startsWith("ea-class-") ? { workspace_class_id: payload.classId } : {}),
       student_name: payload.studentName ?? null,
       assignment: payload.assignment ?? null,
       overall_recommendation: overallRecommendation,
@@ -59,3 +63,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+import { guardWorkspaceRequest } from "@/lib/workspace-access";

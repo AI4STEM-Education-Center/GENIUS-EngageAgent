@@ -21,6 +21,7 @@
     "@aws-sdk/s3-request-presigner": "^3.988.0",
     "dotenv": "^16.5.0",
     "jose": "^6.2.0",
+    "lucide-react": "^1.45.0",
     "next": "16.1.6",
     "openai": "^6.17.0",
     "react": "19.2.3",

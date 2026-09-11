@@ -16,6 +16,9 @@ import path from "node:path";
 const DYNAMODB_MAX_ITEM_BYTES = 400_000;
 
 type StrategyCacheRecord = {
+  class_id?: string;
+  assignment_id?: string;
+  student_id?: string;
   plan_json: string;
   updated_at: string;
 };
@@ -123,6 +126,7 @@ type Store = {
 };
 
 type TeacherAnnotation = {
+  workspace_class_id?: string;
   annotation_id: string;
   student_name?: string | null;
   assignment?: string | null;
@@ -318,7 +322,8 @@ export const getCachedPlanJson = async (
   }
 
   const store = await loadStore();
-  return store.strategy_cache[studentId]?.plan_json ?? null;
+  const key = classId.startsWith("ea-class-") ? JSON.stringify([classId, assignmentId, studentId]) : studentId;
+  return store.strategy_cache[key]?.plan_json ?? null;
 };
 
 export const upsertCachedPlanJson = async (
@@ -353,7 +358,10 @@ export const upsertCachedPlanJson = async (
 
   await withWriteLock(async () => {
     const store = await loadStore();
-    store.strategy_cache[studentId] = {
+    const native = classId.startsWith("ea-class-");
+    const key = native ? JSON.stringify([classId, assignmentId, studentId]) : studentId;
+    store.strategy_cache[key] = {
+      ...(native ? { class_id: classId, assignment_id: assignmentId, student_id: studentId } : {}),
       plan_json: planJson,
       updated_at: new Date().toISOString(),
     };
@@ -443,11 +451,14 @@ export const listCachedPlans = async (
   const store = await loadStore();
   const records: CachedPlanRecord[] = [];
   for (const [sid, record] of Object.entries(store.strategy_cache)) {
-    if (studentId && sid !== studentId) {
+    if (classId.startsWith("ea-class-") && (record.class_id !== classId || record.assignment_id !== assignmentId)) continue;
+    if (!classId.startsWith("ea-class-") && record.class_id?.startsWith("ea-class-")) continue;
+    const studentKey = record.student_id || sid;
+    if (studentId && studentKey !== studentId) {
       continue;
     }
     records.push({
-      student_id: sid,
+      student_id: studentKey,
       assignment_id: assignmentId,
       class_id: classId,
       plan_json: record.plan_json,
@@ -1637,6 +1648,7 @@ export const listAllTeacherAnnotations = async (): Promise<TeacherAnnotation[]> 
     );
     return (result.Items ?? []).map((item) => ({
       annotation_id: (item.annotation_id as string) ?? "",
+      ...(typeof item.workspace_class_id === "string" ? { workspace_class_id: item.workspace_class_id } : {}),
       student_name: (item.student_name as string) ?? null,
       assignment: (item.assignment as string) ?? null,
       overall_recommendation: (item.overall_recommendation as string) ?? "",
@@ -1703,9 +1715,9 @@ export const listAllCachedPlans = async (): Promise<CachedPlanRecord[]> => {
   const records: CachedPlanRecord[] = [];
   for (const [sid, record] of Object.entries(store.strategy_cache)) {
     records.push({
-      student_id: sid,
-      assignment_id: "",
-      class_id: "",
+      student_id: record.student_id || sid,
+      assignment_id: record.assignment_id || "",
+      class_id: record.class_id || "",
       plan_json: record.plan_json,
       updated_at: record.updated_at,
     });

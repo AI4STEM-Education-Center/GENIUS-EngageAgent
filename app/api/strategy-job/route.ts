@@ -19,6 +19,8 @@ type Student = {
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   try {
     if (!isCohortAnalysisQueueConfigured()) {
       const missingEnv = getCohortAnalysisQueueConfigIssues();
@@ -117,3 +119,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+import { guardWorkspaceRequest } from "@/lib/workspace-access";

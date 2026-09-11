@@ -1669,6 +1669,8 @@ export default function TeacherView({ user }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           studentName: null,
+          classId,
+          assignmentId,
           assignment: selectedLesson ? `Lesson ${selectedLesson}` : null,
           overallRecommendation: plan.overallRecommendation,
           recommendationReason: plan.recommendationReason,
@@ -2022,7 +2024,7 @@ export default function TeacherView({ user }: Props) {
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2 xl:justify-end">
-              <Link href="/dashboard" className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">
+              <Link href={classId.startsWith("ea-class-") ? `/teacher/classes?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&view=dashboard` : "/dashboard"} className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">
                 Assignment Dashboard
               </Link>
               <Link href="/community" className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">
@@ -2155,7 +2157,7 @@ export default function TeacherView({ user }: Props) {
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold uppercase text-slate-400">Student responses</p>
                   <div className="flex flex-wrap items-center gap-2">
-                    <button
+                    {!classId.startsWith("ea-class-") && <button
                       type="button"
                       onClick={() => void autoAnswerTestStudents()}
                       disabled={
@@ -2168,7 +2170,7 @@ export default function TeacherView({ user }: Props) {
                       {autoAnsweringTestStudents
                         ? "Generating..."
                         : "Auto-answer 5 test students"}
-                    </button>
+                    </button>}
                     <button
                       type="button"
                       onClick={() => void loadStudentAnswers()}

@@ -4,9 +4,15 @@ import { useAuth } from "./components/AuthContext";
 import GeniusSignIn from "./components/GeniusSignIn";
 import TeacherView from "./components/TeacherView";
 import StudentView from "./components/StudentView";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
   const { user, loading, error } = useAuth();
+  const router = useRouter();
+  useEffect(() => {
+    if (user && !user.classId && !user.assignmentId) router.replace(user.role === "teacher" ? "/teacher/classes" : "/student/classes");
+  }, [user, router]);
 
   if (loading) {
     return (
@@ -22,6 +28,8 @@ export default function Home() {
   if (error || !user) {
     return <GeniusSignIn error={error} />;
   }
+
+  if (!user.classId || !user.assignmentId) return <p role="status" className="p-8">Opening your EngageAgent workspace...</p>;
 
   if (user.role === "student" || user.role === "guest") {
     return <StudentView user={user} />;
