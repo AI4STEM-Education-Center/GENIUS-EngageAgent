@@ -66,6 +66,38 @@ Rollback: redeploy the preceding EngageAgent commit. The additive GENIUS endpoin
 can remain available; existing iframe SSO is unchanged. Preserve all new class
 and response records, even when rolling the application code back.
 
+## Production acceptance, 2026-09-11
+
+The standalone release was deployed as EngageAgent Amplify deployment 49,
+commit `af3fc9442e2c3c20edaee1450d96ff71d7f2f9c0` (PR #76). The companion
+GENIUS provider was deployed from `7d9eb578b68eb90491188061e5fa22681ec0abd5`
+(GENIUS Learning Platform PR #38, successful Actions run 34615061288).
+
+Browser verification used explicitly named QA accounts and one private test
+class, not real instructional data. Confirmed on the production domains:
+
+- An existing GENIUS teacher session returns directly to EngageAgent classes.
+- New teacher and student registration, and subsequent password login, return
+  to the appropriate EngageAgent workspace rather than the GENIUS dashboard.
+- Teacher class/task creation, student enrollment, quiz publication, and student
+  submission persist in production storage across reload and reauthentication.
+- The teacher dashboard reads the student's submission and GENIUS ID.
+- Cohort analysis, text/image generation, content publication, student rating,
+  and teacher reporting complete successfully. The dashboard reports one
+  submission, one analyzed student, one published item, and a 4.0 test rating.
+- The generated image loads for both roles. Teacher workflow and student content
+  pages have no horizontal overflow at a measured 390px viewport width.
+- The pre-existing GENIUS Learning Task iframe still resolves its teacher,
+  class and assignment context and opens the original workflow.
+
+Automated verification: 155 EngageAgent tests, TypeScript, and production build;
+four GENIUS frontend/middleware tests and five provider tests, plus both GENIUS
+builds. The two additional EngageAgent tests cover the native-only cleanup of
+legacy synthetic-answer UI discovered during acceptance.
+
+Video generation, load testing, and historical data migration were not part of
+this acceptance run. The test accounts/class remain isolated for inspection.
+
 ## Existing limitations
 
 The legacy API's broader authorization design and shared public lesson content

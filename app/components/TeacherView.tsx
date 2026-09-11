@@ -2182,11 +2182,11 @@ export default function TeacherView({ user }: Props) {
                   </div>
                 </div>
                 <p className="mt-2 text-sm text-slate-700">
-                  <span className="font-semibold">{studentAnswers.length}</span> student{studentAnswers.length !== 1 ? "s" : ""} have answered so far.
+                  <span className="font-semibold">{studentAnswers.length}</span> student{studentAnswers.length === 1 ? " has" : "s have"} answered so far.
                 </p>
-                <p className="mt-1 text-xs text-slate-500">
+                {!classId.startsWith("ea-class-") && <p className="mt-1 text-xs text-slate-500">
                   Generates stable random answers for the five configured test students and overwrites their prior submissions for this assignment.
-                </p>
+                </p>}
                 {studentAnswers.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {studentAnswers.map((sa) => (
