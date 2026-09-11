@@ -90,7 +90,7 @@ export async function createSSOToken(
     .sign(secret);
 }
 
-export async function verifySSOToken(token: string): Promise<UserContext> {
+export async function verifySSOToken(token: string, options?: { audience: string; nonce: string }): Promise<UserContext> {
   const secrets = getVerificationSecrets();
 
   let payload: JWTPayload | undefined;
@@ -101,6 +101,7 @@ export async function verifySSOToken(token: string): Promise<UserContext> {
       ({ payload } = await jwtVerify(token, secret, {
         issuer: SSO_ISSUER,
         algorithms: ["HS256"],
+        ...(options ? { audience: options.audience, requiredClaims: ["exp", "iat", "sub", "nonce"] } : {}),
       }));
       break;
     } catch (error) {
@@ -116,6 +117,9 @@ export async function verifySSOToken(token: string): Promise<UserContext> {
   }
 
   const sso = payload as SSOPayload;
+  if (options && (sso.nonce !== options.nonce || sso.geniusId !== sso.sub)) {
+    throw new Error("Invalid GENIUS login response.");
+  }
 
   if (!sso.sub) {
     throw new Error("Invalid SSO token: missing sub claim.");

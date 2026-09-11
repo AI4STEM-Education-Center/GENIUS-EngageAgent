@@ -46,7 +46,7 @@ const buildAnswers = (
     ]),
   );
 
-async function resolveTeacherContext(request: Request, body: RequestBody) {
+async function resolveTeacherContext(request: Request, body: RequestBody): Promise<{ error: NextResponse } | { classId: string; assignmentId: string }> {
   const token = extractSSOToken(request);
 
   if (token) {
@@ -113,6 +113,8 @@ async function resolveTeacherContext(request: Request, body: RequestBody) {
 }
 
 export async function POST(request: Request) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   try {
     const body = (await request.json().catch(() => ({}))) as RequestBody;
     const context = await resolveTeacherContext(request, body);
@@ -193,3 +195,4 @@ export async function POST(request: Request) {
     );
   }
 }
+import { guardWorkspaceRequest } from "@/lib/workspace-access";

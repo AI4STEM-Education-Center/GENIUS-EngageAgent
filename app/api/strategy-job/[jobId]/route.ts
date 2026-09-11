@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { guardWorkspaceRequest } from "@/lib/workspace-access";
 
 import { getCohortJob } from "@/lib/nosql";
 
@@ -37,6 +38,9 @@ export async function GET(
   if (!data.job) {
     return NextResponse.json({ error: "Cohort analysis job not found." }, { status: 404 });
   }
+
+  const denied = await guardWorkspaceRequest(_request, { classId: data.job.class_id, assignmentId: data.job.assignment_id });
+  if (denied) return denied;
 
   const results = data.students
     .map((student) => {

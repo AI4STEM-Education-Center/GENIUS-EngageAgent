@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
+import { sessionUser } from "@/lib/session";
+import { isWorkspaceClass, listWorkspaceClasses } from "@/lib/workspace";
 import {
   listAllTeacherAnnotations,
   listAllStudentAnswers,
@@ -35,7 +37,7 @@ export async function GET(request: NextRequest) {
   const month = searchParams.get("month");
   const format = searchParams.get("format") ?? "json";
 
-  const [annotations, studentAnswers, plans, published, ratings] =
+  const [allAnnotations, allStudentAnswers, allPlans, allPublished, allRatings] =
     await Promise.all([
       listAllTeacherAnnotations(),
       listAllStudentAnswers(),
@@ -43,6 +45,19 @@ export async function GET(request: NextRequest) {
       listAllPublishedContent(),
       listAllContentRatings(),
     ]);
+
+  // Legacy exports keep their existing behavior; independent classes are private to their teacher.
+  const user = await sessionUser();
+  const accessible = new Set(user?.role === "teacher" ? (await listWorkspaceClasses(user)).map(c => c.id) : []);
+  const visible = (raw: string | undefined) => {
+    const id = raw?.replace(/^CLASS#/, "");
+    return !isWorkspaceClass(id) || accessible.has(id);
+  };
+  const annotations = allAnnotations.filter(row => visible(row.workspace_class_id));
+  const studentAnswers = allStudentAnswers.filter(row => visible(row.class_id));
+  const plans = allPlans.filter(row => visible(row.class_id));
+  const published = allPublished.filter(row => visible(row.class_id));
+  const ratings = allRatings.filter(row => visible(row.class_id));
 
   if (!month) {
     const summaryMap = new Map<string, MonthSummary>();

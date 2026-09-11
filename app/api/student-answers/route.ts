@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { upsertStudentAnswer, listStudentAnswers, getStudentAnswer } from "@/lib/nosql";
 
 export async function GET(request: Request) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const classId = searchParams.get("classId");
   const assignmentId = searchParams.get("assignmentId");
@@ -44,6 +46,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   const body = await request.json();
   const { classId, assignmentId, studentId, studentName, lessonNumber, answers } = body;
 
@@ -73,3 +77,4 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ answer: record }, { status: 201 });
 }
+import { guardWorkspaceRequest } from "@/lib/workspace-access";

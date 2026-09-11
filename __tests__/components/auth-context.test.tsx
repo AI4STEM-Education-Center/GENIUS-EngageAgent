@@ -30,6 +30,7 @@ beforeEach(() => {
   window.history.replaceState({}, "", "/");
   window.sessionStorage.clear();
   fetchMock.mockReset();
+  fetchMock.mockResolvedValue({ ok: false, status: 401, json: async () => ({ user: null }) });
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
@@ -42,7 +43,7 @@ describe("AuthProvider", () => {
   it("treats direct visits as signed out, not an authentication error", async () => {
     mount();
     expect(await settled()).toEqual({ user: null, loading: false, error: null });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/me", { cache: "no-store" });
     expect(window.sessionStorage.getItem(storageKey)).toBeNull();
   });
 
@@ -63,14 +64,16 @@ describe("AuthProvider", () => {
 
   it("reverifies a stored token when revisiting the app", async () => {
     window.sessionStorage.setItem(storageKey, "stored-token");
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401 });
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: teacher }) });
     mount();
     expect((await settled()).user).toEqual(teacher);
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ token: "stored-token" });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ token: "stored-token" });
   });
 
   it.each(["expired", "invalid signature"])("rejects and clears an %s stored token", async (error) => {
     window.sessionStorage.setItem(storageKey, "rejected-token");
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401 });
     fetchMock.mockResolvedValue({ ok: false, json: async () => ({ error }) });
     mount();
     expect(await settled()).toEqual({ user: null, loading: false, error });
@@ -89,6 +92,25 @@ describe("AuthProvider", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage denied"); });
     mount();
     expect(await settled()).toEqual({ user: null, loading: false, error: null });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/me", { cache: "no-store" });
+  });
+
+  it("restores a standalone session and discards stale iframe credentials", async () => {
+    window.history.replaceState({}, "", "/teacher/classes");
+    window.sessionStorage.setItem(storageKey, "old-iframe-token");
+    const identity = { ...teacher, classId: undefined, assignmentId: undefined };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: identity }) });
+    mount();
+    expect((await settled()).user).toEqual(identity);
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not use legacy credentials to enter a standalone workspace", async () => {
+    window.history.replaceState({}, "", "/student/classes");
+    window.sessionStorage.setItem(storageKey, "old-iframe-token");
+    mount();
+    expect((await settled()).user).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

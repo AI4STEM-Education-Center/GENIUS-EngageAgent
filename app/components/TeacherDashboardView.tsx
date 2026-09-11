@@ -345,7 +345,7 @@ export default function TeacherDashboardView({ user }: Props) {
             <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase text-emerald-700">Teacher</span>
             <span className="rounded-full bg-slate-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">Dashboard</span>
             <div className="ml-auto flex flex-wrap items-center gap-2">
-              <Link href="/" className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">
+              <Link href={user.classId?.startsWith("ea-class-") ? `/teacher/classes?classId=${encodeURIComponent(user.classId)}&assignmentId=${encodeURIComponent(user.assignmentId || "")}` : "/"} className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">
                 Back to workflow
               </Link>
               <Link href="/community" className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">

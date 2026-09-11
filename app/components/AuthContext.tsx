@@ -32,7 +32,7 @@ const TOKEN_STORAGE_KEY = "engage-sso-token";
 
 export const useAuth = () => useContext(AuthCtx);
 
-function readStoredSSOToken(): string | null {
+export function readStoredSSOToken(): string | null {
   if (typeof window === "undefined") return null;
 
   try {
@@ -116,6 +116,7 @@ function parseSSOFromUrl(): string | null {
 }
 
 function parseMockUserFromUrl(): UserContext | null {
+  if (process.env.NODE_ENV === "production") return null;
   if (typeof window === "undefined") return null;
 
   const url = new URL(window.location.href);
@@ -173,6 +174,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      const embeddedToken = window.self !== window.top ? readStoredSSOToken() : null;
+      if (embeddedToken) {
+        await authenticateToken(embeddedToken);
+        return;
+      }
+
+      // Standalone navigation uses the application's HttpOnly session, not an iframe token.
+      try {
+        const response = await fetch("/api/auth/me", { cache: "no-store" });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.user?.geniusId) {
+            clearStoredSSOToken();
+            clearStoredMockUser();
+            setState({ user: data.user, loading: false, error: null });
+            return;
+          }
+        }
+        if (response.status !== 401) throw new Error("Session check failed.");
+      } catch {
+        setState({ user: null, loading: false, error: "Unable to check your session. Please try again." });
+        return;
+      }
+
+      if (/^\/(teacher|student)\/classes/.test(window.location.pathname)) {
+        setState({ user: null, loading: false, error: null });
+        return;
+      }
+
       const mockUserFromUrl = parseMockUserFromUrl();
       if (mockUserFromUrl) {
         await Promise.resolve();
@@ -186,7 +216,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const storedMockUser = readStoredMockUser();
+      const storedMockUser = process.env.NODE_ENV === "production" ? null : readStoredMockUser();
       if (storedMockUser) {
         await Promise.resolve();
         setState({ user: storedMockUser, loading: false, error: null });
@@ -194,7 +224,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       await Promise.resolve();
-      setState({ user: null, loading: false, error: null });
+      setState({ user: null, loading: false, error: new URL(window.location.href).searchParams.has("signInError") ? "GENIUS sign-in could not be completed. Please try again." : null });
     };
     run();
   }, []);

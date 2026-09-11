@@ -216,6 +216,8 @@ const generatePlanForStudent = async ({
 };
 
 export async function POST(request: Request) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json(
       { error: "OPENAI_API_KEY is not set." },
@@ -340,3 +342,4 @@ export async function POST(request: Request) {
     );
   }
 }
+import { guardWorkspaceRequest } from "@/lib/workspace-access";

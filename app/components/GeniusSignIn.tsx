@@ -1,3 +1,5 @@
+"use client";
+
 type GeniusSignInProps = {
   error?: string | null;
 };
@@ -16,16 +18,15 @@ export default function GeniusSignIn({ error }: GeniusSignInProps) {
             Your EngageAgent session could not be verified. Sign-in is required again.
           </p>
         )}
-        {/* GENIUS embeds agents in a sandbox that blocks top-level navigation. */}
         <a
-          href="https://learn.ai4genius.org/login"
-          target="_blank"
+          href="/api/auth/start"
+          onClick={event => { if (window.self !== window.top) event.currentTarget.target = "_blank"; }}
           rel="noopener noreferrer"
           referrerPolicy="no-referrer"
-          title="GENIUS sign-in (opens in a new tab)"
+          title="Sign in to EngageAgent with GENIUS"
           className="mt-8 flex min-h-12 w-full items-center justify-center rounded-md bg-red-800 px-5 py-3 text-center text-sm font-semibold text-white transition-colors hover:bg-red-900 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-red-800"
         >
-          Continue in GENIUS
+          Sign in with GENIUS
         </a>
       </section>
     </main>

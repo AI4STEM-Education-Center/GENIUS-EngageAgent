@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { POST } from "@/app/api/auto-answer-test-students/route";
+import type { Lesson } from "@/lib/types";
 
 vi.mock("@/lib/auth", () => ({
   extractSSOToken: vi.fn(),
@@ -42,7 +43,7 @@ const { getQuizStatus, __getAnswers, __resetStore } = await import(
   __resetStore: () => void;
 };
 
-const lesson = {
+const lesson: Lesson = {
   lesson_number: 1,
   lesson_title: "Lesson 1",
   learning_objective: "Test objective",
@@ -81,6 +82,7 @@ beforeEach(() => {
 
   vi.mocked(extractSSOToken).mockReturnValue("valid-token");
   vi.mocked(verifySSOToken).mockResolvedValue({
+    geniusId: "teacher-1",
     userId: "teacher-1",
     email: "teacher@example.com",
     name: "Teacher",
@@ -117,6 +119,7 @@ describe("POST /api/auto-answer-test-students", () => {
 
   it("rejects non-teacher users", async () => {
     vi.mocked(verifySSOToken).mockResolvedValue({
+      geniusId: "student-1",
       userId: "student-1",
       email: "student@example.com",
       name: "Student",

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listAllMedia } from "@/lib/nosql";
+import { sessionUser } from "@/lib/session";
+import { isWorkspaceClass, listWorkspaceClasses } from "@/lib/workspace";
 
 export const maxDuration = 60;
 
@@ -34,7 +36,12 @@ export async function GET(request: NextRequest) {
 
   try {
     const page = await listAllMedia({ mediaType, search, limit, cursor });
-    return NextResponse.json(page);
+    const user = await sessionUser();
+    const accessible = new Set(user?.role === "teacher" ? (await listWorkspaceClasses(user)).map(c => c.id) : []);
+    return NextResponse.json({ ...page, items: page.items.filter(item => {
+      const classId = item.class_id.replace(/^CLASS#/, "");
+      return !isWorkspaceClass(classId) || accessible.has(classId);
+    }) });
   } catch (error) {
     const rawMessage =
       error instanceof Error ? error.message : "Failed to load gallery.";

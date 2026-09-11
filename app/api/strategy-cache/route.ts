@@ -16,6 +16,8 @@ export const runtime = "nodejs";
  *   { results: [{ studentId, plan, updatedAt }], count: number }
  */
 export async function GET(request: NextRequest) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   const { searchParams } = request.nextUrl;
   const classId = searchParams.get("classId")?.trim();
   const assignmentId = searchParams.get("assignmentId")?.trim();
@@ -87,3 +89,4 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+import { guardWorkspaceRequest } from "@/lib/workspace-access";

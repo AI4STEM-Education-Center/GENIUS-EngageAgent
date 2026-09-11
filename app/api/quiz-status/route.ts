@@ -24,6 +24,8 @@ function logStorageError(action: "GET" | "POST", error: unknown) {
 }
 
 export async function GET(request: Request) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const classId = searchParams.get("classId");
   const assignmentId = searchParams.get("assignmentId");
@@ -48,6 +50,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   try {
     const body = await request.json();
     const { classId, assignmentId, lessonNumber, status, publishedBy } = body;
@@ -82,3 +86,4 @@ export async function POST(request: Request) {
     );
   }
 }
+import { guardWorkspaceRequest } from "@/lib/workspace-access";
