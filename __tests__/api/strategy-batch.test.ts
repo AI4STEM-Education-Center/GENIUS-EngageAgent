@@ -197,6 +197,9 @@ describe("POST /api/strategy-batch", () => {
         answers: {
           L1_Q1: "D",
           L1_Q1_confidence: "B",
+          L1_S1_activity: "Playing soccer",
+          L1_S2_first_thing: "The ball",
+          L1_S2_second_thing: "My foot",
         },
       },
     ]));
@@ -218,6 +221,17 @@ describe("POST /api/strategy-batch", () => {
     );
     expect(userPrompt).toContain(
       "If nothing looks damaged after the collision, the force must have been weak.",
+    );
+    expect(userPrompt).toContain("Beginning-of-lesson survey evidence:");
+    expect(userPrompt).toContain("Playing soccer");
+    expect(userPrompt).toContain("The ball");
+
+    const systemPrompt = firstCall?.messages?.[0]?.content as string;
+    expect(systemPrompt).toContain(
+      "Do not treat survey responses as correct or incorrect",
+    );
+    expect(systemPrompt).toContain(
+      "do not select experience bridging merely because the survey asks about experience",
     );
   });
 

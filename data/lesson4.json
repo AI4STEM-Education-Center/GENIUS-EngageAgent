@@ -135,5 +135,61 @@
         "D": "Just guessing"
       }
     }
+  ],
+  "survey_items": [
+    {
+      "item_id": "L4_S1",
+      "question_number": 1,
+      "category": "familiarity",
+      "stem": "Think of a time you used something springy or stretchy, such as a ball, rubber band, or bow. What was it, and what did you do to make it change shape?",
+      "response_fields": [
+        {
+          "field_id": "L4_S1_object",
+          "label": "Object",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L4_S1_action",
+          "label": "What you did to it",
+          "response_type": "text"
+        }
+      ]
+    },
+    {
+      "item_id": "L4_S2",
+      "question_number": 2,
+      "category": "experience_details",
+      "stem": "Think of a time you pushed, pulled, or stretched something and it went back to its original shape.",
+      "response_fields": [
+        {
+          "field_id": "L4_S2_object",
+          "label": "Object",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L4_S2_action",
+          "label": "What you did to it",
+          "response_type": "text"
+        }
+      ]
+    },
+    {
+      "item_id": "L4_S3",
+      "question_number": 3,
+      "category": "experience_details",
+      "stem": "Think of a time you bent or stretched something too far, so it stayed loose or bent without snapping or returning to its original shape.",
+      "response_fields": [
+        {
+          "field_id": "L4_S3_object",
+          "label": "Object",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L4_S3_current_appearance",
+          "label": "How does it look now?",
+          "response_type": "text"
+        }
+      ]
+    }
   ]
 }
