@@ -134,5 +134,49 @@
         "D": "Just guessing"
       }
     }
+  ],
+  "survey_items": [
+    {
+      "item_id": "L8_S1",
+      "question_number": 1,
+      "category": "familiarity",
+      "stem": "Think of a time you had to load or store energy before releasing it.",
+      "example": "Examples: pulling back a bow string, winding up a toy, lifting a weight before dropping it, or stretching a rubber band.",
+      "response_fields": [
+        {
+          "field_id": "L8_S1_object",
+          "label": "Object",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L8_S1_action",
+          "label": "What did you do to store the energy?",
+          "response_type": "text"
+        }
+      ]
+    },
+    {
+      "item_id": "L8_S2",
+      "question_number": 2,
+      "category": "familiarity",
+      "stem": "Think of a time something hit something else and then stopped moving.",
+      "response_fields": [
+        {
+          "field_id": "L8_S2_first_object",
+          "label": "What hit?",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L8_S2_second_object",
+          "label": "What did it hit?",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L8_S2_observation",
+          "label": "After the hit, what did you still notice?",
+          "response_type": "text"
+        }
+      ]
+    }
   ]
 }
