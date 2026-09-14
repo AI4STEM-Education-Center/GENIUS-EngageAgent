@@ -72,7 +72,7 @@ Return a plan:
 - strategy: one of [cognitive conflict, analogy, experience bridging, engaged critiquing]
 - relevance: scores 0-100 for each strategy
 - overallRecommendation: 1-2 sentences, teacher-facing
-- recommendationReason: 2-3 sentences explaining why this strategy fits ${student.name}; reference the assignment/topic and cite 2+ specific quiz-evidence details
+- recommendationReason: 2-3 sentences explaining why this strategy fits ${student.name}; reference the assignment/topic and cite 2+ specific details from the available quiz and survey evidence
 - summary: 1 sentence
 - tldr: 8-14 words, teacher-facing
 - rationale: 3-5 sentences; reference the assignment/topic and include at least one concrete in-class example of how the teacher would use the strategy with ${student.name}
