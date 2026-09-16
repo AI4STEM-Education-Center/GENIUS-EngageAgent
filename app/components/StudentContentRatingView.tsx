@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { UserContext } from "@/lib/auth";
 import type { ContentItem, TextMode } from "@/lib/types";
+import type { StepProgress } from "@/lib/student-progress";
 import {
   buildPublishedContentState,
   type MediaRecordResponse,
@@ -12,6 +13,7 @@ import {
 
 type Props = {
   user: UserContext;
+  onProgress?: (progress: StepProgress) => void;
 };
 
 const RATING_LABELS = ["", "Not engaging", "Slightly engaging", "Moderately engaging", "Very engaging", "Extremely engaging"];
@@ -30,7 +32,7 @@ const getContentModeLabels = (item: ContentItem) => {
   return item.type ? [item.type] : [];
 };
 
-export default function StudentContentRatingView({ user }: Props) {
+export default function StudentContentRatingView({ user, onProgress }: Props) {
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [media, setMedia] = useState<Record<string, SharedContentMedia>>({});
   const [ratings, setRatings] = useState<Record<string, number>>({});
@@ -120,6 +122,18 @@ export default function StudentContentRatingView({ user }: Props) {
       loadRatings(),
     ]);
   }, [loadPublishedContent, loadRatings]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    if (contentItems.length === 0) {
+      onProgress?.({ kind: "not-available" });
+      return;
+    }
+
+    const allRated = contentItems.every((item) => savedRatings[item.id] != null);
+    onProgress?.(allRated ? { kind: "completed" } : { kind: "active" });
+  }, [loading, contentItems, savedRatings, onProgress]);
 
   useEffect(() => {
     if (!classId || !assignmentId) {
