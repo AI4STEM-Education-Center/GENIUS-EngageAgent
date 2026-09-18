@@ -102,3 +102,11 @@ export type ContentRatingRecord = {
   rating: number; // 1-5
   rated_at: string;
 };
+
+export type ReviewQuestionRecord = {
+  class_id: string;
+  assignment_id: string;
+  student_id: string;
+  questions: string[];
+  submitted_at: string;
+};

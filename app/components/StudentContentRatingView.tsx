@@ -224,7 +224,7 @@ export default function StudentContentRatingView({ user, onProgress }: Props) {
     <div className="flex flex-col gap-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-          Content Rating
+          Material Rating
         </p>
         <h2 className="mt-1 text-xl font-semibold text-slate-900">
           Rate how engaging each piece of content is

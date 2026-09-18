@@ -36,6 +36,11 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [submittedQuestions, setSubmittedQuestions] = useState<string[] | null>(null);
+  const [draftQuestions, setDraftQuestions] = useState<string[]>([""]);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
   const classId = user.classId;
   const assignmentId = user.assignmentId;
 
@@ -80,17 +85,89 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
     }
   }, [assignmentId, classId]);
 
+  const loadOwnQuestions = useCallback(async () => {
+    if (!classId || !assignmentId) return;
+
+    try {
+      const res = await fetch(
+        `/api/review-questions?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=${encodeURIComponent(user.userId)}`,
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as { reviewQuestions?: { questions?: string[] }[] };
+      const existing = data.reviewQuestions?.[0]?.questions;
+      if (existing && existing.length > 0) {
+        setSubmittedQuestions(existing);
+      }
+    } catch {
+      // Best-effort — the write field below still works even if this fails.
+    }
+  }, [assignmentId, classId, user.userId]);
+
   useEffect(() => {
     void loadPublishedContent();
-  }, [loadPublishedContent]);
+    void loadOwnQuestions();
+  }, [loadPublishedContent, loadOwnQuestions]);
 
-  // Content is considered "reviewed" as soon as it's published. This is a
-  // placeholder rule pending a team decision on real review tracking — see
-  // issue #82.
+  // Reviewing this step is complete once the student has submitted at
+  // least one question about the material (per team decision, 2026-09-18 —
+  // supersedes the earlier "published = reviewed" placeholder from #82).
   useEffect(() => {
     if (loading) return;
-    onProgress?.(contentItems.length > 0 ? { kind: "completed" } : { kind: "active" });
-  }, [loading, contentItems.length, onProgress]);
+    onProgress?.(
+      submittedQuestions && submittedQuestions.length > 0
+        ? { kind: "completed" }
+        : { kind: "active" },
+    );
+  }, [loading, submittedQuestions, onProgress]);
+
+  const updateDraftQuestion = (index: number, value: string) => {
+    setDraftQuestions((prev) => prev.map((q, i) => (i === index ? value : q)));
+  };
+
+  const addDraftQuestion = () => {
+    setDraftQuestions((prev) => [...prev, ""]);
+  };
+
+  const removeDraftQuestion = (index: number) => {
+    setDraftQuestions((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+  };
+
+  const submitQuestions = async () => {
+    if (!classId || !assignmentId) return;
+
+    const cleaned = draftQuestions.map((q) => q.trim()).filter((q) => q.length > 0);
+    if (cleaned.length === 0) {
+      setSubmitError("Write at least one question before submitting.");
+      return;
+    }
+
+    setSubmitting(true);
+    setSubmitError(null);
+
+    try {
+      const res = await fetch("/api/review-questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          classId,
+          assignmentId,
+          studentId: user.userId,
+          questions: cleaned,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as Record<string, string>).error ?? "Failed to submit questions.");
+      }
+
+      setSubmittedQuestions(cleaned);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Failed to submit.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -135,7 +212,7 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
           Review the learning material below
         </h2>
         <p className="mt-2 text-sm text-slate-500">
-          Take a look before moving on to Content Rating.
+          Take a look, then write at least one question about it below before moving on to Material Rating.
         </p>
       </div>
 
@@ -185,6 +262,80 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
           </div>
         );
       })}
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+          Your questions
+        </p>
+
+        {submittedQuestions && submittedQuestions.length > 0 ? (
+          <>
+            <p className="mt-1 text-sm font-semibold text-emerald-600">
+              Submitted — you can move on to Material Rating.
+            </p>
+            <ul className="mt-4 flex flex-col gap-2">
+              {submittedQuestions.map((q, i) => (
+                <li
+                  key={i}
+                  className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+                >
+                  {q}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <>
+            <h2 className="mt-1 text-xl font-semibold text-slate-900">
+              Write one or more questions about the material
+            </h2>
+            <div className="mt-4 flex flex-col gap-3">
+              {draftQuestions.map((q, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <textarea
+                    value={q}
+                    onChange={(e) => updateDraftQuestion(i, e.target.value)}
+                    placeholder="What are you wondering about this material?"
+                    rows={2}
+                    className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 focus:border-[#BA0C2F] focus:outline-none"
+                  />
+                  {draftQuestions.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeDraftQuestion(i)}
+                      className="mt-1 shrink-0 rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 hover:border-slate-300 hover:bg-slate-50"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-3 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={addDraftQuestion}
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+              >
+                + Add another question
+              </button>
+              <button
+                type="button"
+                onClick={submitQuestions}
+                disabled={submitting}
+                className="rounded-xl bg-[#BA0C2F] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {submitting ? "Submitting..." : "Submit"}
+              </button>
+            </div>
+
+            {submitError && (
+              <p className="mt-3 text-sm text-rose-600">{submitError}</p>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -21,5 +21,5 @@ export type StepDisplayState = {
 export const STUDENT_STEPS: { id: StudentStepId; title: string }[] = [
   { id: "assessment", title: "Assessment" },
   { id: "content-review", title: "Content Review" },
-  { id: "content-rating", title: "Content Rating" },
+  { id: "content-rating", title: "Material Rating" },
 ];

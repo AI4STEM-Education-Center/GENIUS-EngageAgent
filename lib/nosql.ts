@@ -85,6 +85,14 @@ type ContentRatingRecord = {
   rated_at: string;
 };
 
+type ReviewQuestionRecord = {
+  class_id: string;
+  assignment_id: string;
+  student_id: string;
+  questions: string[];
+  submitted_at: string;
+};
+
 export type CohortJobRecord = {
   job_id: string;
   class_id: string;
@@ -121,6 +129,7 @@ type Store = {
   student_answers: StudentAnswerRecord[];
   content_publish: ContentPublishRecord[];
   content_ratings: ContentRatingRecord[];
+  review_questions: ReviewQuestionRecord[];
   cohort_jobs: CohortJobRecord[];
   cohort_job_students: CohortJobStudentRecord[];
 };
@@ -153,6 +162,7 @@ const emptyStore: Store = {
   student_answers: [],
   content_publish: [],
   content_ratings: [],
+  review_questions: [],
   cohort_jobs: [],
   cohort_job_students: [],
 };
@@ -269,6 +279,9 @@ const loadStore = async () => {
       }
       if (!Array.isArray(parsed.content_ratings)) {
         parsed.content_ratings = [];
+      }
+      if (!Array.isArray(parsed.review_questions)) {
+        parsed.review_questions = [];
       }
       if (!Array.isArray(parsed.cohort_jobs)) {
         parsed.cohort_jobs = [];
@@ -1632,7 +1645,48 @@ export const upsertContentRating = async (
   return input;
 };
 
-export type { StudentAnswerRecord, ContentPublishRecord, ContentRatingRecord, TeacherAnnotation, QuizStatusRecord };
+/* ------------------------------------------------------------------ */
+/*  Review questions                                                   */
+/* ------------------------------------------------------------------ */
+/* Local JSON storage only for now (no DynamoDB path) -- add one before
+   this feature is deployed anywhere DYNAMODB_TABLE is set. */
+
+export const upsertReviewQuestions = async (
+  input: ReviewQuestionRecord,
+): Promise<ReviewQuestionRecord> => {
+  await withWriteLock(async () => {
+    const store = await loadStore();
+    const idx = store.review_questions.findIndex(
+      (r) =>
+        r.class_id === input.class_id &&
+        r.assignment_id === input.assignment_id &&
+        r.student_id === input.student_id,
+    );
+    if (idx >= 0) {
+      store.review_questions[idx] = input;
+    } else {
+      store.review_questions.push(input);
+    }
+    await persistStore(store);
+  });
+  return input;
+};
+
+export const listReviewQuestions = async (
+  classId: string,
+  assignmentId: string,
+  studentId?: string,
+): Promise<ReviewQuestionRecord[]> => {
+  const store = await loadStore();
+  return store.review_questions.filter(
+    (r) =>
+      r.class_id === classId &&
+      r.assignment_id === assignmentId &&
+      (!studentId || r.student_id === studentId),
+  );
+};
+
+export type { StudentAnswerRecord, ContentPublishRecord, ContentRatingRecord, ReviewQuestionRecord, TeacherAnnotation, QuizStatusRecord };
 
 export const listAllTeacherAnnotations = async (): Promise<TeacherAnnotation[]> => {
   if (useDynamoDb) {
