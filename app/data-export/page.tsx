@@ -215,7 +215,7 @@ export default function DataExportPage() {
                           color="bg-amber-100 text-amber-700"
                         />
                         <DataCard
-                          label="Content Ratings"
+                          label="Material Ratings"
                           count={m.contentRatings}
                           color="bg-rose-100 text-rose-700"
                         />

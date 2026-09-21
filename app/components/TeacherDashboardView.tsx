@@ -502,7 +502,7 @@ export default function TeacherDashboardView({ user }: Props) {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase text-slate-400">Ratings chart</p>
-                    <h2 className="text-lg font-semibold text-slate-900">Student content ratings</h2>
+                    <h2 className="text-lg font-semibold text-slate-900">Student material ratings</h2>
                   </div>
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{dashboardRatings.length} ratings</span>
                 </div>
