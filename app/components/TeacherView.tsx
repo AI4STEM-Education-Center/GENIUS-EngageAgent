@@ -2030,6 +2030,9 @@ export default function TeacherView({ user }: Props) {
               <Link href="/community" className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">
                 Community Gallery
               </Link>
+              <Link href="/surveys" className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">
+                Surveys
+              </Link>
             </div>
           </div>
         </header>

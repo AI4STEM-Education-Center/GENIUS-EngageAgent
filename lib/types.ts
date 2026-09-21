@@ -102,3 +102,60 @@ export type ContentRatingRecord = {
   rating: number; // 1-5
   rated_at: string;
 };
+
+/* ------------------------------------------------------------------ */
+/*  Surveys (UC-SV-01)                                                 */
+/*  Learning Task → Surveys → Questions → Response fields             */
+/* ------------------------------------------------------------------ */
+
+export type SurveyResponseType =
+  | "short_text"
+  | "long_text"
+  | "single_choice"
+  | "multiple_choice"
+  | "sentence_completion";
+
+export type SurveyQuestionPurpose = "familiarity" | "follow_up" | "unspecified";
+
+export type SurveyStatus = "draft" | "active";
+
+export type SurveyBlank = {
+  blank_id: string;
+  label: string;
+};
+
+export type SurveyResponseField = {
+  field_id: string;
+  label: string;
+  response_type: SurveyResponseType;
+  helper?: string; // example/helper text
+  data_key?: string;
+  required?: boolean;
+  options?: string[]; // single_choice / multiple_choice (>= 2)
+  sentence_text?: string; // sentence_completion
+  blanks?: SurveyBlank[]; // sentence_completion (>= 1)
+};
+
+export type SurveyQuestion = {
+  question_id: string;
+  prompt: string;
+  instructions?: string; // instructions or example
+  purpose: SurveyQuestionPurpose;
+  related_concept: string;
+  order: number; // auto-assigned as questions are added; editable
+  response_fields: SurveyResponseField[];
+};
+
+export type Survey = {
+  survey_id: string;
+  class_id: string;
+  assignment_id: string;
+  title: string;
+  description?: string;
+  student_instructions?: string;
+  lesson_number?: number; // related lesson, optional
+  status: SurveyStatus;
+  questions: SurveyQuestion[];
+  created_at: string;
+  updated_at: string;
+};

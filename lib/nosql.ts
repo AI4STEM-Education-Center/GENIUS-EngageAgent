@@ -10,6 +10,7 @@ import {
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import crypto from "node:crypto";
+import type { Survey } from "@/lib/types";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -113,6 +114,9 @@ export type CohortJobStudentRecord = {
   updated_at: string;
 };
 
+// A stored survey is exactly the Survey shape defined in lib/types.
+type SurveyRecord = Survey;
+
 type Store = {
   strategy_cache: Record<string, StrategyCacheRecord>;
   teacher_annotations: TeacherAnnotation[];
@@ -123,6 +127,7 @@ type Store = {
   content_ratings: ContentRatingRecord[];
   cohort_jobs: CohortJobRecord[];
   cohort_job_students: CohortJobStudentRecord[];
+  surveys: SurveyRecord[];
 };
 
 type TeacherAnnotation = {
@@ -155,6 +160,7 @@ const emptyStore: Store = {
   content_ratings: [],
   cohort_jobs: [],
   cohort_job_students: [],
+  surveys: [],
 };
 const dataDir = path.join(process.cwd(), "data");
 const storePath = path.join(dataDir, "engage-nosql.json");
@@ -275,6 +281,9 @@ const loadStore = async () => {
       }
       if (!Array.isArray(parsed.cohort_job_students)) {
         parsed.cohort_job_students = [];
+      }
+      if (!Array.isArray(parsed.surveys)) {
+        parsed.surveys = [];
       }
       storeCache = parsed;
       return parsed;
@@ -1632,7 +1641,141 @@ export const upsertContentRating = async (
   return input;
 };
 
-export type { StudentAnswerRecord, ContentPublishRecord, ContentRatingRecord, TeacherAnnotation, QuizStatusRecord };
+/* ------------------------------------------------------------------ */
+/*  Surveys (UC-SV-01)                                                 */
+/* ------------------------------------------------------------------ */
+
+const surveySortKey = (assignmentId: string, surveyId: string) =>
+  `SURVEY#ASSIGN#${assignmentId}#ID#${surveyId}`;
+
+export const upsertSurvey = async (survey: SurveyRecord): Promise<SurveyRecord> => {
+  if (useDynamoDb) {
+    const client = getDynamoClient();
+    if (client) {
+      await client.send(
+        new PutCommand({
+          TableName: dynamoTableName,
+          Item: {
+            [pkField]: `CLASS#${survey.class_id}`,
+            [skField]: surveySortKey(survey.assignment_id, survey.survey_id),
+            record_type: "survey",
+            survey_id: survey.survey_id,
+            assignment_id: survey.assignment_id,
+            title: survey.title,
+            description: survey.description,
+            student_instructions: survey.student_instructions,
+            lesson_number: survey.lesson_number,
+            status: survey.status,
+            questions: survey.questions,
+            created_at: survey.created_at,
+            updated_at: survey.updated_at,
+          },
+        }),
+      );
+    }
+    return survey;
+  }
+
+  await withWriteLock(async () => {
+    const store = await loadStore();
+    const idx = store.surveys.findIndex((s) => s.survey_id === survey.survey_id);
+    if (idx >= 0) {
+      store.surveys[idx] = survey;
+    } else {
+      store.surveys.push(survey);
+    }
+    await persistStore(store);
+  });
+  return survey;
+};
+
+export const getSurvey = async (
+  classId: string,
+  assignmentId: string,
+  surveyId: string,
+): Promise<SurveyRecord | null> => {
+  if (useDynamoDb) {
+    const client = getDynamoClient();
+    if (!client) return null;
+    const result = await client.send(
+      new GetCommand({
+        TableName: dynamoTableName,
+        Key: {
+          [pkField]: `CLASS#${classId}`,
+          [skField]: surveySortKey(assignmentId, surveyId),
+        },
+      }),
+    );
+    if (!result.Item) return null;
+    const item = result.Item;
+    return {
+      survey_id: (item.survey_id as string) ?? surveyId,
+      class_id: classId,
+      assignment_id: (item.assignment_id as string) ?? assignmentId,
+      title: (item.title as string) ?? "",
+      description: item.description as string | undefined,
+      student_instructions: item.student_instructions as string | undefined,
+      lesson_number: item.lesson_number as number | undefined,
+      status: (item.status as SurveyRecord["status"]) ?? "draft",
+      questions: (item.questions as SurveyRecord["questions"]) ?? [],
+      created_at: (item.created_at as string) ?? "",
+      updated_at: (item.updated_at as string) ?? "",
+    };
+  }
+
+  const store = await loadStore();
+  return (
+    store.surveys.find(
+      (s) =>
+        s.class_id === classId &&
+        s.assignment_id === assignmentId &&
+        s.survey_id === surveyId,
+    ) ?? null
+  );
+};
+
+export const listSurveys = async (
+  classId: string,
+  assignmentId: string,
+): Promise<SurveyRecord[]> => {
+  if (useDynamoDb) {
+    const client = getDynamoClient();
+    if (!client) return [];
+    const result = await client.send(
+      new QueryCommand({
+        TableName: dynamoTableName,
+        KeyConditionExpression: "#pk = :pk AND begins_with(#sk, :skPrefix)",
+        ExpressionAttributeNames: { "#pk": pkField, "#sk": skField },
+        ExpressionAttributeValues: {
+          ":pk": `CLASS#${classId}`,
+          ":skPrefix": `SURVEY#ASSIGN#${assignmentId}#ID#`,
+        },
+      }),
+    );
+    return (result.Items ?? [])
+      .filter((item) => item.record_type === "survey")
+      .map((item) => ({
+        survey_id: (item.survey_id as string) ?? "",
+        class_id: classId,
+        assignment_id: (item.assignment_id as string) ?? assignmentId,
+        title: (item.title as string) ?? "",
+        description: item.description as string | undefined,
+        student_instructions: item.student_instructions as string | undefined,
+        lesson_number: item.lesson_number as number | undefined,
+        status: (item.status as SurveyRecord["status"]) ?? "draft",
+        questions: (item.questions as SurveyRecord["questions"]) ?? [],
+        created_at: (item.created_at as string) ?? "",
+        updated_at: (item.updated_at as string) ?? "",
+      }));
+  }
+
+  const store = await loadStore();
+  return store.surveys.filter(
+    (s) => s.class_id === classId && s.assignment_id === assignmentId,
+  );
+};
+
+export type { StudentAnswerRecord, ContentPublishRecord, ContentRatingRecord, TeacherAnnotation, QuizStatusRecord, SurveyRecord };
 
 export const listAllTeacherAnnotations = async (): Promise<TeacherAnnotation[]> => {
   if (useDynamoDb) {
