@@ -64,6 +64,22 @@ export type QuizItem = {
   distractor_misconception_map?: Partial<Record<string, string>>;
 };
 
+export type SurveyResponseField = {
+  field_id: string;
+  label: string;
+  response_type: "text" | "choice";
+  options?: string[];
+};
+
+export type SurveyItem = {
+  item_id: string;
+  question_number: number;
+  category: "familiarity" | "experience_details";
+  stem: string;
+  example?: string;
+  response_fields: SurveyResponseField[];
+};
+
 export type Lesson = {
   lesson_number: number;
   lesson_title: string;
@@ -71,6 +87,7 @@ export type Lesson = {
   core_ideas: string[];
   misconceptions: Record<string, string>;
   quiz_items: QuizItem[];
+  survey_items: SurveyItem[];
 };
 
 export type QuizStatus = "draft" | "published" | "closed";

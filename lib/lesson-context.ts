@@ -34,6 +34,18 @@ export type ResolvedQuizEvidence = {
   misconceptionText: string | null;
 };
 
+export type ResolvedSurveyEvidence = {
+  itemId: string;
+  questionNumber: number;
+  category: "familiarity" | "experience_details";
+  stem: string;
+  responses: Array<{
+    fieldId: string;
+    label: string;
+    response: string;
+  }>;
+};
+
 const splitMisconceptionCodes = (value: string | null | undefined) =>
   value
     ?.split(",")
@@ -140,4 +152,29 @@ export const resolveQuizEvidence = (
         misconceptionText: resolveMisconceptionText(lesson, misconceptionCode),
       };
     });
+};
+
+export const resolveSurveyEvidence = (
+  lessonNumber: number,
+  answers: StudentAnswers,
+): ResolvedSurveyEvidence[] => {
+  const lesson = getLesson(lessonNumber);
+  if (!lesson) {
+    return [];
+  }
+
+  return lesson.survey_items
+    .map((item) => ({
+      itemId: item.item_id,
+      questionNumber: item.question_number,
+      category: item.category,
+      stem: item.stem,
+      responses: item.response_fields.flatMap((field) => {
+        const response = answers[field.field_id]?.trim();
+        return response
+          ? [{ fieldId: field.field_id, label: field.label, response }]
+          : [];
+      }),
+    }))
+    .filter((item) => item.responses.length > 0);
 };

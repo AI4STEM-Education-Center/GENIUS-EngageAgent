@@ -339,7 +339,7 @@ const parsePersistedContentItem = (
 };
 
 const stepLabels = [
-  "Lesson & quiz",
+  "Assessment",
   "Strategy recommendation",
   "Content generation",
 ];
@@ -359,6 +359,8 @@ export default function TeacherView({ user }: Props) {
   const [quizItems, setQuizItems] = useState<QuizItem[]>([]);
   const [quizStatus, setQuizStatus] = useState<"draft" | "published" | "closed">("draft");
   const [publishingQuiz, setPublishingQuiz] = useState(false);
+  // Assessment step sub-tabs (quiz vs survey), mirrors the tab pattern in StudentView.
+  const [assessmentTab, setAssessmentTab] = useState<"quiz" | "survey">("quiz");
 
   // Student answers
   const [studentAnswers, setStudentAnswers] = useState<StudentAnswer[]>([]);
@@ -2060,12 +2062,13 @@ export default function TeacherView({ user }: Props) {
           </div>
 
 
-          {/* Step 1: Lesson & Quiz */}
+          {/* Step 1: Assessment */}
           {currentStep === 1 && (
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 1</p>
-                <h2 className="text-2xl font-semibold text-slate-900">Select lesson & publish quiz</h2>
+                <h2 className="text-2xl font-semibold text-slate-900">Assessment</h2>
+                <p className="mt-1 text-sm text-slate-500">Select a lesson, then publish its quiz and survey to students.</p>
               </div>
 
               {selectedLessonData && (
@@ -2085,14 +2088,39 @@ export default function TeacherView({ user }: Props) {
                     <button key={lesson.lesson_number} type="button" onClick={() => selectLesson(lesson.lesson_number)}
                       className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${selectedLesson === lesson.lesson_number ? "border-[#BA0C2F] bg-[#BA0C2F]/5 ring-2 ring-[#BA0C2F]" : "border-slate-200 hover:border-slate-300"}`}>
                       <p className="font-semibold text-slate-800">{lesson.lesson_title}</p>
-                      <p className="mt-1 text-xs text-slate-500">{lesson.quiz_items.filter((q) => q.type === "multiple_choice").length} questions</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {lesson.quiz_items.filter((q) => q.type === "multiple_choice").length} questions + {(lesson.survey_items ?? []).length} survey questions
+                      </p>
                     </button>
                   ))}
                 </div>
               </div>
 
+              {/* Assessment sub-tabs: Quiz / Survey (same pill pattern as StudentView tabs) */}
+              {selectedLesson && (
+                <div className="flex gap-2">
+                  {([
+                    { id: "quiz", label: "Quiz" },
+                    { id: "survey", label: "Survey" },
+                  ] as const).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setAssessmentTab(tab.id)}
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                        assessmentTab === tab.id
+                          ? "bg-[#BA0C2F] text-white"
+                          : "border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* Quiz preview */}
-              {selectedLesson && quizItems.length > 0 && (
+              {selectedLesson && quizItems.length > 0 && assessmentTab === "quiz" && (
                 <div className="grid gap-4">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-semibold uppercase text-slate-400">Quiz preview ({quizItems.filter((q) => q.type === "multiple_choice").length} questions + confidence checks)</p>
@@ -2121,7 +2149,7 @@ export default function TeacherView({ user }: Props) {
                         disabled={publishingQuiz || !selectedLesson || !hasAssignmentContext}
                         className="inline-flex items-center justify-center rounded-xl bg-[#BA0C2F] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-400"
                       >
-                        {publishingQuiz ? "Publishing..." : "Publish quiz to students"}
+                        {publishingQuiz ? "Publishing..." : "Publish quiz and survey to students"}
                       </button>
                       {!hasAssignmentContext && (
                         <p className="text-sm text-amber-700">
@@ -2131,7 +2159,57 @@ export default function TeacherView({ user }: Props) {
                     </div>
                   )}
                   {quizStatus === "published" && (
-                    <p className="text-sm font-semibold text-emerald-600">Quiz is live. Students can now answer.</p>
+                    <p className="text-sm font-semibold text-emerald-600">Quiz and survey are live. Students can now answer.</p>
+                  )}
+                </div>
+              )}
+
+              {/* Survey preview — published together with the quiz */}
+              {selectedLesson && assessmentTab === "survey" && (
+                <div className="grid gap-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase text-slate-400">
+                      Beginning-of-lesson survey ({selectedLessonData?.survey_items?.length ?? 0} questions)
+                    </p>
+                    {(selectedLessonData?.survey_items?.length ?? 0) > 0 ? (
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${quizStatus === "published" ? "bg-emerald-100 text-emerald-700" : quizStatus === "closed" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-700"}`}>
+                        {quizStatus}
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">not created</span>
+                    )}
+                  </div>
+                  {(selectedLessonData?.survey_items?.length ?? 0) > 0 ? (
+                    <>
+                      <div className="max-h-80 overflow-y-auto rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                        {selectedLessonData?.survey_items?.map((item) => (
+                          <div key={item.item_id} className="mb-4">
+                            <p className="text-sm font-medium">{item.question_number}. {item.stem}</p>
+                            {item.example && (
+                              <p className="mt-1 text-xs text-slate-500">{item.example}</p>
+                            )}
+                            <div className="mt-1 grid gap-1 pl-4">
+                              {item.response_fields.map((field) => (
+                                <p key={field.field_id} className="text-xs text-slate-500">
+                                  {field.label}{field.options ? ` (${field.options.join(" / ")})` : ""}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        The survey is published to students together with the quiz from the Quiz tab.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6">
+                      <p className="text-sm font-semibold text-slate-700">No survey for this lesson</p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        A survey asks students short questions alongside the quiz — for example, their prior
+                        experience or confidence — so the assessment captures more than the quiz alone.
+                      </p>
+                    </div>
                   )}
                 </div>
               )}

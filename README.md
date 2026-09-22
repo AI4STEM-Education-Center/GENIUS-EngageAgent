@@ -16,7 +16,7 @@ development.
   strategies → generate & send content
 - **Student workflow**: answer quiz questions, then rate published content
 - Lesson data for 8 physics lessons (collisions & forces) with multiple-choice
-  and confidence-check items
+  items, confidence checks, and beginning-of-lesson experience surveys
 - Strategy generation using batch/cohort analysis of student answers
 - Content generation with AI-generated images and video
 - Role-based views determined by SSO token (`teacher` vs `student`)
@@ -29,7 +29,8 @@ development.
   content publish, content rating, strategy, media generation
 - **Data layer**: `lib/nosql.ts` — DynamoDB with local JSON fallback
 - **Auth**: `lib/auth.ts` — JWT (HS256) verification via `jose`
-- **Quiz data**: `lib/quiz-data.ts` — loads `docs/data/lesson1-8.json`
+- **Lesson data**: `lib/quiz-data.ts` — loads quiz and survey items from
+  `data/lesson1.json` through `data/lesson8.json`
 - **Tests**: `__tests__/` — 57 tests via Vitest
 
 ## Prerequisites

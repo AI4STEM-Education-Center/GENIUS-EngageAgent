@@ -1,4 +1,9 @@
-import type { Lesson, QuizItem } from "./types";
+import type {
+  Lesson,
+  QuizItem,
+  SurveyItem,
+  SurveyResponseField,
+} from "./types";
 
 import lesson1 from "@/data/lesson1.json";
 import lesson2 from "@/data/lesson2.json";
@@ -13,9 +18,19 @@ type RawQuizItem = Omit<QuizItem, "type"> & {
   type: string;
 };
 
-type RawLesson = Omit<Lesson, "misconceptions" | "quiz_items"> & {
+type RawSurveyResponseField = Omit<SurveyResponseField, "response_type"> & {
+  response_type: string;
+};
+
+type RawSurveyItem = Omit<SurveyItem, "category" | "response_fields"> & {
+  category: string;
+  response_fields: RawSurveyResponseField[];
+};
+
+type RawLesson = Omit<Lesson, "misconceptions" | "quiz_items" | "survey_items"> & {
   misconceptions: Lesson["misconceptions"];
   quiz_items: RawQuizItem[];
+  survey_items: RawSurveyItem[];
 };
 
 function normalizeQuizItemType(type: string): QuizItem["type"] {
@@ -33,10 +48,40 @@ function normalizeQuizItem(rawItem: RawQuizItem): QuizItem {
   };
 }
 
+function normalizeSurveyResponseType(
+  responseType: string,
+): SurveyResponseField["response_type"] {
+  if (responseType === "text" || responseType === "choice") {
+    return responseType;
+  }
+
+  throw new Error(`Unsupported survey response type: ${responseType}`);
+}
+
+function normalizeSurveyCategory(category: string): SurveyItem["category"] {
+  if (category === "familiarity" || category === "experience_details") {
+    return category;
+  }
+
+  throw new Error(`Unsupported survey category: ${category}`);
+}
+
+function normalizeSurveyItem(rawItem: RawSurveyItem): SurveyItem {
+  return {
+    ...rawItem,
+    category: normalizeSurveyCategory(rawItem.category),
+    response_fields: rawItem.response_fields.map((field) => ({
+      ...field,
+      response_type: normalizeSurveyResponseType(field.response_type),
+    })),
+  };
+}
+
 function normalizeLesson(rawLesson: RawLesson): Lesson {
   return {
     ...rawLesson,
     quiz_items: rawLesson.quiz_items.map(normalizeQuizItem),
+    survey_items: rawLesson.survey_items.map(normalizeSurveyItem),
   };
 }
 

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { UserContext } from "@/lib/auth";
 import { findExistingStudentAnswer } from "@/lib/student-answer-lookup";
-import type { QuizItem } from "@/lib/types";
+import type { QuizItem, SurveyItem } from "@/lib/types";
 import type { StepProgress } from "@/lib/student-progress";
 
 type Props = {
@@ -33,6 +33,7 @@ export const notifyQuizSubmitted = (classId: string, assignmentId: string, geniu
 export default function StudentQuizView({ user, onProgress }: Props) {
   const [quizStatus, setQuizStatus] = useState<QuizStatusData | null>(null);
   const [questions, setQuestions] = useState<QuizItem[]>([]);
+  const [surveyQuestions, setSurveyQuestions] = useState<SurveyItem[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [existingAnswers, setExistingAnswers] = useState<Record<string, string> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -77,6 +78,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
       const lessonRes = await fetch(`/api/lessons/${qs.lesson_number}`);
       const lessonData = await lessonRes.json();
       setQuestions(lessonData.quiz_items ?? []);
+      setSurveyQuestions(lessonData.survey_items ?? []);
 
       const existingAnswer = await findExistingStudentAnswer({
         classId,
@@ -117,6 +119,11 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   const handleSelect = (itemId: string, option: string) => {
     if (submitted) return;
     setAnswers((prev) => ({ ...prev, [itemId]: option }));
+  };
+
+  const handleTextResponse = (fieldId: string, response: string) => {
+    if (submitted) return;
+    setAnswers((prev) => ({ ...prev, [fieldId]: response }));
   };
 
   const handleSubmit = async () => {
@@ -200,13 +207,17 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   // Check confidence items too
   const confidenceItems = questions.filter((q) => q.type === "confidence_check");
   const allConfidenceAnswered = confidenceItems.every((q) => answers[q.item_id]);
-  const canSubmit = allAnswered && allConfidenceAnswered && !submitted;
+  const allSurveyAnswered = surveyQuestions.every((item) =>
+    item.response_fields.every((field) => answers[field.field_id]?.trim()),
+  );
+  const canSubmit =
+    allAnswered && allConfidenceAnswered && allSurveyAnswered && !submitted;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-          Lesson {quizStatus.lesson_number} Quiz
+          Lesson {quizStatus.lesson_number} Quiz and Survey
         </p>
         <h2 className="mt-1 text-xl font-semibold text-slate-900">
           Answer the questions below
@@ -281,6 +292,100 @@ export default function StudentQuizView({ user, onProgress }: Props) {
           </div>
         );
       })}
+
+      {surveyQuestions.length > 0 && (
+        <section className="flex flex-col gap-4" aria-labelledby="lesson-survey-heading">
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">
+              Beginning-of-lesson survey
+            </p>
+            <h2 id="lesson-survey-heading" className="mt-1 text-xl font-semibold text-slate-900">
+              Connect the lesson to what you already know
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              There are no right or wrong answers. Your responses help your teacher
+              connect the lesson to familiar experiences.
+            </p>
+          </div>
+
+          {surveyQuestions.map((item) => (
+            <div key={item.item_id} className="rounded-2xl border border-sky-100 bg-white p-6">
+              <div className="flex items-start gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-100 text-xs font-semibold text-sky-700">
+                  {item.question_number}
+                </span>
+                <div className="flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+                    {item.category === "familiarity" ? "Familiarity" : "Experience details"}
+                  </p>
+                  <p className="mt-1 text-sm font-medium leading-6 text-slate-800">
+                    {item.stem}
+                  </p>
+                  {item.example && (
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{item.example}</p>
+                  )}
+
+                  <div className="mt-4 grid gap-4">
+                    {item.response_fields.map((field) => {
+                      const response =
+                        answers[field.field_id] ?? existingAnswers?.[field.field_id] ?? "";
+
+                      return (
+                        <div key={field.field_id}>
+                          {field.response_type === "choice" ? (
+                            <fieldset>
+                              <legend className="text-sm font-semibold text-slate-700">
+                                {field.label}
+                              </legend>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {(field.options ?? []).map((option) => (
+                                  <button
+                                    key={option}
+                                    type="button"
+                                    aria-pressed={response === option}
+                                    onClick={() => handleSelect(field.field_id, option)}
+                                    disabled={submitted}
+                                    className={`rounded-full border px-4 py-2 text-sm transition ${
+                                      response === option
+                                        ? "border-sky-600 bg-sky-600 text-white"
+                                        : "border-slate-200 text-slate-600 hover:border-sky-300 hover:bg-sky-50"
+                                    } ${submitted ? "cursor-default" : "cursor-pointer"}`}
+                                  >
+                                    {option}
+                                  </button>
+                                ))}
+                              </div>
+                            </fieldset>
+                          ) : (
+                            <>
+                              <label
+                                htmlFor={field.field_id}
+                                className="text-sm font-semibold text-slate-700"
+                              >
+                                {field.label}
+                              </label>
+                              <textarea
+                                id={field.field_id}
+                                value={response}
+                                onChange={(event) =>
+                                  handleTextResponse(field.field_id, event.target.value)
+                                }
+                                disabled={submitted}
+                                rows={2}
+                                className="mt-2 w-full resize-y rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100 disabled:cursor-default disabled:bg-slate-50"
+                              />
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       {error && (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
