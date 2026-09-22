@@ -2123,9 +2123,7 @@ export default function TeacherView({ user }: Props) {
               {selectedLesson && quizItems.length > 0 && assessmentTab === "quiz" && (
                 <div className="grid gap-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase text-slate-400">
-                      Quiz and survey preview ({quizItems.filter((q) => q.type === "multiple_choice").length} quiz questions + confidence checks + {selectedLessonData?.survey_items?.length ?? 0} survey questions)
-                    </p>
+                    <p className="text-xs font-semibold uppercase text-slate-400">Quiz preview ({quizItems.filter((q) => q.type === "multiple_choice").length} questions + confidence checks)</p>
                     <span className={`rounded-full px-3 py-1 text-xs font-semibold ${quizStatus === "published" ? "bg-emerald-100 text-emerald-700" : quizStatus === "closed" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-700"}`}>
                       {quizStatus}
                     </span>
@@ -2141,28 +2139,6 @@ export default function TeacherView({ user }: Props) {
                         </div>
                       </div>
                     ))}
-                    {(selectedLessonData?.survey_items?.length ?? 0) > 0 && (
-                      <div className="mt-5 border-t border-sky-200 pt-4">
-                        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-sky-700">
-                          Beginning-of-lesson survey
-                        </p>
-                        {selectedLessonData?.survey_items?.map((item) => (
-                          <div key={item.item_id} className="mb-4">
-                            <p className="text-sm font-medium">{item.question_number}. {item.stem}</p>
-                            {item.example && (
-                              <p className="mt-1 text-xs text-slate-500">{item.example}</p>
-                            )}
-                            <div className="mt-1 grid gap-1 pl-4">
-                              {item.response_fields.map((field) => (
-                                <p key={field.field_id} className="text-xs text-slate-500">
-                                  {field.label}{field.options ? ` (${field.options.join(" / ")})` : ""}
-                                </p>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
 
                   {quizStatus === "draft" && (
@@ -2188,31 +2164,53 @@ export default function TeacherView({ user }: Props) {
                 </div>
               )}
 
-              {/* Survey (placeholder entry point — survey builder is tracked separately in UC-SV-01 #78) */}
+              {/* Survey preview — published together with the quiz */}
               {selectedLesson && assessmentTab === "survey" && (
                 <div className="grid gap-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase text-slate-400">Survey</p>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">not created</span>
+                    <p className="text-xs font-semibold uppercase text-slate-400">
+                      Beginning-of-lesson survey ({selectedLessonData?.survey_items?.length ?? 0} questions)
+                    </p>
+                    {(selectedLessonData?.survey_items?.length ?? 0) > 0 ? (
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${quizStatus === "published" ? "bg-emerald-100 text-emerald-700" : quizStatus === "closed" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-700"}`}>
+                        {quizStatus}
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">not created</span>
+                    )}
                   </div>
-                  <div className="flex flex-col items-start gap-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-700">No survey yet for this lesson</p>
+                  {(selectedLessonData?.survey_items?.length ?? 0) > 0 ? (
+                    <>
+                      <div className="max-h-80 overflow-y-auto rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                        {selectedLessonData?.survey_items?.map((item) => (
+                          <div key={item.item_id} className="mb-4">
+                            <p className="text-sm font-medium">{item.question_number}. {item.stem}</p>
+                            {item.example && (
+                              <p className="mt-1 text-xs text-slate-500">{item.example}</p>
+                            )}
+                            <div className="mt-1 grid gap-1 pl-4">
+                              {item.response_fields.map((field) => (
+                                <p key={field.field_id} className="text-xs text-slate-500">
+                                  {field.label}{field.options ? ` (${field.options.join(" / ")})` : ""}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        The survey is published to students together with the quiz from the Quiz tab.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6">
+                      <p className="text-sm font-semibold text-slate-700">No survey for this lesson</p>
                       <p className="mt-1 text-sm text-slate-500">
-                        A survey lets you ask students short questions alongside the quiz — for example, their prior
+                        A survey asks students short questions alongside the quiz — for example, their prior
                         experience or confidence — so the assessment captures more than the quiz alone.
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      disabled
-                      title="Survey builder coming soon"
-                      className="inline-flex items-center justify-center rounded-xl bg-[#BA0C2F] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-400"
-                    >
-                      Add survey
-                    </button>
-                    <p className="text-xs text-slate-400">The survey builder is in progress and will connect here.</p>
-                  </div>
+                  )}
                 </div>
               )}
 
