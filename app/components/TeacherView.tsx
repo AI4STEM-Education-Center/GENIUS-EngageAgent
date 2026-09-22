@@ -339,7 +339,7 @@ const parsePersistedContentItem = (
 };
 
 const stepLabels = [
-  "Lesson & quiz",
+  "Assessment",
   "Strategy recommendation",
   "Content generation",
 ];
@@ -359,6 +359,8 @@ export default function TeacherView({ user }: Props) {
   const [quizItems, setQuizItems] = useState<QuizItem[]>([]);
   const [quizStatus, setQuizStatus] = useState<"draft" | "published" | "closed">("draft");
   const [publishingQuiz, setPublishingQuiz] = useState(false);
+  // Assessment step sub-tabs (quiz vs survey), mirrors the tab pattern in StudentView.
+  const [assessmentTab, setAssessmentTab] = useState<"quiz" | "survey">("quiz");
 
   // Student answers
   const [studentAnswers, setStudentAnswers] = useState<StudentAnswer[]>([]);
@@ -2060,12 +2062,13 @@ export default function TeacherView({ user }: Props) {
           </div>
 
 
-          {/* Step 1: Lesson & Quiz */}
+          {/* Step 1: Assessment */}
           {currentStep === 1 && (
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 1</p>
-                <h2 className="text-2xl font-semibold text-slate-900">Select lesson & publish quiz</h2>
+                <h2 className="text-2xl font-semibold text-slate-900">Assessment</h2>
+                <p className="mt-1 text-sm text-slate-500">Select a lesson, then publish its quiz and survey to students.</p>
               </div>
 
               {selectedLessonData && (
@@ -2093,8 +2096,31 @@ export default function TeacherView({ user }: Props) {
                 </div>
               </div>
 
+              {/* Assessment sub-tabs: Quiz / Survey (same pill pattern as StudentView tabs) */}
+              {selectedLesson && (
+                <div className="flex gap-2">
+                  {([
+                    { id: "quiz", label: "Quiz" },
+                    { id: "survey", label: "Survey" },
+                  ] as const).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setAssessmentTab(tab.id)}
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                        assessmentTab === tab.id
+                          ? "bg-[#BA0C2F] text-white"
+                          : "border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* Quiz preview */}
-              {selectedLesson && quizItems.length > 0 && (
+              {selectedLesson && quizItems.length > 0 && assessmentTab === "quiz" && (
                 <div className="grid gap-4">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-semibold uppercase text-slate-400">
@@ -2159,6 +2185,34 @@ export default function TeacherView({ user }: Props) {
                   {quizStatus === "published" && (
                     <p className="text-sm font-semibold text-emerald-600">Quiz and survey are live. Students can now answer.</p>
                   )}
+                </div>
+              )}
+
+              {/* Survey (placeholder entry point — survey builder is tracked separately in UC-SV-01 #78) */}
+              {selectedLesson && assessmentTab === "survey" && (
+                <div className="grid gap-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase text-slate-400">Survey</p>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">not created</span>
+                  </div>
+                  <div className="flex flex-col items-start gap-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700">No survey yet for this lesson</p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        A survey lets you ask students short questions alongside the quiz — for example, their prior
+                        experience or confidence — so the assessment captures more than the quiz alone.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled
+                      title="Survey builder coming soon"
+                      className="inline-flex items-center justify-center rounded-xl bg-[#BA0C2F] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-400"
+                    >
+                      Add survey
+                    </button>
+                    <p className="text-xs text-slate-400">The survey builder is in progress and will connect here.</p>
+                  </div>
                 </div>
               )}
 
