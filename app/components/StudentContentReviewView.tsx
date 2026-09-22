@@ -111,14 +111,20 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
   // Reviewing this step is complete once the student has submitted at
   // least one question about the material (per team decision, 2026-09-18 —
   // supersedes the earlier "published = reviewed" placeholder from #82).
+  // It only becomes available once the teacher has published content (#87)
+  // — not merely because the assessment step is done.
   useEffect(() => {
     if (loading) return;
+    if (contentItems.length === 0) {
+      onProgress?.({ kind: "not-available" });
+      return;
+    }
     onProgress?.(
       submittedQuestions && submittedQuestions.length > 0
         ? { kind: "completed" }
         : { kind: "active" },
     );
-  }, [loading, submittedQuestions, onProgress]);
+  }, [loading, contentItems, submittedQuestions, onProgress]);
 
   const updateDraftQuestion = (index: number, value: string) => {
     setDraftQuestions((prev) => prev.map((q, i) => (i === index ? value : q)));

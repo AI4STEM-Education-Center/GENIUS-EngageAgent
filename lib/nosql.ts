@@ -1648,12 +1648,32 @@ export const upsertContentRating = async (
 /* ------------------------------------------------------------------ */
 /*  Review questions                                                   */
 /* ------------------------------------------------------------------ */
-/* Local JSON storage only for now (no DynamoDB path) -- add one before
-   this feature is deployed anywhere DYNAMODB_TABLE is set. */
 
 export const upsertReviewQuestions = async (
   input: ReviewQuestionRecord,
 ): Promise<ReviewQuestionRecord> => {
+  if (useDynamoDb) {
+    const client = getDynamoClient();
+    if (client) {
+      await client.send(
+        new PutCommand({
+          TableName: dynamoTableName,
+          Item: {
+            [pkField]: `CLASS#${input.class_id}`,
+            [skField]: `REVIEW_Q#ASSIGN#${input.assignment_id}#STUDENT#${input.student_id}`,
+            record_type: "review_questions",
+            [gsiStudentPkField]: `STUDENT#${input.student_id}`,
+            [gsiStudentSkField]: `REVIEW_Q#ASSIGN#${input.assignment_id}`,
+            assignment_id: input.assignment_id,
+            questions: input.questions,
+            submitted_at: input.submitted_at,
+          },
+        }),
+      );
+    }
+    return input;
+  }
+
   await withWriteLock(async () => {
     const store = await loadStore();
     const idx = store.review_questions.findIndex(
@@ -1677,6 +1697,38 @@ export const listReviewQuestions = async (
   assignmentId: string,
   studentId?: string,
 ): Promise<ReviewQuestionRecord[]> => {
+  if (useDynamoDb) {
+    const client = getDynamoClient();
+    if (!client) return [];
+    const skPrefix = studentId
+      ? `REVIEW_Q#ASSIGN#${assignmentId}#STUDENT#${studentId}`
+      : `REVIEW_Q#ASSIGN#${assignmentId}#STUDENT#`;
+    const result = await client.send(
+      new QueryCommand({
+        TableName: dynamoTableName,
+        KeyConditionExpression:
+          "#pk = :pk AND begins_with(#sk, :skPrefix)",
+        ExpressionAttributeNames: {
+          "#pk": pkField,
+          "#sk": skField,
+        },
+        ExpressionAttributeValues: {
+          ":pk": `CLASS#${classId}`,
+          ":skPrefix": skPrefix,
+        },
+      }),
+    );
+    return (result.Items ?? [])
+      .filter((item) => item.record_type === "review_questions")
+      .map((item) => ({
+        class_id: (item.class_id as string) ?? classId,
+        assignment_id: (item.assignment_id as string) ?? assignmentId,
+        student_id: toPlainStudentId(item.student_id as string),
+        questions: (item.questions as string[]) ?? [],
+        submitted_at: (item.submitted_at as string) ?? "",
+      }));
+  }
+
   const store = await loadStore();
   return store.review_questions.filter(
     (r) =>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { UserContext } from "@/lib/auth";
 import StudentQuizView from "./StudentQuizView";
 import StudentContentReviewView from "./StudentContentReviewView";
@@ -12,6 +12,7 @@ import {
   type StepProgress,
   type StudentStepId,
 } from "@/lib/student-progress";
+import type { ActivityStatus } from "@/lib/activity-status";
 
 type Props = {
   user: UserContext;
@@ -23,19 +24,31 @@ const INITIAL_PROGRESS: Record<StudentStepId, StepProgress> = {
   "content-rating": { kind: "not-available" },
 };
 
+const INITIAL_SERVER_STATUS: Record<StudentStepId, ActivityStatus> = {
+  assessment: "locked",
+  "content-review": "locked",
+  "content-rating": "locked",
+};
+
+// The server (`/api/activity-status`, backed by `lib/activity-status.ts`) is
+// the source of truth for whether a step is locked, since it alone knows the
+// real cross-step dependencies (e.g. content-rating requires content-review
+// to be complete). Child self-reports via `onProgress` are only trusted to
+// flip an already-unlocked step to "completed" instantly, without waiting on
+// a server round trip.
 function buildDisplayStates(
+  serverStatus: Record<StudentStepId, ActivityStatus>,
   progress: Record<StudentStepId, StepProgress>,
 ): Record<StudentStepId, StepDisplayState> {
-  const assessment = progress.assessment;
-  const assessmentStatus = assessment.kind === "completed" ? "completed" : assessment.kind === "active" ? "active" : "locked";
+  const statusFor = (id: StudentStepId) => {
+    if (serverStatus[id] === "locked") return "locked" as const;
+    if (serverStatus[id] === "completed" || progress[id].kind === "completed") return "completed" as const;
+    return "active" as const;
+  };
 
-  const reviewUnlocked = assessment.kind === "completed";
-  const review = progress["content-review"];
-  const reviewStatus = !reviewUnlocked ? "locked" : review.kind === "completed" ? "completed" : "active";
-
-  const ratingUnlocked = reviewUnlocked && review.kind === "completed";
-  const rating = progress["content-rating"];
-  const ratingStatus = !ratingUnlocked ? "locked" : rating.kind === "completed" ? "completed" : "active";
+  const assessmentStatus = statusFor("assessment");
+  const reviewStatus = statusFor("content-review");
+  const ratingStatus = statusFor("content-rating");
 
   return {
     assessment: {
@@ -44,7 +57,7 @@ function buildDisplayStates(
     },
     "content-review": {
       status: reviewStatus,
-      label: reviewStatus === "completed" ? "Completed" : reviewStatus === "active" ? "Waiting for teacher" : "Not available yet",
+      label: reviewStatus === "completed" ? "Completed" : reviewStatus === "active" ? "In progress" : "Not available yet",
     },
     "content-rating": {
       status: ratingStatus,
@@ -56,35 +69,81 @@ function buildDisplayStates(
 export default function StudentView({ user }: Props) {
   const [activeStep, setActiveStep] = useState<StudentStepId>("assessment");
   const [progress, setProgress] = useState<Record<StudentStepId, StepProgress>>(INITIAL_PROGRESS);
-  // Snapshot of `progress` as of the last render where we checked for a
-  // step transition. Comparing against it below (during render, not in an
-  // effect) is React's documented pattern for "adjusting state when a prop
-  // changes" without an extra render/effect round-trip.
-  const [previousProgress, setPreviousProgress] = useState(INITIAL_PROGRESS);
+  const [serverStatus, setServerStatus] = useState<Record<StudentStepId, ActivityStatus>>(INITIAL_SERVER_STATUS);
+  const activeStepRef = useRef(activeStep);
+  useEffect(() => {
+    activeStepRef.current = activeStep;
+  }, [activeStep]);
 
-  const displayStates = useMemo(() => buildDisplayStates(progress), [progress]);
+  const classId = user.classId;
+  const assignmentId = user.assignmentId;
+  const studentId = user.userId;
+
+  // Bumped whenever a child reports a step just completed, to re-poll the
+  // authoritative server status. The fetch lives inside the effect (rather
+  // than a shared callback also invoked from an event handler) so this stays
+  // a plain "synchronize with an external system" effect.
+  const [statusRefreshToken, setStatusRefreshToken] = useState(0);
+
+  useEffect(() => {
+    if (!classId || !assignmentId || !studentId) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/activity-status?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=${encodeURIComponent(studentId)}`,
+        );
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { activities?: { id: StudentStepId; status: ActivityStatus }[] };
+        if (!data.activities || cancelled) return;
+
+        const next = { ...INITIAL_SERVER_STATUS };
+        for (const activity of data.activities) {
+          next[activity.id] = activity.status;
+        }
+        setServerStatus(next);
+
+        // Auto-advance to the next step only right as it newly unlocks, so
+        // revisiting an already-completed step doesn't bounce the student away.
+        const currentIndex = STUDENT_STEPS.findIndex((step) => step.id === activeStepRef.current);
+        if (next[activeStepRef.current] === "completed" && currentIndex < STUDENT_STEPS.length - 1) {
+          const nextStepId = STUDENT_STEPS[currentIndex + 1].id;
+          if (next[nextStepId] !== "locked") {
+            setActiveStep(nextStepId);
+          }
+        }
+      } catch {
+        // Best-effort -- children's own onProgress callbacks still drive same-session UI.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [classId, assignmentId, studentId, statusRefreshToken]);
+
+  // Children re-create their `onProgress` closure on every StudentView render
+  // (it's an inline arrow in the JSX below) and re-report their current kind
+  // whenever that happens, not just on real transitions. Tracking the last
+  // reported kind per step here -- and bailing out before touching state when
+  // it's unchanged -- is what keeps that from cascading into a render loop.
+  const lastReportedKindRef = useRef<Record<StudentStepId, StepProgress["kind"]>>({
+    assessment: "not-available",
+    "content-review": "not-available",
+    "content-rating": "not-available",
+  });
 
   const reportProgress = useCallback((step: StudentStepId, next: StepProgress) => {
-    setProgress((prev) => (prev[step].kind === next.kind ? prev : { ...prev, [step]: next }));
+    if (lastReportedKindRef.current[step] === next.kind) return;
+    lastReportedKindRef.current[step] = next.kind;
+    setProgress((prev) => ({ ...prev, [step]: next }));
+    if (next.kind === "completed") {
+      setStatusRefreshToken((token) => token + 1);
+    }
   }, []);
 
-  // Auto-advance to the next step only at the moment a step *becomes*
-  // completed, so revisiting an already-completed step doesn't bounce the
-  // student away from it.
-  if (progress !== previousProgress) {
-    const currentIndex = STUDENT_STEPS.findIndex((step) => step.id === activeStep);
-    const justCompleted =
-      progress[activeStep].kind === "completed" && previousProgress[activeStep].kind !== "completed";
-
-    if (justCompleted && currentIndex < STUDENT_STEPS.length - 1) {
-      const nextStep = STUDENT_STEPS[currentIndex + 1].id;
-      if (displayStates[nextStep].status !== "locked") {
-        setActiveStep(nextStep);
-      }
-    }
-
-    setPreviousProgress(progress);
-  }
+  const displayStates = buildDisplayStates(serverStatus, progress);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
