@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import type { UserContext } from "@/lib/auth";
 import { findExistingStudentAnswer } from "@/lib/student-answer-lookup";
 import type { QuizItem, SurveyItem } from "@/lib/types";
+import type { StepProgress } from "@/lib/student-progress";
 
 type Props = {
   user: UserContext;
+  onProgress?: (progress: StepProgress) => void;
 };
 
 type QuizStatusData = {
@@ -28,7 +30,7 @@ export const notifyQuizSubmitted = (classId: string, assignmentId: string, geniu
   );
 };
 
-export default function StudentQuizView({ user }: Props) {
+export default function StudentQuizView({ user, onProgress }: Props) {
   const [quizStatus, setQuizStatus] = useState<QuizStatusData | null>(null);
   const [questions, setQuestions] = useState<QuizItem[]>([]);
   const [surveyQuestions, setSurveyQuestions] = useState<SurveyItem[]>([]);
@@ -101,6 +103,18 @@ export default function StudentQuizView({ user }: Props) {
   useEffect(() => {
     loadQuiz();
   }, [loadQuiz]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    if (submitted) {
+      onProgress?.({ kind: "completed" });
+    } else if (quizStatus?.status === "published") {
+      onProgress?.({ kind: "active" });
+    } else {
+      onProgress?.({ kind: "not-available" });
+    }
+  }, [loading, submitted, quizStatus, onProgress]);
 
   const handleSelect = (itemId: string, option: string) => {
     if (submitted) return;

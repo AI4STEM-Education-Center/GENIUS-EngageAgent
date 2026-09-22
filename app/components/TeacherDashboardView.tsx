@@ -40,6 +40,12 @@ type DashboardStudentRow = {
   tldr?: string;
 };
 
+type DashboardReviewQuestionRow = {
+  studentId: string;
+  name: string;
+  questions: string[];
+};
+
 const formatDate = (iso: string) => {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", {
@@ -71,6 +77,7 @@ export default function TeacherDashboardView({ user }: Props) {
   const [dashboardStrategyDistribution, setDashboardStrategyDistribution] = useState<Record<string, number>>({});
   const [dashboardPublishedRecords, setDashboardPublishedRecords] = useState<DashboardPublishedRecord[]>([]);
   const [dashboardRatings, setDashboardRatings] = useState<ContentRatingRecord[]>([]);
+  const [dashboardReviewQuestions, setDashboardReviewQuestions] = useState<DashboardReviewQuestionRow[]>([]);
   const [dashboardMedia, setDashboardMedia] = useState<Record<string, { image: boolean; video: boolean }>>({});
   const [quizStatus, setQuizStatus] = useState<QuizStatus>("draft");
   const [selectedLesson, setSelectedLesson] = useState<number | null>(null);
@@ -81,6 +88,7 @@ export default function TeacherDashboardView({ user }: Props) {
       setDashboardStrategyDistribution({});
       setDashboardPublishedRecords([]);
       setDashboardRatings([]);
+      setDashboardReviewQuestions([]);
       setDashboardMedia({});
       setDashboardUpdatedAt(null);
       setSelectedLesson(null);
@@ -95,13 +103,14 @@ export default function TeacherDashboardView({ user }: Props) {
     setDashboardError(null);
 
     try {
-      const [quizResult, answersResult, cacheResult, publishedResult, ratingsResult, mediaResult] = await Promise.allSettled([
+      const [quizResult, answersResult, cacheResult, publishedResult, ratingsResult, mediaResult, reviewQuestionsResult] = await Promise.allSettled([
         fetch(`/api/quiz-status?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
         fetch(`/api/student-answers?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
         fetch(`/api/strategy-cache?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
         fetch(`/api/content-publish?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
         fetch(`/api/content-rating?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
         fetch(`/api/media?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=cohort`),
+        fetch(`/api/review-questions?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
       ]);
 
       let partialFailure = false;
@@ -110,6 +119,7 @@ export default function TeacherDashboardView({ user }: Props) {
       let fetchedRatings: ContentRatingRecord[] = [];
       let fetchedMedia: DashboardMediaRecord[] = [];
       let fetchedStrategyResults: Array<{ studentId?: string; plan?: Plan }> = [];
+      let fetchedReviewQuestions: Array<{ student_id?: string; questions?: string[] }> = [];
 
       if (quizResult.status === "fulfilled" && quizResult.value.ok) {
         const quizData = (await quizResult.value.json()) as {
@@ -164,6 +174,15 @@ export default function TeacherDashboardView({ user }: Props) {
         partialFailure = true;
       }
 
+      if (reviewQuestionsResult.status === "fulfilled" && reviewQuestionsResult.value.ok) {
+        const reviewQuestionsData = (await reviewQuestionsResult.value.json()) as {
+          reviewQuestions?: Array<{ student_id?: string; questions?: string[] }>;
+        };
+        fetchedReviewQuestions = reviewQuestionsData.reviewQuestions ?? [];
+      } else if (reviewQuestionsResult.status === "fulfilled" || reviewQuestionsResult.status === "rejected") {
+        partialFailure = true;
+      }
+
       const strategyDistribution: Record<string, number> = {};
       const strategyByStudent = new Map<string, { strategy?: string; tldr?: string }>();
       for (const entry of fetchedStrategyResults) {
@@ -201,10 +220,22 @@ export default function TeacherDashboardView({ user }: Props) {
         }))
         .sort((left, right) => new Date(right.submittedAt).getTime() - new Date(left.submittedAt).getTime());
 
+      const studentNameById = new Map(studentRows.map((row) => [row.id, row.name]));
+      const reviewQuestionRows = fetchedReviewQuestions
+        .filter((entry): entry is { student_id: string; questions: string[] } =>
+          Boolean(entry.student_id && entry.questions && entry.questions.length > 0),
+        )
+        .map((entry) => ({
+          studentId: entry.student_id,
+          name: studentNameById.get(entry.student_id) ?? entry.student_id,
+          questions: entry.questions,
+        }));
+
       setDashboardStudents(studentRows);
       setDashboardStrategyDistribution(strategyDistribution);
       setDashboardPublishedRecords(fetchedPublished);
       setDashboardRatings(fetchedRatings);
+      setDashboardReviewQuestions(reviewQuestionRows);
       setDashboardMedia(mediaMap);
       setDashboardUpdatedAt(new Date().toISOString());
 
@@ -226,6 +257,7 @@ export default function TeacherDashboardView({ user }: Props) {
       setDashboardStrategyDistribution({});
       setDashboardPublishedRecords([]);
       setDashboardRatings([]);
+      setDashboardReviewQuestions([]);
       setDashboardMedia({});
       setDashboardUpdatedAt(null);
       return;
@@ -470,7 +502,7 @@ export default function TeacherDashboardView({ user }: Props) {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase text-slate-400">Ratings chart</p>
-                    <h2 className="text-lg font-semibold text-slate-900">Student content ratings</h2>
+                    <h2 className="text-lg font-semibold text-slate-900">Student material ratings</h2>
                   </div>
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{dashboardRatings.length} ratings</span>
                 </div>
@@ -583,6 +615,34 @@ export default function TeacherDashboardView({ user }: Props) {
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-slate-400">Student questions</p>
+                  <h2 className="text-lg font-semibold text-slate-900">Questions from Content Review</h2>
+                </div>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{dashboardReviewQuestions.length} students</span>
+              </div>
+              {dashboardReviewQuestions.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">Questions appear here after students write them during Content Review.</p>
+              ) : (
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  {dashboardReviewQuestions.map((row) => (
+                    <div key={row.studentId} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                      <p className="text-sm font-semibold text-slate-800">{row.name}</p>
+                      <ul className="mt-2 flex flex-col gap-1.5">
+                        {row.questions.map((q, i) => (
+                          <li key={i} className="text-sm text-slate-600">
+                            {q}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </section>
         )}

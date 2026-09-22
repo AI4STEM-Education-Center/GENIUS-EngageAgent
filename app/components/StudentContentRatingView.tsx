@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { UserContext } from "@/lib/auth";
 import type { ContentItem, TextMode } from "@/lib/types";
+import type { StepProgress } from "@/lib/student-progress";
 import {
   buildPublishedContentState,
   type MediaRecordResponse,
@@ -12,6 +13,7 @@ import {
 
 type Props = {
   user: UserContext;
+  onProgress?: (progress: StepProgress) => void;
 };
 
 const RATING_LABELS = ["", "Not engaging", "Slightly engaging", "Moderately engaging", "Very engaging", "Extremely engaging"];
@@ -30,7 +32,7 @@ const getContentModeLabels = (item: ContentItem) => {
   return item.type ? [item.type] : [];
 };
 
-export default function StudentContentRatingView({ user }: Props) {
+export default function StudentContentRatingView({ user, onProgress }: Props) {
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [media, setMedia] = useState<Record<string, SharedContentMedia>>({});
   const [ratings, setRatings] = useState<Record<string, number>>({});
@@ -122,6 +124,18 @@ export default function StudentContentRatingView({ user }: Props) {
   }, [loadPublishedContent, loadRatings]);
 
   useEffect(() => {
+    if (loading) return;
+
+    if (contentItems.length === 0) {
+      onProgress?.({ kind: "not-available" });
+      return;
+    }
+
+    const allRated = contentItems.every((item) => savedRatings[item.id] != null);
+    onProgress?.(allRated ? { kind: "completed" } : { kind: "active" });
+  }, [loading, contentItems, savedRatings, onProgress]);
+
+  useEffect(() => {
     if (!classId || !assignmentId) {
       return;
     }
@@ -210,7 +224,7 @@ export default function StudentContentRatingView({ user }: Props) {
     <div className="flex flex-col gap-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-          Content Rating
+          Material Rating
         </p>
         <h2 className="mt-1 text-xl font-semibold text-slate-900">
           Rate how engaging each piece of content is

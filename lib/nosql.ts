@@ -85,6 +85,14 @@ type ContentRatingRecord = {
   rated_at: string;
 };
 
+type ReviewQuestionRecord = {
+  class_id: string;
+  assignment_id: string;
+  student_id: string;
+  questions: string[];
+  submitted_at: string;
+};
+
 export type CohortJobRecord = {
   job_id: string;
   class_id: string;
@@ -121,6 +129,7 @@ type Store = {
   student_answers: StudentAnswerRecord[];
   content_publish: ContentPublishRecord[];
   content_ratings: ContentRatingRecord[];
+  review_questions: ReviewQuestionRecord[];
   cohort_jobs: CohortJobRecord[];
   cohort_job_students: CohortJobStudentRecord[];
 };
@@ -153,6 +162,7 @@ const emptyStore: Store = {
   student_answers: [],
   content_publish: [],
   content_ratings: [],
+  review_questions: [],
   cohort_jobs: [],
   cohort_job_students: [],
 };
@@ -269,6 +279,9 @@ const loadStore = async () => {
       }
       if (!Array.isArray(parsed.content_ratings)) {
         parsed.content_ratings = [];
+      }
+      if (!Array.isArray(parsed.review_questions)) {
+        parsed.review_questions = [];
       }
       if (!Array.isArray(parsed.cohort_jobs)) {
         parsed.cohort_jobs = [];
@@ -1632,7 +1645,100 @@ export const upsertContentRating = async (
   return input;
 };
 
-export type { StudentAnswerRecord, ContentPublishRecord, ContentRatingRecord, TeacherAnnotation, QuizStatusRecord };
+/* ------------------------------------------------------------------ */
+/*  Review questions                                                   */
+/* ------------------------------------------------------------------ */
+
+export const upsertReviewQuestions = async (
+  input: ReviewQuestionRecord,
+): Promise<ReviewQuestionRecord> => {
+  if (useDynamoDb) {
+    const client = getDynamoClient();
+    if (client) {
+      await client.send(
+        new PutCommand({
+          TableName: dynamoTableName,
+          Item: {
+            [pkField]: `CLASS#${input.class_id}`,
+            [skField]: `REVIEW_Q#ASSIGN#${input.assignment_id}#STUDENT#${input.student_id}`,
+            record_type: "review_questions",
+            [gsiStudentPkField]: `STUDENT#${input.student_id}`,
+            [gsiStudentSkField]: `REVIEW_Q#ASSIGN#${input.assignment_id}`,
+            assignment_id: input.assignment_id,
+            questions: input.questions,
+            submitted_at: input.submitted_at,
+          },
+        }),
+      );
+    }
+    return input;
+  }
+
+  await withWriteLock(async () => {
+    const store = await loadStore();
+    const idx = store.review_questions.findIndex(
+      (r) =>
+        r.class_id === input.class_id &&
+        r.assignment_id === input.assignment_id &&
+        r.student_id === input.student_id,
+    );
+    if (idx >= 0) {
+      store.review_questions[idx] = input;
+    } else {
+      store.review_questions.push(input);
+    }
+    await persistStore(store);
+  });
+  return input;
+};
+
+export const listReviewQuestions = async (
+  classId: string,
+  assignmentId: string,
+  studentId?: string,
+): Promise<ReviewQuestionRecord[]> => {
+  if (useDynamoDb) {
+    const client = getDynamoClient();
+    if (!client) return [];
+    const skPrefix = studentId
+      ? `REVIEW_Q#ASSIGN#${assignmentId}#STUDENT#${studentId}`
+      : `REVIEW_Q#ASSIGN#${assignmentId}#STUDENT#`;
+    const result = await client.send(
+      new QueryCommand({
+        TableName: dynamoTableName,
+        KeyConditionExpression:
+          "#pk = :pk AND begins_with(#sk, :skPrefix)",
+        ExpressionAttributeNames: {
+          "#pk": pkField,
+          "#sk": skField,
+        },
+        ExpressionAttributeValues: {
+          ":pk": `CLASS#${classId}`,
+          ":skPrefix": skPrefix,
+        },
+      }),
+    );
+    return (result.Items ?? [])
+      .filter((item) => item.record_type === "review_questions")
+      .map((item) => ({
+        class_id: (item.class_id as string) ?? classId,
+        assignment_id: (item.assignment_id as string) ?? assignmentId,
+        student_id: toPlainStudentId(item.student_id as string),
+        questions: (item.questions as string[]) ?? [],
+        submitted_at: (item.submitted_at as string) ?? "",
+      }));
+  }
+
+  const store = await loadStore();
+  return store.review_questions.filter(
+    (r) =>
+      r.class_id === classId &&
+      r.assignment_id === assignmentId &&
+      (!studentId || r.student_id === studentId),
+  );
+};
+
+export type { StudentAnswerRecord, ContentPublishRecord, ContentRatingRecord, ReviewQuestionRecord, TeacherAnnotation, QuizStatusRecord };
 
 export const listAllTeacherAnnotations = async (): Promise<TeacherAnnotation[]> => {
   if (useDynamoDb) {
