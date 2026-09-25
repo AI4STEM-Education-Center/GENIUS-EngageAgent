@@ -69,14 +69,31 @@ export type SurveyResponseField = {
   label: string;
   response_type: "text" | "choice";
   options?: string[];
+  /**
+   * For "text" responses, how much room the student gets.
+   * Teacher-authored surveys (UC-SV-01_V1) expose this as
+   * "Short answer" / "Long answer". Defaults to "short".
+   */
+  text_length?: "short" | "long";
 };
 
 export type SurveyItem = {
   item_id: string;
   question_number: number;
-  category: "familiarity" | "experience_details";
+  /**
+   * Question purpose. "familiarity" and "experience_details" come from the
+   * built-in beginning-of-lesson surveys; "follow_up" and "unspecified" are
+   * used by teacher-authored surveys (UC-SV-01_V1).
+   */
+  category:
+    | "familiarity"
+    | "experience_details"
+    | "follow_up"
+    | "unspecified";
   stem: string;
   example?: string;
+  /** Related concept or phenomenon (optional in UC-SV-01_V1). */
+  related_concept?: string;
   response_fields: SurveyResponseField[];
 };
 
@@ -126,4 +143,27 @@ export type ReviewQuestionRecord = {
   student_id: string;
   questions: string[];
   submitted_at: string;
+};
+
+/* ------------------------------------------------------------------ */
+/*  Teacher-authored surveys (UC-SV-01_V1, #95)                        */
+/*                                                                     */
+/*  These reuse the SurveyItem / SurveyResponseField shapes above so    */
+/*  there is a single survey model shared with the built-in            */
+/*  beginning-of-lesson surveys.                                       */
+/* ------------------------------------------------------------------ */
+
+export type SurveyStatus = "draft" | "published";
+
+export type Survey = {
+  survey_id: string;
+  class_id: string;
+  assignment_id: string;
+  title: string; // required
+  description?: string; // optional
+  daily_experience_topic: string; // required
+  status: SurveyStatus;
+  questions: SurveyItem[];
+  created_at: string;
+  updated_at: string;
 };
