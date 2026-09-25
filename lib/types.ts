@@ -153,7 +153,25 @@ export type ReviewQuestionRecord = {
 /*  beginning-of-lesson surveys.                                       */
 /* ------------------------------------------------------------------ */
 
-export type SurveyStatus = "draft" | "published";
+/**
+ * "draft"     — not published yet.
+ * "scheduled" — published with a publish time still in the future (UC-SV-03).
+ * "published" — open to students.
+ * "closed"    — past the due time and late submissions are not allowed.
+ *
+ * "scheduled" and "closed" are derived from the schedule rather than set by
+ * hand; see resolveSurveyStatus in lib/survey-schedule.
+ */
+export type SurveyStatus = "draft" | "scheduled" | "published" | "closed";
+
+/** Publish settings for a survey (UC-SV-03, #80). */
+export type SurveySchedule = {
+  publish_at: string; // ISO timestamp
+  due_at: string; // ISO timestamp
+  allow_late_submissions: boolean;
+  allow_response_editing: boolean;
+  show_immediately: boolean;
+};
 
 export type Survey = {
   survey_id: string;
@@ -164,6 +182,10 @@ export type Survey = {
   daily_experience_topic: string; // required
   status: SurveyStatus;
   questions: SurveyItem[];
+  /** Set once the survey has been published or scheduled (UC-SV-03). */
+  schedule?: SurveySchedule;
+  published_by?: string;
+  published_at?: string;
   created_at: string;
   updated_at: string;
 };
