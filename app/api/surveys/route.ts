@@ -4,7 +4,7 @@ import { upsertSurvey, getSurvey, listSurveys } from "@/lib/nosql";
 import { guardWorkspaceRequest } from "@/lib/workspace-access";
 import type { Survey, SurveyQuestion, SurveyStatus } from "@/lib/types";
 
-const VALID_STATUSES: SurveyStatus[] = ["draft", "active"];
+const VALID_STATUSES: SurveyStatus[] = ["draft", "published"];
 
 export async function GET(request: Request) {
   const denied = await guardWorkspaceRequest(request);
@@ -43,8 +43,7 @@ export async function POST(request: Request) {
     surveyId,
     title,
     description,
-    studentInstructions,
-    lessonNumber,
+    dailyExperienceTopic,
     status,
     questions,
   } = body ?? {};
@@ -56,11 +55,20 @@ export async function POST(request: Request) {
     );
   }
 
-  const resolvedStatus: SurveyStatus =
-    status == null ? "draft" : status;
+  if (
+    typeof dailyExperienceTopic !== "string" ||
+    !dailyExperienceTopic.trim()
+  ) {
+    return NextResponse.json(
+      { error: "dailyExperienceTopic is required." },
+      { status: 400 },
+    );
+  }
+
+  const resolvedStatus: SurveyStatus = status == null ? "draft" : status;
   if (!VALID_STATUSES.includes(resolvedStatus)) {
     return NextResponse.json(
-      { error: 'status must be "draft" or "active".' },
+      { error: 'status must be "draft" or "published".' },
       { status: 400 },
     );
   }
@@ -85,11 +93,10 @@ export async function POST(request: Request) {
     assignment_id: assignmentId,
     title: title.trim(),
     description: typeof description === "string" ? description : undefined,
-    student_instructions:
-      typeof studentInstructions === "string" ? studentInstructions : undefined,
-    lesson_number: typeof lessonNumber === "number" ? lessonNumber : undefined,
+    daily_experience_topic: dailyExperienceTopic.trim(),
     status: resolvedStatus,
-    questions: (questions as SurveyQuestion[] | undefined) ?? existing?.questions ?? [],
+    questions:
+      (questions as SurveyQuestion[] | undefined) ?? existing?.questions ?? [],
     created_at: existing?.created_at ?? now,
     updated_at: now,
   };

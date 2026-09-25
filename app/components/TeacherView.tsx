@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import SurveyBuilderView from "./SurveyBuilderView";
 import type { UserContext } from "@/lib/auth";
 import { MOCK_USER_STORAGE_KEY, parseMockUserRole } from "@/lib/mock-auth";
 import {
@@ -2032,9 +2033,6 @@ export default function TeacherView({ user }: Props) {
               <Link href="/community" className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">
                 Community Gallery
               </Link>
-              <Link href="/surveys" className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">
-                Surveys
-              </Link>
             </div>
           </div>
         </header>
@@ -2165,32 +2163,9 @@ export default function TeacherView({ user }: Props) {
                 </div>
               )}
 
-              {/* Survey (placeholder entry point — survey builder is tracked separately in UC-SV-01 #78) */}
+              {/* Survey builder (UC-SV-01_V1, #95) */}
               {selectedLesson && assessmentTab === "survey" && (
-                <div className="grid gap-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase text-slate-400">Survey</p>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">not created</span>
-                  </div>
-                  <div className="flex flex-col items-start gap-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-700">No survey yet for this lesson</p>
-                      <p className="mt-1 text-sm text-slate-500">
-                        A survey lets you ask students short questions alongside the quiz — for example, their prior
-                        experience or confidence — so the assessment captures more than the quiz alone.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      disabled
-                      title="Survey builder coming soon"
-                      className="inline-flex items-center justify-center rounded-xl bg-[#BA0C2F] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-400"
-                    >
-                      Add survey
-                    </button>
-                    <p className="text-xs text-slate-400">The survey builder is in progress and will connect here.</p>
-                  </div>
-                </div>
+                <SurveyBuilderView classId={classId} assignmentId={assignmentId} />
               )}
 
               <div className="flex items-center justify-between">

@@ -43,27 +43,40 @@ const post = (payload: Record<string, unknown>) =>
     }),
   );
 
+/** A minimal valid create payload for the V1 survey shape (#95). */
+const validPayload = (overrides: Record<string, unknown> = {}) => ({
+  classId: "c1",
+  assignmentId: "a1",
+  title: "Prior experience survey",
+  dailyExperienceTopic: "Collisions in everyday life",
+  ...overrides,
+});
+
 beforeEach(() => {
   __resetStore();
 });
 
 describe("POST /api/surveys", () => {
   it("creates a valid survey with a generated id and defaults to draft", async () => {
-    const res = await post({
-      classId: "c1",
-      assignmentId: "a1",
-      title: "Prior experience survey",
-    });
+    const res = await post(validPayload());
     expect(res.status).toBe(201);
     const data = await res.json();
     expect(data.survey.survey_id).toBeTruthy();
     expect(data.survey.title).toBe("Prior experience survey");
+    expect(data.survey.daily_experience_topic).toBe(
+      "Collisions in everyday life",
+    );
     expect(data.survey.status).toBe("draft");
     expect(data.survey.questions).toEqual([]);
   });
 
   it("rejects an empty title", async () => {
-    const res = await post({ classId: "c1", assignmentId: "a1", title: "   " });
+    const res = await post(validPayload({ title: "   " }));
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a missing daily experience topic", async () => {
+    const res = await post(validPayload({ dailyExperienceTopic: "  " }));
     expect(res.status).toBe(400);
   });
 
@@ -73,54 +86,67 @@ describe("POST /api/surveys", () => {
   });
 
   it("rejects an invalid status", async () => {
-    const res = await post({
-      classId: "c1",
-      assignmentId: "a1",
-      title: "T",
-      status: "published",
-    });
+    const res = await post(validPayload({ status: "active" }));
     expect(res.status).toBe(400);
+  });
+
+  it("accepts the published status", async () => {
+    const res = await post(validPayload({ status: "published" }));
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.survey.status).toBe("published");
   });
 
   it("rejects non-array questions", async () => {
-    const res = await post({
-      classId: "c1",
-      assignmentId: "a1",
-      title: "T",
-      questions: "nope",
-    });
+    const res = await post(validPayload({ questions: "nope" }));
     expect(res.status).toBe(400);
   });
 
+  it("stores questions with a V1 response type", async () => {
+    const res = await post(
+      validPayload({
+        questions: [
+          {
+            question_id: "q1",
+            prompt: "What did you notice?",
+            purpose: "familiarity",
+            order: 1,
+            response_type: "long_answer",
+          },
+        ],
+      }),
+    );
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.survey.questions).toHaveLength(1);
+    expect(data.survey.questions[0].response_type).toBe("long_answer");
+  });
+
   it("updates an existing survey and preserves its id and created_at", async () => {
-    const created = await (await post({
-      classId: "c1",
-      assignmentId: "a1",
-      title: "Draft title",
-    })).json();
+    const created = await (await post(validPayload())).json();
     const { survey_id, created_at } = created.survey;
 
-    const res = await post({
-      classId: "c1",
-      assignmentId: "a1",
-      surveyId: survey_id,
-      title: "Updated title",
-      status: "active",
-    });
+    const res = await post(
+      validPayload({
+        surveyId: survey_id,
+        title: "Updated title",
+        status: "published",
+      }),
+    );
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.survey.survey_id).toBe(survey_id);
     expect(data.survey.title).toBe("Updated title");
-    expect(data.survey.status).toBe("active");
+    expect(data.survey.status).toBe("published");
     expect(data.survey.created_at).toBe(created_at);
   });
 });
 
 describe("GET /api/surveys", () => {
   it("lists surveys for a class assignment", async () => {
-    await post({ classId: "c1", assignmentId: "a1", title: "One" });
-    await post({ classId: "c1", assignmentId: "a1", title: "Two" });
-    await post({ classId: "c1", assignmentId: "a2", title: "Other assignment" });
+    await post(validPayload({ title: "One" }));
+    await post(validPayload({ title: "Two" }));
+    await post(validPayload({ assignmentId: "a2", title: "Other assignment" }));
 
     const res = await GET(
       new Request("http://localhost:3000/api/surveys?classId=c1&assignmentId=a1"),
@@ -131,11 +157,7 @@ describe("GET /api/surveys", () => {
   });
 
   it("gets a single survey by id", async () => {
-    const created = await (await post({
-      classId: "c1",
-      assignmentId: "a1",
-      title: "Findable",
-    })).json();
+    const created = await (await post(validPayload({ title: "Findable" }))).json();
 
     const res = await GET(
       new Request(
