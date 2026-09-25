@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import SurveyBuilderView from "./SurveyBuilderView";
 import type { UserContext } from "@/lib/auth";
 import { MOCK_USER_STORAGE_KEY, parseMockUserRole } from "@/lib/mock-auth";
 import {
@@ -2211,6 +2212,13 @@ export default function TeacherView({ user }: Props) {
                       </p>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Teacher-authored surveys (UC-SV-01_V1, #95) */}
+              {selectedLesson && assessmentTab === "survey" && (
+                <div className="border-t border-slate-100 pt-6">
+                  <SurveyBuilderView classId={classId} assignmentId={assignmentId} />
                 </div>
               )}
 
