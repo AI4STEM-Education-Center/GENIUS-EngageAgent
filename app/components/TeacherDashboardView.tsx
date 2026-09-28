@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import SurveyResultsSection from "./SurveyResultsSection";
 import Link from "next/link";
 import type { UserContext } from "@/lib/auth";
 import {
@@ -644,6 +645,8 @@ export default function TeacherDashboardView({ user }: Props) {
                 </div>
               )}
             </div>
+
+            <SurveyResultsSection classId={classId} assignmentId={assignmentId} />
           </section>
         )}
       </div>
