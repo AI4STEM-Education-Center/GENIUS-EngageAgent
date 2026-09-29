@@ -3,7 +3,7 @@ import {
   getEngagementStrategyLabel,
 } from "./engagement-strategies";
 import { getLesson } from "./quiz-data";
-import type { Lesson } from "./types";
+import type { Lesson, SurveyItem } from "./types";
 
 type StudentAnswers = Record<string, string | undefined>;
 
@@ -37,7 +37,8 @@ export type ResolvedQuizEvidence = {
 export type ResolvedSurveyEvidence = {
   itemId: string;
   questionNumber: number;
-  category: "familiarity" | "experience_details";
+  /** Derived from SurveyItem so the two never drift apart. */
+  category: SurveyItem["category"];
   stem: string;
   responses: Array<{
     fieldId: string;
