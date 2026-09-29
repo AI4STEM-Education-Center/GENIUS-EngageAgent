@@ -126,5 +126,58 @@
         "D": "Just guessing"
       }
     }
+  ],
+  "survey_items": [
+    {
+      "item_id": "L1_S1",
+      "question_number": 1,
+      "category": "familiarity",
+      "stem": "What is your favorite sport, hobby, or household chore that you do often?",
+      "example": "Examples: soccer, drawing, washing dishes, or gaming.",
+      "response_fields": [
+        {
+          "field_id": "L1_S1_activity",
+          "label": "Your activity",
+          "response_type": "text"
+        }
+      ]
+    },
+    {
+      "item_id": "L1_S2",
+      "question_number": 2,
+      "category": "experience_details",
+      "stem": "In that activity, what two things most often touch or hit each other?",
+      "example": "Write it like this: first thing hits second thing.",
+      "response_fields": [
+        {
+          "field_id": "L1_S2_first_thing",
+          "label": "First thing",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L1_S2_second_thing",
+          "label": "Second thing",
+          "response_type": "text"
+        }
+      ]
+    },
+    {
+      "item_id": "L1_S3",
+      "question_number": 3,
+      "category": "experience_details",
+      "stem": "Think of a time in that activity, or at home, when something fell or crashed. What was the object, and what did it hit?",
+      "response_fields": [
+        {
+          "field_id": "L1_S3_object",
+          "label": "Object",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L1_S3_hit_object",
+          "label": "What it hit",
+          "response_type": "text"
+        }
+      ]
+    }
   ]
 }

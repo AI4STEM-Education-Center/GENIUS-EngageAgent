@@ -125,5 +125,61 @@
         "D": "Just guessing"
       }
     }
+  ],
+  "survey_items": [
+    {
+      "item_id": "L3_S1",
+      "question_number": 1,
+      "category": "familiarity",
+      "stem": "Think of a time you hit something hard and felt a sting or buzzing vibration in your hands.",
+      "response_fields": [
+        {
+          "field_id": "L3_S1_held_object",
+          "label": "What were you holding?",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L3_S1_hit_object",
+          "label": "What did you hit?",
+          "response_type": "text"
+        }
+      ]
+    },
+    {
+      "item_id": "L3_S2",
+      "question_number": 2,
+      "category": "experience_details",
+      "stem": "Think of a time you pushed, squeezed, or hit something and saw it bend, dent, or squish.",
+      "response_fields": [
+        {
+          "field_id": "L3_S2_object",
+          "label": "Object",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L3_S2_action",
+          "label": "What you did to it",
+          "response_type": "text"
+        }
+      ]
+    },
+    {
+      "item_id": "L3_S3",
+      "question_number": 3,
+      "category": "experience_details",
+      "stem": "Think of a time you pushed or hit something and it did not seem to bend or change shape.",
+      "response_fields": [
+        {
+          "field_id": "L3_S3_object",
+          "label": "Object",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L3_S3_cause",
+          "label": "What hit or pushed it",
+          "response_type": "text"
+        }
+      ]
+    }
   ]
 }

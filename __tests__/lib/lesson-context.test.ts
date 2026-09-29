@@ -4,6 +4,7 @@ import {
   getLessonGenerationContext,
   getStrategyContext,
   resolveQuizEvidence,
+  resolveSurveyEvidence,
 } from "@/lib/lesson-context";
 
 describe("getLessonGenerationContext", () => {
@@ -50,5 +51,49 @@ describe("resolveQuizEvidence", () => {
       misconceptionText:
         "If nothing looks damaged after the collision, the force must have been weak.",
     });
+  });
+});
+
+describe("resolveSurveyEvidence", () => {
+  it("resolves submitted survey fields without assigning correctness", () => {
+    const evidence = resolveSurveyEvidence(1, {
+      L1_S1_activity: "Playing soccer",
+      L1_S2_first_thing: "The ball",
+      L1_S2_second_thing: "My foot",
+    });
+
+    expect(evidence).toEqual([
+      {
+        itemId: "L1_S1",
+        questionNumber: 1,
+        category: "familiarity",
+        stem: "What is your favorite sport, hobby, or household chore that you do often?",
+        responses: [
+          {
+            fieldId: "L1_S1_activity",
+            label: "Your activity",
+            response: "Playing soccer",
+          },
+        ],
+      },
+      {
+        itemId: "L1_S2",
+        questionNumber: 2,
+        category: "experience_details",
+        stem: "In that activity, what two things most often touch or hit each other?",
+        responses: [
+          {
+            fieldId: "L1_S2_first_thing",
+            label: "First thing",
+            response: "The ball",
+          },
+          {
+            fieldId: "L1_S2_second_thing",
+            label: "Second thing",
+            response: "My foot",
+          },
+        ],
+      },
+    ]);
   });
 });

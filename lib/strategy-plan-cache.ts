@@ -1,4 +1,4 @@
-const STRATEGY_PLAN_CACHE_VERSION = 2;
+const STRATEGY_PLAN_CACHE_VERSION = 3;
 
 type CachedPlanEnvelope<TPlan> = {
   promptVersion: number;

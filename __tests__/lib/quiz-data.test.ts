@@ -21,6 +21,39 @@ describe("getAllLessons", () => {
     }
   });
 
+  it("each lesson should have a beginning-of-lesson survey", () => {
+    const lessons = getAllLessons();
+    for (const lesson of lessons) {
+      expect(lesson.survey_items.length).toBeGreaterThanOrEqual(2);
+      for (const item of lesson.survey_items) {
+        expect(item.response_fields.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("uses unique survey response field IDs across all lessons", () => {
+    const fieldIds = getAllLessons().flatMap((lesson) =>
+      lesson.survey_items.flatMap((item) =>
+        item.response_fields.map((field) => field.field_id),
+      ),
+    );
+
+    expect(new Set(fieldIds).size).toBe(fieldIds.length);
+  });
+
+  it("gives every choice response a non-empty option list", () => {
+    const choiceFields = getAllLessons().flatMap((lesson) =>
+      lesson.survey_items.flatMap((item) =>
+        item.response_fields.filter((field) => field.response_type === "choice"),
+      ),
+    );
+
+    expect(choiceFields.length).toBeGreaterThan(0);
+    for (const field of choiceFields) {
+      expect(field.options?.length).toBeGreaterThan(1);
+    }
+  });
+
   it("each lesson should have misconceptions", () => {
     const lessons = getAllLessons();
     for (const lesson of lessons) {

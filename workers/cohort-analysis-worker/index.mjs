@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import OpenAI, { APIConnectionTimeoutError } from "openai";
 
 const STRATEGY_REQUEST_TIMEOUT_MS = 45_000;
-const STRATEGY_PLAN_CACHE_VERSION = 2;
+const STRATEGY_PLAN_CACHE_VERSION = 3;
 
 const workerDir = path.dirname(fileURLToPath(import.meta.url));
 const lessonDataDir = path.join(workerDir, "data");
@@ -137,27 +137,53 @@ const resolveQuizEvidence = (lessonNumber, answers) => {
     });
 };
 
-const buildPrompt = (student, lessonContext, quizEvidence) => ({
+const resolveSurveyEvidence = (lessonNumber, answers) => {
+  const lesson = getLesson(lessonNumber);
+  if (!lesson) {
+    return [];
+  }
+
+  return (lesson.survey_items ?? [])
+    .map((item) => ({
+      itemId: item.item_id,
+      questionNumber: item.question_number,
+      category: item.category,
+      stem: item.stem,
+      responses: (item.response_fields ?? []).flatMap((field) => {
+        const response = answers?.[field.field_id]?.trim();
+        return response
+          ? [{ fieldId: field.field_id, label: field.label, response }]
+          : [];
+      }),
+    }))
+    .filter((item) => item.responses.length > 0);
+};
+
+const buildPrompt = (student, lessonContext, quizEvidence, surveyEvidence) => ({
   system: `You are an education engagement planner.
 Return JSON only with keys: name, strategy, relevance, overallRecommendation, recommendationReason, summary, tldr, rationale, tactics, cadence, checks.
 The strategy must be exactly one of: cognitive conflict, analogy, experience bridging, engaged critiquing.
 The relevance field is an object with those four strategies as keys and integer scores from 0-100.
 Base the recommendation primarily on the student's quiz evidence: question text, selected response, confidence, correctness, and any linked misconception.
+Use the beginning-of-lesson survey responses as qualitative context about the student's familiarity and experiences. Do not treat survey responses as correct or incorrect, and do not select experience bridging merely because the survey asks about experience.
 Use the lesson learning objective as supplemental context, not as a substitute for the student's quiz evidence.
 Make the recommendationReason reference the student by name and the assignment/topic.
-For recommendationReason and rationale, cite 2+ concrete details from the student's quiz evidence and connect them directly to the chosen strategy.`,
+For recommendationReason and rationale, cite 2+ concrete details from the available quiz and survey evidence and connect them directly to the chosen strategy.`,
   user: `Student name: ${student.name}
 Assignment: ${lessonContext?.lessonTitle ?? student.assignment ?? "Not provided"}
 
 ${lessonContext ? `Lesson objective:\n${lessonContext.learningObjective}\n\n` : ""}Structured quiz evidence:
 ${quizEvidence.length > 0 ? JSON.stringify(quizEvidence, null, 2) : JSON.stringify(student.answers ?? {}, null, 2)}
 
+Beginning-of-lesson survey evidence:
+${surveyEvidence.length > 0 ? JSON.stringify(surveyEvidence, null, 2) : "No survey responses submitted."}
+
 Return a plan:
 - name: short label
 - strategy: one of [cognitive conflict, analogy, experience bridging, engaged critiquing]
 - relevance: scores 0-100 for each strategy
 - overallRecommendation: 1-2 sentences, teacher-facing
-- recommendationReason: 2-3 sentences explaining why this strategy fits ${student.name}; reference the assignment/topic and cite 2+ specific quiz-evidence details
+- recommendationReason: 2-3 sentences explaining why this strategy fits ${student.name}; reference the assignment/topic and cite 2+ specific details from the available quiz and survey evidence
 - summary: 1 sentence
 - tldr: 8-14 words, teacher-facing
 - rationale: 3-5 sentences; reference the assignment/topic and include at least one concrete in-class example of how the teacher would use the strategy with ${student.name}
@@ -555,6 +581,9 @@ const processRecord = async (record) => {
         lessonContext,
         typeof lessonNumber === "number"
           ? resolveQuizEvidence(lessonNumber, student.answers)
+          : [],
+        typeof lessonNumber === "number"
+          ? resolveSurveyEvidence(lessonNumber, student.answers)
           : [],
       );
       const completion = await (async () => {

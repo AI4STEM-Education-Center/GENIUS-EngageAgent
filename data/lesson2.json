@@ -132,5 +132,68 @@
         "D": "Just guessing"
       }
     }
+  ],
+  "survey_items": [
+    {
+      "item_id": "L2_S1",
+      "question_number": 1,
+      "category": "familiarity",
+      "stem": "What is your favorite sport, hobby, or household chore that you do often?",
+      "example": "Examples: soccer, drawing, washing dishes, or gaming.",
+      "response_fields": [
+        {
+          "field_id": "L2_S1_activity",
+          "label": "Your activity",
+          "response_type": "text"
+        }
+      ]
+    },
+    {
+      "item_id": "L2_S2",
+      "question_number": 2,
+      "category": "experience_details",
+      "stem": "In that activity, think of a time when something moving fast hit something slower or not moving.",
+      "response_fields": [
+        {
+          "field_id": "L2_S2_fast_thing",
+          "label": "Fast thing",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L2_S2_hit_object",
+          "label": "What it hit",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L2_S2_outcome",
+          "label": "What happened to the fast thing",
+          "response_type": "text"
+        }
+      ]
+    },
+    {
+      "item_id": "L2_S3",
+      "question_number": 3,
+      "category": "experience_details",
+      "stem": "Think of a time when a heavier thing and a lighter thing bumped into each other.",
+      "response_fields": [
+        {
+          "field_id": "L2_S3_heavier_thing",
+          "label": "Heavier thing",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L2_S3_lighter_thing",
+          "label": "Lighter thing",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L2_S3_changed_more",
+          "label": "Which one changed motion more?",
+          "response_type": "choice",
+          "options": ["Heavier", "Lighter", "About the same"]
+        }
+      ]
+    }
   ]
 }

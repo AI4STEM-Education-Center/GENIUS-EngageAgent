@@ -130,5 +130,44 @@
         "D": "Just guessing"
       }
     }
+  ],
+  "survey_items": [
+    {
+      "item_id": "L7_S1",
+      "question_number": 1,
+      "category": "familiarity",
+      "stem": "Think of a time in your activity, or in a video game, when something caused damage, such as breaking, bruising, or crashing.",
+      "response_fields": [
+        {
+          "field_id": "L7_S1_object",
+          "label": "Object",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L7_S1_speed",
+          "label": "Was it moving fast or slow?",
+          "response_type": "choice",
+          "options": ["Fast", "Slow"]
+        }
+      ]
+    },
+    {
+      "item_id": "L7_S2",
+      "question_number": 2,
+      "category": "familiarity",
+      "stem": "Think of a time you were moving faster than usual, such as running, biking, skating, sliding, or moving in a game, and it was harder to stop.",
+      "response_fields": [
+        {
+          "field_id": "L7_S2_activity",
+          "label": "What were you doing?",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L7_S2_stop_outcome",
+          "label": "What happened when you tried to stop?",
+          "response_type": "text"
+        }
+      ]
+    }
   ]
 }

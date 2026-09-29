@@ -10,6 +10,7 @@ describe("GET /api/lessons/[lessonNumber]", () => {
     expect(data.lesson_number).toBe(1);
     expect(data.learning_objective).toBeTruthy();
     expect(data.quiz_items.length).toBeGreaterThan(0);
+    expect(data.survey_items.length).toBeGreaterThan(0);
   });
 
   it("should return lesson 8", async () => {

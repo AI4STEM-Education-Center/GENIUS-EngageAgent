@@ -135,5 +135,63 @@
         "D": "Just guessing"
       }
     }
+  ],
+  "survey_items": [
+    {
+      "item_id": "L5_S1",
+      "question_number": 1,
+      "category": "familiarity",
+      "stem": "What is your favorite sport, hobby, or household chore that you do often?",
+      "example": "Examples: soccer, drawing, washing dishes, or gaming.",
+      "response_fields": [
+        {
+          "field_id": "L5_S1_activity",
+          "label": "Your activity",
+          "response_type": "text"
+        }
+      ]
+    },
+    {
+      "item_id": "L5_S2",
+      "question_number": 2,
+      "category": "experience_details",
+      "stem": "Think of a time in that activity when you felt a really strong hit or push, such as a fast ball, a hard bump, or a strong shove.",
+      "response_fields": [
+        {
+          "field_id": "L5_S2_hit_source",
+          "label": "What hit you or your hands?",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L5_S2_body_location",
+          "label": "Where on your body did you feel it most?",
+          "response_type": "text"
+        }
+      ]
+    },
+    {
+      "item_id": "L5_S3",
+      "question_number": 3,
+      "category": "familiarity",
+      "stem": "Think of one time you tried to stop or push something heavy and another time you tried to stop or push something light.",
+      "response_fields": [
+        {
+          "field_id": "L5_S3_heavy_thing",
+          "label": "Heavy thing you pushed or stopped",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L5_S3_light_thing",
+          "label": "Light thing you pushed or stopped",
+          "response_type": "text"
+        },
+        {
+          "field_id": "L5_S3_pushed_harder",
+          "label": "Which one pushed back on you harder?",
+          "response_type": "choice",
+          "options": ["Heavier", "Lighter", "About the same"]
+        }
+      ]
+    }
   ]
 }
