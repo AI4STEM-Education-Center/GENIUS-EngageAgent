@@ -2068,56 +2068,59 @@ export default function TeacherView({ user }: Props) {
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 1</p>
                 <h2 className="text-2xl font-semibold text-slate-900">Assessment</h2>
-                <p className="mt-1 text-sm text-slate-500">Select a lesson, then publish its quiz and survey to students.</p>
+                <p className="mt-1 text-sm text-slate-500">Give students a quiz, a survey, or both for this learning task.</p>
               </div>
 
-              {selectedLessonData && (
-                <div className="rounded-2xl border border-[#BA0C2F]/15 bg-[#BA0C2F]/5 p-5">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#BA0C2F]">Learning objective</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-700">
-                    {selectedLessonData.learning_objective}
-                  </p>
-                </div>
-              )}
-
-              {/* Lesson picker */}
-              <div className="grid gap-3">
-                <p className="text-xs font-semibold uppercase text-slate-400">Choose a lesson</p>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                  {lessons.map((lesson) => (
-                    <button key={lesson.lesson_number} type="button" onClick={() => selectLesson(lesson.lesson_number)}
-                      className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${selectedLesson === lesson.lesson_number ? "border-[#BA0C2F] bg-[#BA0C2F]/5 ring-2 ring-[#BA0C2F]" : "border-slate-200 hover:border-slate-300"}`}>
-                      <p className="font-semibold text-slate-800">{lesson.lesson_title}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {lesson.quiz_items.filter((q) => q.type === "multiple_choice").length} questions + {(lesson.survey_items ?? []).length} survey questions
-                      </p>
-                    </button>
-                  ))}
-                </div>
+              {/* Quiz / Survey tabs sit at the top of the Assessment step. Lessons are ready-made quizzes, so the lesson picker lives in the Quiz tab. */}
+              <div className="flex gap-2">
+                {([
+                  { id: "quiz", label: "Quiz" },
+                  { id: "survey", label: "Survey" },
+                ] as const).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setAssessmentTab(tab.id)}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                      assessmentTab === tab.id
+                        ? "bg-[#BA0C2F] text-white"
+                        : "border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
 
-              {/* Assessment sub-tabs: Quiz / Survey (same pill pattern as StudentView tabs) */}
-              {selectedLesson && (
-                <div className="flex gap-2">
-                  {([
-                    { id: "quiz", label: "Quiz" },
-                    { id: "survey", label: "Survey" },
-                  ] as const).map((tab) => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setAssessmentTab(tab.id)}
-                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                        assessmentTab === tab.id
-                          ? "bg-[#BA0C2F] text-white"
-                          : "border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                      }`}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
+              {assessmentTab === "quiz" && (
+                <>
+                {selectedLessonData && (
+                  <div className="rounded-2xl border border-[#BA0C2F]/15 bg-[#BA0C2F]/5 p-5">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#BA0C2F]">Learning objective</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-700">
+                      {selectedLessonData.learning_objective}
+                    </p>
+                  </div>
+                )}
+
+                {/* Lesson picker */}
+                <div className="grid gap-3">
+                  <p className="text-xs font-semibold uppercase text-slate-400">Choose a lesson</p>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    {lessons.map((lesson) => (
+                      <button key={lesson.lesson_number} type="button" onClick={() => selectLesson(lesson.lesson_number)}
+                        className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${selectedLesson === lesson.lesson_number ? "border-[#BA0C2F] bg-[#BA0C2F]/5 ring-2 ring-[#BA0C2F]" : "border-slate-200 hover:border-slate-300"}`}>
+                        <p className="font-semibold text-slate-800">{lesson.lesson_title}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {lesson.quiz_items.filter((q) => q.type === "multiple_choice").length} questions + {(lesson.survey_items ?? []).length} survey questions
+                        </p>
+                      </button>
+                    ))}
+                  </div>
                 </div>
+                </>
               )}
+
 
               {/* Quiz preview */}
               {selectedLesson && quizItems.length > 0 && assessmentTab === "quiz" && (
@@ -2164,7 +2167,12 @@ export default function TeacherView({ user }: Props) {
                 </div>
               )}
 
-              {/* Survey preview — published together with the quiz */}
+              {/* Survey tab — the lesson's built-in survey appears once a lesson is picked in the Quiz tab */}
+              {assessmentTab === "survey" && !selectedLesson && (
+                <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                  Pick a lesson in the Quiz tab to see the beginning-of-lesson survey that comes with it.
+                </p>
+              )}
               {selectedLesson && assessmentTab === "survey" && (
                 <div className="grid gap-4">
                   <div className="flex items-center justify-between">
