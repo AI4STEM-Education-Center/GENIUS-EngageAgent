@@ -1,12 +1,9 @@
-import type { Lesson, StudentAnswer, Survey, SurveyItem, SurveyResponse } from "./types";
+import type { Survey, SurveyItem, SurveyResponse } from "./types";
 
 /**
  * Per-student survey results for the teacher's Assignment summary (#93).
  *
- * Both kinds of survey share the SurveyItem shape, so one viewer covers:
- * - the built-in beginning-of-lesson survey (#88), whose answers are stored
- *   alongside the quiz answers, keyed by field_id; and
- * - teacher-created surveys (#95), whose answers are SurveyResponse records.
+ * Teacher-created surveys use SurveyResponse records.
  */
 
 export type SurveyResultEntry = {
@@ -27,40 +24,8 @@ export type SurveyResultSource = {
   inProgress: number;
 };
 
-const fieldIdsOf = (questions: SurveyItem[]) =>
-  questions.flatMap((q) => q.response_fields.map((f) => f.field_id));
-
 const byName = (a: SurveyResultEntry, b: SurveyResultEntry) =>
   a.name.localeCompare(b.name);
-
-export const buildLessonSurveySource = (
-  lesson: Pick<Lesson, "lesson_number" | "survey_items"> | null,
-  studentAnswers: StudentAnswer[],
-): SurveyResultSource | null => {
-  const questions = lesson?.survey_items ?? [];
-  if (!lesson || questions.length === 0) return null;
-  const fieldIds = fieldIdsOf(questions);
-
-  const entries = studentAnswers
-    .filter((a) => fieldIds.some((id) => a.answers[id]?.trim()))
-    .map((a) => ({
-      studentId: a.student_id,
-      name: a.student_name || a.student_id,
-      answers: Object.fromEntries(fieldIds.map((id) => [id, a.answers[id] ?? ""])),
-      submittedAt: a.submitted_at,
-      late: false,
-    }))
-    .sort(byName);
-
-  return {
-    id: `lesson-${lesson.lesson_number}`,
-    title: "Beginning-of-lesson survey",
-    subtitle: `Lesson ${lesson.lesson_number}`,
-    questions,
-    entries,
-    inProgress: 0,
-  };
-};
 
 export const buildTeacherSurveySource = (
   survey: Pick<Survey, "survey_id" | "title" | "daily_experience_topic" | "questions">,
