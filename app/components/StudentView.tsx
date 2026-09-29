@@ -4,15 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { UserContext } from "@/lib/auth";
 import StudentQuizView from "./StudentQuizView";
 import StudentContentReviewView from "./StudentContentReviewView";
-import StudentContentRatingView from "./StudentContentRatingView";
 import StudentProgressStepper from "./StudentProgressStepper";
 import {
-  STUDENT_STEPS,
+  STUDENT_VIEW_STEPS,
   type StepDisplayState,
   type StepProgress,
   type StudentStepId,
+  type StudentViewStepId,
 } from "@/lib/student-progress";
 import type { ActivityStatus } from "@/lib/activity-status";
+import { notifyTaskCompleted } from "@/lib/genius-notify";
 
 type Props = {
   user: UserContext;
@@ -36,38 +37,46 @@ const INITIAL_SERVER_STATUS: Record<StudentStepId, ActivityStatus> = {
 // to be complete). Child self-reports via `onProgress` are only trusted to
 // flip an already-unlocked step to "completed" instantly, without waiting on
 // a server round trip.
+//
+// The stepper only shows two steps to students -- Content Review and
+// Material Rating are grouped into one "Explore and ASK" step (Material
+// Rating renders inline once the question is submitted, not as its own
+// tab) -- so a view step's status is derived from the real activities it
+// groups (STUDENT_VIEW_STEPS[].activityIds). Whether the *group* is locked
+// follows only its first/primary activity (content-review): Material
+// Rating being internally "locked" until the review is done is expected
+// and must not re-lock the whole step once content-review itself is open.
 function buildDisplayStates(
   serverStatus: Record<StudentStepId, ActivityStatus>,
   progress: Record<StudentStepId, StepProgress>,
-): Record<StudentStepId, StepDisplayState> {
-  const statusFor = (id: StudentStepId) => {
+): Record<StudentViewStepId, StepDisplayState> {
+  const activityStatusFor = (id: StudentStepId) => {
     if (serverStatus[id] === "locked") return "locked" as const;
     if (serverStatus[id] === "completed" || progress[id].kind === "completed") return "completed" as const;
     return "active" as const;
   };
 
-  const assessmentStatus = statusFor("assessment");
-  const reviewStatus = statusFor("content-review");
-  const ratingStatus = statusFor("content-rating");
+  const result = {} as Record<StudentViewStepId, StepDisplayState>;
+  for (const step of STUDENT_VIEW_STEPS) {
+    const [primaryActivityId] = step.activityIds;
+    const allCompleted = step.activityIds.every((id) => activityStatusFor(id) === "completed");
+    const status =
+      activityStatusFor(primaryActivityId) === "locked"
+        ? ("locked" as const)
+        : allCompleted
+          ? ("completed" as const)
+          : ("active" as const);
 
-  return {
-    assessment: {
-      status: assessmentStatus,
-      label: assessmentStatus === "completed" ? "Completed" : assessmentStatus === "active" ? "In progress" : "Not available yet",
-    },
-    "content-review": {
-      status: reviewStatus,
-      label: reviewStatus === "completed" ? "Completed" : reviewStatus === "active" ? "In progress" : "Not available yet",
-    },
-    "content-rating": {
-      status: ratingStatus,
-      label: ratingStatus === "completed" ? "Completed" : ratingStatus === "active" ? "In progress" : "Not available yet",
-    },
-  };
+    result[step.id] = {
+      status,
+      label: status === "completed" ? "Completed" : status === "active" ? "In progress" : "Not available yet",
+    };
+  }
+  return result;
 }
 
 export default function StudentView({ user }: Props) {
-  const [activeStep, setActiveStep] = useState<StudentStepId>("assessment");
+  const [activeStep, setActiveStep] = useState<StudentViewStepId>("assessment");
   const [progress, setProgress] = useState<Record<StudentStepId, StepProgress>>(INITIAL_PROGRESS);
   const [serverStatus, setServerStatus] = useState<Record<StudentStepId, ActivityStatus>>(INITIAL_SERVER_STATUS);
   const activeStepRef = useRef(activeStep);
@@ -104,13 +113,21 @@ export default function StudentView({ user }: Props) {
         }
         setServerStatus(next);
 
+        // The last real job is Material Rating -- report task completion to
+        // GENIUS once it's done, not at quiz submission (#98).
+        if (next["content-rating"] === "completed") {
+          notifyTaskCompleted(classId, assignmentId, user.geniusId);
+        }
+
         // Auto-advance to the next step only right as it newly unlocks, so
         // revisiting an already-completed step doesn't bounce the student away.
-        const currentIndex = STUDENT_STEPS.findIndex((step) => step.id === activeStepRef.current);
-        if (next[activeStepRef.current] === "completed" && currentIndex < STUDENT_STEPS.length - 1) {
-          const nextStepId = STUDENT_STEPS[currentIndex + 1].id;
-          if (next[nextStepId] !== "locked") {
-            setActiveStep(nextStepId);
+        const currentIndex = STUDENT_VIEW_STEPS.findIndex((step) => step.id === activeStepRef.current);
+        const currentStepDone = STUDENT_VIEW_STEPS[currentIndex].activityIds.every((id) => next[id] === "completed");
+        if (currentStepDone && currentIndex < STUDENT_VIEW_STEPS.length - 1) {
+          const nextStep = STUDENT_VIEW_STEPS[currentIndex + 1];
+          const nextStepLocked = next[nextStep.activityIds[0]] === "locked";
+          if (!nextStepLocked) {
+            setActiveStep(nextStep.id);
           }
         }
       } catch {
@@ -121,7 +138,7 @@ export default function StudentView({ user }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [classId, assignmentId, studentId, statusRefreshToken]);
+  }, [classId, assignmentId, studentId, statusRefreshToken, user.geniusId]);
 
   // Children re-create their `onProgress` closure on every StudentView render
   // (it's an inline arrow in the JSX below) and re-report their current kind
@@ -162,19 +179,30 @@ export default function StudentView({ user }: Props) {
           </p>
         </header>
 
-        <StudentProgressStepper activeStep={activeStep} states={displayStates} onSelectStep={setActiveStep} />
+        <StudentProgressStepper
+          steps={STUDENT_VIEW_STEPS}
+          activeStep={activeStep}
+          states={displayStates}
+          onSelectStep={setActiveStep}
+          completedSteps={STUDENT_VIEW_STEPS.filter((step) => displayStates[step.id].status === "completed").length}
+          totalSteps={STUDENT_VIEW_STEPS.length}
+        />
 
-        {/* All three step views stay mounted (hidden when inactive) so each
-            keeps polling/reporting its own progress regardless of which tab
-            is currently visible. */}
+        {/* The assessment and content-review views stay mounted (hidden when
+            inactive) so they keep polling/reporting progress regardless of
+            which tab is visible. Material Rating renders inside each material
+            card once the review question is submitted, per #101, rather than
+            as its own tab or a second copy of the material. */}
         <div className={activeStep === "assessment" ? "" : "hidden"}>
           <StudentQuizView user={user} onProgress={(p) => reportProgress("assessment", p)} />
         </div>
-        <div className={activeStep === "content-review" ? "" : "hidden"}>
-          <StudentContentReviewView user={user} onProgress={(p) => reportProgress("content-review", p)} />
-        </div>
-        <div className={activeStep === "content-rating" ? "" : "hidden"}>
-          <StudentContentRatingView user={user} onProgress={(p) => reportProgress("content-rating", p)} />
+        <div className={activeStep === "explore-and-ask" ? "flex flex-col gap-6" : "hidden"}>
+          <StudentContentReviewView
+            user={user}
+            onProgress={(p) => reportProgress("content-review", p)}
+            ratingUnlocked={serverStatus["content-review"] === "completed"}
+            onRatingProgress={(p) => reportProgress("content-rating", p)}
+          />
         </div>
       </div>
     </div>

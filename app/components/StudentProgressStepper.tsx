@@ -1,12 +1,15 @@
 "use client";
 
-import type { StudentStepId, StepDisplayState } from "@/lib/student-progress";
-import { STUDENT_STEPS } from "@/lib/student-progress";
+import type { StepDisplayState } from "@/lib/student-progress";
 
-type Props = {
-  activeStep: StudentStepId;
-  states: Record<StudentStepId, StepDisplayState>;
-  onSelectStep: (step: StudentStepId) => void;
+type Props<StepId extends string> = {
+  steps: { id: StepId; title: string }[];
+  activeStep: StepId;
+  states: Record<StepId, StepDisplayState>;
+  onSelectStep: (step: StepId) => void;
+  /** Real underlying activity counts, which may differ from `steps.length` when a step groups more than one activity. */
+  completedSteps: number;
+  totalSteps: number;
 };
 
 const PILL_STYLES: Record<StepDisplayState["status"], string> = {
@@ -21,18 +24,23 @@ const CARD_STYLES: Record<StepDisplayState["status"], string> = {
   locked: "border-slate-200 bg-white opacity-60",
 };
 
-export default function StudentProgressStepper({ activeStep, states, onSelectStep }: Props) {
-  const completedCount = STUDENT_STEPS.filter((step) => states[step.id].status === "completed").length;
-
+export default function StudentProgressStepper<StepId extends string>({
+  steps,
+  activeStep,
+  states,
+  onSelectStep,
+  completedSteps,
+  totalSteps,
+}: Props<StepId>) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-6">
       <p className="text-base font-semibold text-slate-900">Your progress</p>
       <p className="mt-0.5 text-sm text-slate-500">
-        {completedCount} of {STUDENT_STEPS.length} activities completed
+        {completedSteps} of {totalSteps} activities completed
       </p>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        {STUDENT_STEPS.map((step, index) => {
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {steps.map((step, index) => {
           const state = states[step.id];
           const clickable = state.status !== "locked";
           const isActive = step.id === activeStep;
