@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { notifyQuizSubmitted } from "@/app/components/StudentQuizView";
+import { notifyTaskCompleted } from "@/lib/genius-notify";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("notifyQuizSubmitted", () => {
+describe("notifyTaskCompleted", () => {
   it("sends the GENIUS identity using geniusId", () => {
     const postMessage = vi.fn();
     vi.stubGlobal("window", { parent: { postMessage } });
 
-    notifyQuizSubmitted("class-1", "assignment-1", "genius-user-1");
+    notifyTaskCompleted("class-1", "assignment-1", "genius-user-1");
 
     expect(postMessage).toHaveBeenCalledWith(
       {

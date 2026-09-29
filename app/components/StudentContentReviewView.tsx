@@ -14,7 +14,13 @@ import {
 type Props = {
   user: UserContext;
   onProgress?: (progress: StepProgress) => void;
+  // Material Rating renders inline in each material card, but only once the
+  // server has marked content-review complete (content-rating depends on it).
+  ratingUnlocked?: boolean;
+  onRatingProgress?: (progress: StepProgress) => void;
 };
+
+const RATING_LABELS = ["", "Not engaging", "Slightly engaging", "Moderately engaging", "Very engaging", "Extremely engaging"];
 
 const TEXT_MODE_LABELS: Record<TextMode, string> = {
   questions: "Questions",
@@ -30,7 +36,12 @@ const getContentModeLabels = (item: ContentItem) => {
   return item.type ? [item.type] : [];
 };
 
-export default function StudentContentReviewView({ user, onProgress }: Props) {
+export default function StudentContentReviewView({
+  user,
+  onProgress,
+  ratingUnlocked = false,
+  onRatingProgress,
+}: Props) {
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [media, setMedia] = useState<Record<string, SharedContentMedia>>({});
   const [loading, setLoading] = useState(true);
@@ -41,16 +52,24 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const [ratings, setRatings] = useState<Record<string, number>>({});
+  const [savedRatings, setSavedRatings] = useState<Record<string, number>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+
   const classId = user.classId;
   const assignmentId = user.assignmentId;
 
-  const loadPublishedContent = useCallback(async () => {
+  const loadPublishedContent = useCallback(async (silent = false) => {
     if (!classId || !assignmentId) {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
       return;
     }
 
-    setLoading(true);
+    if (!silent) {
+      setLoading(true);
+    }
 
     try {
       const [pubRes, mediaRes] = await Promise.all([
@@ -81,7 +100,9 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load content.");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [assignmentId, classId]);
 
@@ -103,10 +124,57 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
     }
   }, [assignmentId, classId, user.userId]);
 
+  const loadRatings = useCallback(async () => {
+    if (!classId || !assignmentId) return;
+
+    try {
+      const res = await fetch(
+        `/api/content-rating?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=${encodeURIComponent(user.userId)}`,
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as { ratings?: { content_item_id: string; rating: number }[] };
+      const existing: Record<string, number> = {};
+      for (const r of data.ratings ?? []) {
+        existing[r.content_item_id] = r.rating;
+      }
+      setRatings(existing);
+      setSavedRatings(existing);
+    } catch {
+      // Rating history is best-effort and should not block content rendering.
+    }
+  }, [assignmentId, classId, user.userId]);
+
   useEffect(() => {
     void loadPublishedContent();
     void loadOwnQuestions();
-  }, [loadPublishedContent, loadOwnQuestions]);
+    void loadRatings();
+  }, [loadPublishedContent, loadOwnQuestions, loadRatings]);
+
+  // Keep published content fresh so newly shared material shows up without
+  // a reload (carried over from the former standalone Material Rating view).
+  useEffect(() => {
+    if (!classId || !assignmentId) return;
+
+    const refreshContent = () => {
+      void loadPublishedContent(true);
+    };
+
+    const intervalId = window.setInterval(refreshContent, 15000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshContent();
+      }
+    };
+
+    window.addEventListener("focus", refreshContent);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshContent);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [assignmentId, classId, loadPublishedContent]);
 
   // Reviewing this step is complete once the student has submitted at
   // least one question about the material (per team decision, 2026-09-18 —
@@ -125,6 +193,16 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
         : { kind: "active" },
     );
   }, [loading, contentItems, submittedQuestions, onProgress]);
+
+  useEffect(() => {
+    if (loading || !ratingUnlocked) return;
+    if (contentItems.length === 0) {
+      onRatingProgress?.({ kind: "not-available" });
+      return;
+    }
+    const allRated = contentItems.every((item) => savedRatings[item.id] != null);
+    onRatingProgress?.(allRated ? { kind: "completed" } : { kind: "active" });
+  }, [loading, ratingUnlocked, contentItems, savedRatings, onRatingProgress]);
 
   const updateDraftQuestion = (index: number, value: string) => {
     setDraftQuestions((prev) => prev.map((q, i) => (i === index ? value : q)));
@@ -175,6 +253,46 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
     }
   };
 
+  const submitRating = async (contentItemId: string, rating: number) => {
+    if (!classId || !assignmentId) return;
+
+    setRatings((prev) => ({ ...prev, [contentItemId]: rating }));
+    setSavingId(contentItemId);
+
+    try {
+      const res = await fetch("/api/content-rating", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          classId,
+          assignmentId,
+          studentId: user.userId,
+          contentItemId,
+          rating,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to save rating.");
+      }
+
+      setSavedRatings((prev) => ({ ...prev, [contentItemId]: rating }));
+    } catch {
+      // Revert on failure
+      setRatings((prev) => {
+        const reverted = { ...prev };
+        if (savedRatings[contentItemId] != null) {
+          reverted[contentItemId] = savedRatings[contentItemId];
+        } else {
+          delete reverted[contentItemId];
+        }
+        return reverted;
+      });
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -212,18 +330,22 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
     <div className="flex flex-col gap-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-          Content Review
+          Explore and ASK
         </p>
         <h2 className="mt-1 text-xl font-semibold text-slate-900">
-          Review the learning material below
+          What do you notice? What do you wonder?
         </h2>
         <p className="mt-2 text-sm text-slate-500">
-          Take a look, then write at least one question about it below before moving on to Material Rating.
+          After exploring and learning the materials, please write at least one question about
+          something you are curious about or want to understand better.
         </p>
       </div>
 
       {contentItems.map((item) => {
         const itemMedia = media[item.id];
+        const currentRating = ratings[item.id];
+        const isSaved = savedRatings[item.id] === currentRating;
+        const isSaving = savingId === item.id;
 
         return (
           <div key={item.id} className="rounded-2xl border border-slate-200 bg-white p-6">
@@ -265,6 +387,42 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
                 <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600">{item.body}</p>
               </div>
             </div>
+
+            {ratingUnlocked && (
+              <div className="mt-4 border-t border-slate-100 pt-4">
+                <p className="text-xs font-semibold text-slate-500">
+                  How engaging is this content?
+                  <span className="ml-2 font-normal text-slate-400">
+                    1 = Not engaging, 5 = Extremely engaging
+                  </span>
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => submitRating(item.id, value)}
+                      disabled={isSaving}
+                      className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold transition ${
+                        currentRating === value
+                          ? "bg-[#BA0C2F] text-white"
+                          : "border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                      }`}
+                      title={RATING_LABELS[value]}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                  {currentRating && (
+                    <span className="ml-2 text-xs text-slate-400">
+                      {RATING_LABELS[currentRating]}
+                      {isSaved && !isSaving && " (saved)"}
+                      {isSaving && " (saving...)"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         );
       })}
@@ -277,7 +435,7 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
         {submittedQuestions && submittedQuestions.length > 0 ? (
           <>
             <p className="mt-1 text-sm font-semibold text-emerald-600">
-              Submitted — you can move on to Material Rating.
+              Submitted - see your questions below.
             </p>
             <ul className="mt-4 flex flex-col gap-2">
               {submittedQuestions.map((q, i) => (
@@ -293,8 +451,12 @@ export default function StudentContentReviewView({ user, onProgress }: Props) {
         ) : (
           <>
             <h2 className="mt-1 text-xl font-semibold text-slate-900">
-              Write one or more questions about the material
+              What questions do you have after learning the materials?
             </h2>
+            <p className="mt-2 text-sm text-slate-500">
+              After exploring and learning the materials, please write at least one question about
+              something you&apos;re curious about or want to understand better.
+            </p>
             <div className="mt-4 flex flex-col gap-3">
               {draftQuestions.map((q, i) => (
                 <div key={i} className="flex items-start gap-2">

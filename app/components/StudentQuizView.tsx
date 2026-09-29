@@ -16,20 +16,6 @@ type QuizStatusData = {
   status: "draft" | "published" | "closed";
 };
 
-export const notifyQuizSubmitted = (classId: string, assignmentId: string, geniusId: string) => {
-  if (typeof window === "undefined" || window.parent === window) return;
-
-  window.parent.postMessage(
-    {
-      type: "engage-agent.quiz-submitted",
-      classId,
-      assignmentId,
-      geniusId,
-    },
-    "*",
-  );
-};
-
 export default function StudentQuizView({ user, onProgress }: Props) {
   const [quizStatus, setQuizStatus] = useState<QuizStatusData | null>(null);
   const [questions, setQuestions] = useState<QuizItem[]>([]);
@@ -91,14 +77,13 @@ export default function StudentQuizView({ user, onProgress }: Props) {
         setExistingAnswers(existingAnswer.answer.answers);
         setAnswers(existingAnswer.answer.answers);
         setSubmitted(true);
-        notifyQuizSubmitted(classId, assignmentId, user.geniusId);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load quiz.");
     } finally {
       setLoading(false);
     }
-  }, [classId, assignmentId, user.geniusId, user.userId, user.email]);
+  }, [classId, assignmentId, user.userId, user.email]);
 
   useEffect(() => {
     loadQuiz();
@@ -155,7 +140,6 @@ export default function StudentQuizView({ user, onProgress }: Props) {
 
       setSubmitted(true);
       setExistingAnswers(answers);
-      notifyQuizSubmitted(classId, assignmentId, user.geniusId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit.");
     } finally {
