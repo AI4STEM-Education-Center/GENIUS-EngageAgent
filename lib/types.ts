@@ -189,3 +189,24 @@ export type Survey = {
   created_at: string;
   updated_at: string;
 };
+
+/* ------------------------------------------------------------------ */
+/*  Student survey responses (UC-SV-02, #79)                           */
+/* ------------------------------------------------------------------ */
+
+export type SurveyResponseStatus = "draft" | "submitted";
+
+export type SurveyResponse = {
+  survey_id: string;
+  class_id: string;
+  assignment_id: string;
+  student_id: string;
+  student_name?: string;
+  /** field_id → the student's written answer. */
+  answers: Record<string, string>;
+  status: SurveyResponseStatus;
+  /** True when submitted after the due time (late submissions allowed). */
+  is_late?: boolean;
+  submitted_at?: string;
+  updated_at: string;
+};
