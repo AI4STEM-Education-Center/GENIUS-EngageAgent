@@ -2,13 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  buildLessonSurveySource,
   buildTeacherSurveySource,
   countAnswered,
   entryToCsv,
   type SurveyResultSource,
 } from "@/lib/survey-results";
-import type { Lesson, StudentAnswer, Survey, SurveyResponse } from "@/lib/types";
+import type { Survey, SurveyResponse } from "@/lib/types";
 
 type Props = {
   classId: string;
@@ -48,19 +47,11 @@ export default function SurveyResultsSection({ classId, assignmentId }: Props) {
       }
     };
     try {
-      const [answersData, quizData, surveysData, responsesData] = await Promise.all([
-        json<{ answers?: StudentAnswer[] }>(`/api/student-answers?${q}`),
-        json<{ lesson_number?: number }>(`/api/quiz-status?${q}`),
+      const [surveysData, responsesData] = await Promise.all([
         json<{ surveys?: Survey[] }>(`/api/surveys?${q}`),
         json<{ responses?: SurveyResponse[] }>(`/api/survey-responses?${q}`),
       ]);
-      const answers = answersData?.answers ?? [];
-      const lessonNumber = quizData?.lesson_number || answers[0]?.lesson_number;
-      const lesson = lessonNumber ? await json<Lesson>(`/api/lessons/${lessonNumber}`) : null;
-
       const next: SurveyResultSource[] = [];
-      const lessonSource = buildLessonSurveySource(lesson, answers);
-      if (lessonSource) next.push(lessonSource);
       for (const survey of surveysData?.surveys ?? []) {
         next.push(buildTeacherSurveySource(survey, responsesData?.responses ?? []));
       }

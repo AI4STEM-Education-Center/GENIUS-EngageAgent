@@ -4,10 +4,8 @@ import { NextResponse } from "next/server";
 import {
   getLessonGenerationContext,
   resolveQuizEvidence,
-  resolveSurveyEvidence,
   type LessonGenerationContext,
   type ResolvedQuizEvidence,
-  type ResolvedSurveyEvidence,
 } from "@/lib/lesson-context";
 import { getCachedPlanJson, upsertCachedPlanJson } from "@/lib/nosql";
 import {
@@ -60,25 +58,20 @@ const buildPrompt = (
   student: Student,
   lessonContext: LessonGenerationContext | null,
   quizEvidence: ResolvedQuizEvidence[],
-  surveyEvidence: ResolvedSurveyEvidence[],
 ) => ({
   system: `You are an education engagement planner.
 Return JSON only with keys: name, strategy, relevance, overallRecommendation, recommendationReason, summary, tldr, rationale, tactics, cadence, checks.
 The strategy must be exactly one of: cognitive conflict, analogy, experience bridging, engaged critiquing.
 The relevance field is an object with those four strategies as keys and integer scores from 0-100.
 Base the recommendation primarily on the student's quiz evidence: question text, selected response, confidence, correctness, and any linked misconception.
-Use the beginning-of-lesson survey responses as qualitative context about the student's familiarity and experiences. Do not treat survey responses as correct or incorrect, and do not select experience bridging merely because the survey asks about experience.
 Use the lesson learning objective as supplemental context, not as a substitute for the student's quiz evidence.
 Make the recommendationReason reference the student by name and the assignment/topic.
-For recommendationReason and rationale, cite 2+ concrete details from the available quiz and survey evidence and connect them directly to the chosen strategy.`,
+For recommendationReason and rationale, cite 2+ concrete details from the student's quiz evidence and connect them directly to the chosen strategy.`,
   user: `Student name: ${student.name}
 Assignment: ${lessonContext?.lessonTitle ?? student.assignment ?? "Not provided"}
 
 ${lessonContext ? `Lesson objective:\n${lessonContext.learningObjective}\n\n` : ""}Structured quiz evidence:
 ${quizEvidence.length > 0 ? JSON.stringify(quizEvidence, null, 2) : JSON.stringify(student.answers, null, 2)}
-
-Beginning-of-lesson survey evidence:
-${surveyEvidence.length > 0 ? JSON.stringify(surveyEvidence, null, 2) : "No survey responses submitted."}
 
 Return a plan:
 - name: short label
@@ -169,7 +162,6 @@ const generatePlanForStudent = async ({
   student,
   lessonContext,
   quizEvidence,
-  surveyEvidence,
 }: {
   client: OpenAI;
   model: string;
@@ -179,7 +171,6 @@ const generatePlanForStudent = async ({
   student: Student;
   lessonContext: LessonGenerationContext | null;
   quizEvidence: ResolvedQuizEvidence[];
-  surveyEvidence: ResolvedSurveyEvidence[];
 }): Promise<StudentStrategyResult> => {
   if (!forceRefresh) {
     const cachedPlanJson = await getCachedPlanJson(
@@ -200,12 +191,7 @@ const generatePlanForStudent = async ({
     }
   }
 
-  const prompt = buildPrompt(
-    student,
-    lessonContext,
-    quizEvidence,
-    surveyEvidence,
-  );
+  const prompt = buildPrompt(student, lessonContext, quizEvidence);
   const completion = await client.chat.completions.create({
     model,
     response_format: { type: "json_object" },
@@ -299,10 +285,6 @@ export async function POST(request: Request) {
             quizEvidence:
               typeof lessonNumber === "number"
                 ? resolveQuizEvidence(lessonNumber, student.answers)
-                : [],
-            surveyEvidence:
-              typeof lessonNumber === "number"
-                ? resolveSurveyEvidence(lessonNumber, student.answers)
                 : [],
           }),
         ),

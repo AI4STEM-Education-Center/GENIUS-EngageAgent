@@ -76,8 +76,7 @@ const emptyPublishForm = {
 
 /**
  * V1 questions have exactly one free-text response field. It is stored in the
- * shared SurveyResponseField shape so teacher-authored surveys and the
- * built-in beginning-of-lesson surveys share one model.
+ * shared SurveyResponseField shape for teacher-authored surveys.
  */
 const emptyQuestion = (questionNumber: number): SurveyItem => ({
   item_id: newId(),

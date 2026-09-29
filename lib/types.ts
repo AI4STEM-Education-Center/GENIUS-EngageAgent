@@ -81,9 +81,7 @@ export type SurveyItem = {
   item_id: string;
   question_number: number;
   /**
-   * Question purpose. "familiarity" and "experience_details" come from the
-   * built-in beginning-of-lesson surveys; "follow_up" and "unspecified" are
-   * used by teacher-authored surveys (UC-SV-01_V1).
+   * Question purpose for teacher-authored surveys (UC-SV-01_V1).
    */
   category:
     | "familiarity"
@@ -104,7 +102,6 @@ export type Lesson = {
   core_ideas: string[];
   misconceptions: Record<string, string>;
   quiz_items: QuizItem[];
-  survey_items: SurveyItem[];
 };
 
 export type QuizStatus = "draft" | "published" | "closed";
@@ -148,9 +145,7 @@ export type ReviewQuestionRecord = {
 /* ------------------------------------------------------------------ */
 /*  Teacher-authored surveys (UC-SV-01_V1, #95)                        */
 /*                                                                     */
-/*  These reuse the SurveyItem / SurveyResponseField shapes above so    */
-/*  there is a single survey model shared with the built-in            */
-/*  beginning-of-lesson surveys.                                       */
+/*  These use the SurveyItem / SurveyResponseField shapes above.       */
 /* ------------------------------------------------------------------ */
 
 /**

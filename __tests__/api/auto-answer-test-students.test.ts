@@ -49,7 +49,6 @@ const lesson: Lesson = {
   learning_objective: "Test objective",
   core_ideas: [],
   misconceptions: {},
-  survey_items: [],
   quiz_items: [
     {
       item_id: "L1_Q1",

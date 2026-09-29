@@ -1,11 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildLessonSurveySource,
   buildTeacherSurveySource,
   countAnswered,
   entryToCsv,
 } from "@/lib/survey-results";
-import type { StudentAnswer, SurveyItem, SurveyResponse } from "@/lib/types";
+import type { SurveyItem, SurveyResponse } from "@/lib/types";
 
 const questions: SurveyItem[] = [
   { item_id: "q1", question_number: 1, category: "familiarity", stem: "Hobby?",
@@ -16,28 +15,6 @@ const questions: SurveyItem[] = [
       { field_id: "f3", label: "Which changed more?", response_type: "choice", options: ["Lighter", "Heavier"] },
     ] },
 ];
-
-const answer = (id: string, name: string, answers: Record<string, string>): StudentAnswer => ({
-  student_id: id, student_name: name, class_id: "c", assignment_id: "a",
-  lesson_number: 1, answers, submitted_at: "2026-09-14T15:42:00.000Z",
-});
-
-describe("buildLessonSurveySource", () => {
-  it("returns null when the lesson has no survey", () => {
-    expect(buildLessonSurveySource({ lesson_number: 1, survey_items: [] }, [])).toBeNull();
-  });
-
-  it("includes only students who answered a survey field, sorted by name, without quiz answers", () => {
-    const src = buildLessonSurveySource({ lesson_number: 2, survey_items: questions }, [
-      answer("s2", "Maya", { L1_Q1: "C", f1: "Gaming" }),
-      answer("s1", "Alex", { f1: "Soccer", f2: "Ball", f3: "Lighter" }),
-      answer("s3", "Quiz Only", { L1_Q1: "A" }),
-    ])!;
-    expect(src.subtitle).toBe("Lesson 2");
-    expect(src.entries.map((e) => e.name)).toEqual(["Alex", "Maya"]);
-    expect(src.entries[1].answers).toEqual({ f1: "Gaming", f2: "", f3: "" });
-  });
-});
 
 describe("buildTeacherSurveySource", () => {
   const resp = (id: string, status: "draft" | "submitted", late = false): SurveyResponse => ({
@@ -68,9 +45,12 @@ describe("countAnswered", () => {
 
 describe("entryToCsv", () => {
   it("writes one row per field and escapes quotes", () => {
-    const src = buildLessonSurveySource({ lesson_number: 1, survey_items: questions }, [
-      answer("s1", "Alex", { f1: 'He said "hi"', f2: "Ball", f3: "Lighter" }),
-    ])!;
+    const src = buildTeacherSurveySource(
+      { survey_id: "s1", title: "Check", daily_experience_topic: "Collisions", questions },
+      [{ survey_id: "s1", class_id: "c", assignment_id: "a", student_id: "s1",
+         student_name: "Alex", answers: { f1: 'He said "hi"', f2: "Ball", f3: "Lighter" },
+         status: "submitted", updated_at: "2026-09-14T00:00:00.000Z" }],
+    );
     const csv = entryToCsv(src, src.entries[0]).split("\n");
     expect(csv).toHaveLength(4);
     expect(csv[1]).toBe('"Alex","1. Hobby?","Answer","He said ""hi"""');
