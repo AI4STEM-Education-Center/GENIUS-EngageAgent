@@ -2223,9 +2223,9 @@ export default function TeacherView({ user }: Props) {
                 </div>
               )}
 
-              {/* Teacher-authored surveys (UC-SV-01_V1, #95) */}
-              {selectedLesson && assessmentTab === "survey" && (
-                <div className="border-t border-slate-100 pt-6">
+              {/* Teacher-authored surveys (UC-SV-01_V1, #95) — belong to the learning task, so no lesson is needed */}
+              {assessmentTab === "survey" && (
+                <div className={selectedLesson ? "border-t border-slate-100 pt-6" : ""}>
                   <SurveyBuilderView classId={classId} assignmentId={assignmentId} />
                 </div>
               )}
