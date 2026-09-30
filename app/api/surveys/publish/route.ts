@@ -8,26 +8,19 @@ import {
 } from "@/lib/survey-schedule";
 import type { Survey, SurveySchedule } from "@/lib/types";
 
+const optionalDate = (value: unknown) =>
+  typeof value === "string" && value.trim() ? value : undefined;
+
 /**
- * Publish or schedule a survey, and edit the publish settings of one that is
- * already published or scheduled (UC-SV-03, #80).
+ * Publish a survey, or change its dates later (UC-SV-03, #80).
+ * The publish and due dates are both optional (#106).
  */
 export async function POST(request: Request) {
   const denied = await guardWorkspaceRequest(request);
   if (denied) return denied;
 
   const body = await request.json();
-  const {
-    classId,
-    assignmentId,
-    surveyId,
-    publishAt,
-    dueAt,
-    allowLateSubmissions,
-    allowResponseEditing,
-    showImmediately,
-    publishedBy,
-  } = body ?? {};
+  const { classId, assignmentId, surveyId, publishAt, dueAt, publishedBy } = body ?? {};
 
   if (!classId || !assignmentId || !surveyId) {
     return NextResponse.json(
@@ -42,17 +35,11 @@ export async function POST(request: Request) {
   }
 
   const schedule: SurveySchedule = {
-    publish_at: typeof publishAt === "string" ? publishAt : "",
-    due_at: typeof dueAt === "string" ? dueAt : "",
-    allow_late_submissions: Boolean(allowLateSubmissions),
-    allow_response_editing: Boolean(allowResponseEditing),
-    show_immediately: showImmediately === undefined ? true : Boolean(showImmediately),
+    publish_at: optionalDate(publishAt),
+    due_at: optionalDate(dueAt),
   };
 
-  const errors = [
-    ...validateSchedule(schedule),
-    ...validateSurveyIsPublishable(existing),
-  ];
+  const errors = [...validateSchedule(schedule), ...validateSurveyIsPublishable(existing)];
   if (errors.length > 0) {
     return NextResponse.json({ error: errors[0], errors }, { status: 400 });
   }
@@ -61,9 +48,8 @@ export async function POST(request: Request) {
   const published: Survey = {
     ...existing,
     schedule,
-    status: resolveSurveyStatus({ status: existing.status, schedule }, now),
-    published_by:
-      typeof publishedBy === "string" ? publishedBy : existing.published_by,
+    status: resolveSurveyStatus({ status: "published", schedule }, now),
+    published_by: typeof publishedBy === "string" ? publishedBy : existing.published_by,
     published_at: existing.published_at ?? now.toISOString(),
     updated_at: now.toISOString(),
   };

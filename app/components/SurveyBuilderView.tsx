@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { resolveSurveyStatus, validateSchedule } from "@/lib/survey-schedule";
+import { pickTaskSurvey, resolveSurveyStatus, validateSchedule } from "@/lib/survey-schedule";
 import type { Survey, SurveyItem, SurveyStatus } from "@/lib/types";
 
 type Props = {
@@ -69,9 +69,6 @@ const emptyPublishForm = {
   publishTime: "",
   dueDate: "",
   dueTime: "",
-  allowLate: false,
-  allowEditing: false,
-  showImmediately: true,
 };
 
 /**
@@ -333,9 +330,6 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
       publishTime: publishParts.time,
       dueDate: dueParts.date,
       dueTime: dueParts.time,
-      allowLate: survey.schedule?.allow_late_submissions ?? false,
-      allowEditing: survey.schedule?.allow_response_editing ?? false,
-      showImmediately: survey.schedule?.show_immediately ?? true,
     });
     setPublishErrors([]);
     setSavedNotice(null);
@@ -343,10 +337,13 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
 
   const submitPublish = async () => {
     if (!publishTarget) return;
-    const publishAt = toIso(publishForm.publishDate, publishForm.publishTime);
-    const dueAt = toIso(publishForm.dueDate, publishForm.dueTime);
+    const publishAt = toIso(publishForm.publishDate, publishForm.publishTime || "00:00");
+    const dueAt = toIso(publishForm.dueDate, publishForm.dueTime || "23:59");
 
-    const problems = validateSchedule({ publish_at: publishAt, due_at: dueAt });
+    const problems = validateSchedule({
+      publish_at: publishAt || undefined,
+      due_at: dueAt || undefined,
+    });
     setPublishErrors(problems);
     if (problems.length > 0) return;
 
@@ -362,9 +359,6 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
           surveyId: publishTarget.survey_id,
           publishAt,
           dueAt,
-          allowLateSubmissions: publishForm.allowLate,
-          allowResponseEditing: publishForm.allowEditing,
-          showImmediately: publishForm.showImmediately,
         }),
       });
       if (!res.ok) {
@@ -409,7 +403,8 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
       {mode === "list" && !publishTarget && (
         <>
           <div className="flex items-center justify-between">
-            <p className={labelClass}>Teacher-created surveys</p>
+            <p className={labelClass}>Survey for this learning task</p>
+            {surveys.length === 0 && !loadingList && (
             <button
               type="button"
               onClick={startNew}
@@ -417,6 +412,7 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
             >
               Add survey
             </button>
+            )}
           </div>
 
           {savedNotice && (
@@ -428,15 +424,16 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
           ) : surveys.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center">
               <p className="text-sm font-semibold text-slate-700">
-                No teacher-created surveys yet
+                No survey yet
               </p>
               <p className="mt-1 text-sm text-slate-500">
-                Click “Add survey” to write your own questions for this learning task.
+                Click “Add survey” to write the survey students answer after the quiz.
               </p>
             </div>
           ) : (
             <ul className="flex flex-col gap-3">
-              {surveys.map((s) => (
+              {/* Each learning task has one survey (#111). */}
+              {[pickTaskSurvey(surveys)!].map((s) => (
                 <li
                   key={s.survey_id}
                   className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-5"
@@ -459,11 +456,10 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
                         ? ` · ${s.daily_experience_topic}`
                         : ""}
                     </p>
-                    {s.schedule && (
+                    {s.schedule && (s.schedule.publish_at || s.schedule.due_at) && (
                       <p className="mt-0.5 text-xs text-slate-400">
-                        Opens {formatWhen(s.schedule.publish_at)} · Due{" "}
-                        {formatWhen(s.schedule.due_at)}
-                        {s.schedule.allow_late_submissions ? " · late allowed" : ""}
+                        {s.schedule.publish_at ? `Opens ${formatWhen(s.schedule.publish_at)}` : "Open now"}
+                        {s.schedule.due_at ? ` · Due ${formatWhen(s.schedule.due_at)}` : " · No due date"}
                       </p>
                     )}
                   </div>
@@ -510,7 +506,7 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1">
                 <span className={labelClass}>
-                  Publish date <span className="text-[#BA0C2F]">*</span>
+                  Publish date <span className="font-normal normal-case text-slate-400">(optional)</span>
                 </span>
                 <input
                   type="date"
@@ -523,7 +519,7 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
               </label>
               <label className="flex flex-col gap-1">
                 <span className={labelClass}>
-                  Publish time <span className="text-[#BA0C2F]">*</span>
+                  Publish time <span className="font-normal normal-case text-slate-400">(optional)</span>
                 </span>
                 <input
                   type="time"
@@ -536,7 +532,7 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
               </label>
               <label className="flex flex-col gap-1">
                 <span className={labelClass}>
-                  Due date <span className="text-[#BA0C2F]">*</span>
+                  Due date <span className="font-normal normal-case text-slate-400">(optional)</span>
                 </span>
                 <input
                   type="date"
@@ -549,7 +545,7 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
               </label>
               <label className="flex flex-col gap-1">
                 <span className={labelClass}>
-                  Due time <span className="text-[#BA0C2F]">*</span>
+                  Due time <span className="font-normal normal-case text-slate-400">(optional)</span>
                 </span>
                 <input
                   type="time"
@@ -562,41 +558,10 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
               </label>
             </div>
 
-            <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={publishForm.allowLate}
-                  onChange={(e) =>
-                    setPublishForm((f) => ({ ...f, allowLate: e.target.checked }))
-                  }
-                />
-                Allow late submissions
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={publishForm.allowEditing}
-                  onChange={(e) =>
-                    setPublishForm((f) => ({ ...f, allowEditing: e.target.checked }))
-                  }
-                />
-                Allow students to edit responses after submitting
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={publishForm.showImmediately}
-                  onChange={(e) =>
-                    setPublishForm((f) => ({
-                      ...f,
-                      showImmediately: e.target.checked,
-                    }))
-                  }
-                />
-                Show the survey immediately after the publish time
-              </label>
-            </div>
+            <p className="text-xs text-slate-500">
+              Both dates are optional. With no publish date the survey opens as soon as you
+              publish it, and with no due date it stays open.
+            </p>
           </div>
 
           {/* Summary before publishing */}
@@ -615,28 +580,20 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
                 <dt className="inline font-semibold text-slate-700">Opens: </dt>
                 <dd className="inline">
                   {formatWhen(
-                    toIso(publishForm.publishDate, publishForm.publishTime),
-                  ) || "—"}
+                    toIso(publishForm.publishDate, publishForm.publishTime || "00:00"),
+                  ) || "Right away"}
                 </dd>
               </div>
               <div>
                 <dt className="inline font-semibold text-slate-700">Due: </dt>
                 <dd className="inline">
-                  {formatWhen(toIso(publishForm.dueDate, publishForm.dueTime)) ||
-                    "—"}
+                  {formatWhen(toIso(publishForm.dueDate, publishForm.dueTime || "23:59")) ||
+                    "No due date"}
                 </dd>
               </div>
               <div>
                 <dt className="inline font-semibold text-slate-700">Questions: </dt>
                 <dd className="inline">{publishTarget.questions.length}</dd>
-              </div>
-              <div>
-                <dt className="inline font-semibold text-slate-700">
-                  Late submissions:{" "}
-                </dt>
-                <dd className="inline">
-                  {publishForm.allowLate ? "Allowed" : "Not allowed"}
-                </dd>
               </div>
             </dl>
           </div>

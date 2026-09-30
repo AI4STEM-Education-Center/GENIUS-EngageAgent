@@ -159,13 +159,18 @@ export type ReviewQuestionRecord = {
  */
 export type SurveyStatus = "draft" | "scheduled" | "published" | "closed";
 
-/** Publish settings for a survey (UC-SV-03, #80). */
+/**
+ * Publish settings for a survey (UC-SV-03, #80). Both dates are optional
+ * (#106): with no publish date the survey opens as soon as it is published,
+ * and with no due date it stays open.
+ */
 export type SurveySchedule = {
-  publish_at: string; // ISO timestamp
-  due_at: string; // ISO timestamp
-  allow_late_submissions: boolean;
-  allow_response_editing: boolean;
-  show_immediately: boolean;
+  publish_at?: string; // ISO timestamp
+  due_at?: string; // ISO timestamp
+  // Removed in #106 — kept here in case they come back:
+  // allow_late_submissions: boolean;
+  // allow_response_editing: boolean;
+  // show_immediately: boolean;
 };
 
 export type Survey = {
@@ -200,8 +205,7 @@ export type SurveyResponse = {
   /** field_id → the student's written answer. */
   answers: Record<string, string>;
   status: SurveyResponseStatus;
-  /** True when submitted after the due time (late submissions allowed). */
-  is_late?: boolean;
+  // Removed in #106 (no late submissions): is_late?: boolean;
   submitted_at?: string;
   updated_at: string;
 };

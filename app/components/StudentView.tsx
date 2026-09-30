@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UserContext } from "@/lib/auth";
 import StudentQuizView from "./StudentQuizView";
-import StudentSurveysView from "./StudentSurveysView";
 import StudentContentReviewView from "./StudentContentReviewView";
 import StudentProgressStepper from "./StudentProgressStepper";
 import {
@@ -196,9 +195,6 @@ export default function StudentView({ user }: Props) {
             as its own tab or a second copy of the material. */}
         <div className={activeStep === "assessment" ? "" : "hidden"}>
           <StudentQuizView user={user} onProgress={(p) => reportProgress("assessment", p)} />
-          <div className="mt-6">
-            <StudentSurveysView user={user} />
-          </div>
         </div>
         <div className={activeStep === "explore-and-ask" ? "flex flex-col gap-6" : "hidden"}>
           <StudentContentReviewView

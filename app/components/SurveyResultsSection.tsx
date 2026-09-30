@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { pickTaskSurvey } from "@/lib/survey-schedule";
 import {
   buildTeacherSurveySource,
   countAnswered,
@@ -52,9 +53,9 @@ export default function SurveyResultsSection({ classId, assignmentId }: Props) {
         json<{ responses?: SurveyResponse[] }>(`/api/survey-responses?${q}`),
       ]);
       const next: SurveyResultSource[] = [];
-      for (const survey of surveysData?.surveys ?? []) {
-        next.push(buildTeacherSurveySource(survey, responsesData?.responses ?? []));
-      }
+      // Each learning task has one survey (#111).
+      const survey = pickTaskSurvey(surveysData?.surveys ?? []);
+      if (survey) next.push(buildTeacherSurveySource(survey, responsesData?.responses ?? []));
       setSources(next);
       setSourceId((current) =>
         next.some((s) => s.id === current) ? current : (next.find((s) => s.entries.length > 0) ?? next[0])?.id ?? "",
@@ -214,7 +215,7 @@ export default function SurveyResultsSection({ classId, assignmentId }: Props) {
             <div className="order-1 text-center sm:order-2">
               <p className="text-lg font-semibold text-slate-900">{entry.name}</p>
               <p className="text-xs text-slate-500">
-                Submitted {formatWhen(entry.submittedAt)} · {entry.late ? "Late" : "On time"}
+                Submitted {formatWhen(entry.submittedAt)}
               </p>
               <p className="mt-0.5 text-xs font-semibold text-[#BA0C2F]">
                 Student {safeIndex + 1} of {entries.length}
@@ -224,16 +225,15 @@ export default function SurveyResultsSection({ classId, assignmentId }: Props) {
           </div>
 
           {/* Summary strip */}
-          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {[
               ["Submission status", "Submitted"],
               ["Submitted", formatWhen(entry.submittedAt)],
               ["Questions answered", `${counts.answered} / ${counts.total}`],
-              ["Submission type", entry.late ? "Late" : "On time"],
             ].map(([label, value]) => (
               <div key={label} className="rounded-2xl border border-slate-100 p-3">
                 <dt className="text-[11px] font-semibold uppercase text-slate-400">{label}</dt>
-                <dd className={`mt-1 text-sm font-semibold ${label === "Submission type" && entry.late ? "text-amber-700" : "text-slate-800"}`}>
+                <dd className="mt-1 text-sm font-semibold text-slate-800">
                   {value}
                 </dd>
               </div>

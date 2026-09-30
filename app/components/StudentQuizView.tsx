@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type { UserContext } from "@/lib/auth";
 import { findExistingStudentAnswer } from "@/lib/student-answer-lookup";
-import type { QuizItem } from "@/lib/types";
+import { findMissingAnswers, getSurveyAvailability } from "@/lib/survey-response";
+import { pickTaskSurvey } from "@/lib/survey-schedule";
+import type { QuizItem, Survey, SurveyResponse } from "@/lib/types";
 import type { StepProgress } from "@/lib/student-progress";
 
 type Props = {
@@ -25,6 +27,12 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The learning task's survey is part of the same task as the quiz (#107, #111):
+  // its questions follow the quiz questions and share one submit button.
+  const [survey, setSurvey] = useState<Survey | null>(null);
+  const [surveyAnswers, setSurveyAnswers] = useState<Record<string, string>>({});
+  const [surveySubmitted, setSurveySubmitted] = useState(false);
+  const [surveyNote, setSurveyNote] = useState<string | null>(null);
 
   const classId = user.classId;
   const assignmentId = user.assignmentId;
@@ -76,6 +84,34 @@ export default function StudentQuizView({ user, onProgress }: Props) {
         setAnswers(existingAnswer.answer.answers);
         setSubmitted(true);
       }
+
+      // Load the learning task's survey, if the teacher published one.
+      const query = `classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`;
+      const surveysRes = await fetch(`/api/surveys?${query}`);
+      if (surveysRes.ok) {
+        const data = (await surveysRes.json()) as { surveys?: Survey[] };
+        const taskSurvey = pickTaskSurvey(data.surveys ?? []);
+        if (taskSurvey) {
+          const responsesRes = await fetch(
+            `/api/survey-responses?${query}&surveyId=${encodeURIComponent(taskSurvey.survey_id)}&studentId=${encodeURIComponent(user.userId)}`,
+          );
+          const own = responsesRes.ok
+            ? (((await responsesRes.json()) as { responses?: SurveyResponse[] }).responses ?? [])[0]
+            : undefined;
+          const availability = getSurveyAvailability(taskSurvey);
+          if (own?.status === "submitted") {
+            setSurvey(taskSurvey);
+            setSurveyAnswers(own.answers);
+            setSurveySubmitted(true);
+          } else if (availability.open) {
+            setSurvey(taskSurvey);
+            setSurveyAnswers(own?.answers ?? {});
+          } else if (availability.reason !== "draft") {
+            // Scheduled or closed: mention it, but don't hold up the quiz.
+            setSurveyNote(availability.message);
+          }
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load quiz.");
     } finally {
@@ -90,20 +126,28 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   useEffect(() => {
     if (loading) return;
 
-    if (submitted) {
+    if (submitted && (!survey || surveySubmitted)) {
       onProgress?.({ kind: "completed" });
     } else if (quizStatus?.status === "published") {
       onProgress?.({ kind: "active" });
     } else {
       onProgress?.({ kind: "not-available" });
     }
-  }, [loading, submitted, quizStatus, onProgress]);
+  }, [loading, submitted, survey, surveySubmitted, quizStatus, onProgress]);
 
   const handleSelect = (itemId: string, option: string) => {
     if (submitted) return;
     setAnswers((prev) => ({ ...prev, [itemId]: option }));
   };
 
+  const handleSurveyAnswer = (fieldId: string, value: string) => {
+    if (surveySubmitted) return;
+    setSurveyAnswers((prev) => ({ ...prev, [fieldId]: value }));
+  };
+
+  // One submit for the quiz and the survey. The quiz goes first; if the survey
+  // part fails, the quiz answers stay saved and the student can retry just the
+  // survey with the same button.
   const handleSubmit = async () => {
     if (!classId || !assignmentId || !quizStatus) return;
 
@@ -111,28 +155,55 @@ export default function StudentQuizView({ user, onProgress }: Props) {
     setError(null);
 
     try {
-      const res = await fetch("/api/student-answers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          classId,
-          assignmentId,
-          studentId: user.userId,
-          studentName: user.name,
-          lessonNumber: quizStatus.lesson_number,
-          answers,
-        }),
-      });
+      if (!submitted) {
+        const res = await fetch("/api/student-answers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            classId,
+            assignmentId,
+            studentId: user.userId,
+            studentName: user.name,
+            lessonNumber: quizStatus.lesson_number,
+            answers,
+          }),
+        });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(
-          (data as Record<string, string>).error ?? "Failed to submit answers.",
-        );
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(
+            (data as Record<string, string>).error ?? "Failed to submit answers.",
+          );
+        }
+
+        setSubmitted(true);
+        setExistingAnswers(answers);
       }
 
-      setSubmitted(true);
-      setExistingAnswers(answers);
+      if (survey && !surveySubmitted) {
+        const res = await fetch("/api/survey-responses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            classId,
+            assignmentId,
+            surveyId: survey.survey_id,
+            studentId: user.userId,
+            studentName: user.name,
+            answers: surveyAnswers,
+            action: "submit",
+          }),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(
+            `Your quiz answers were saved, but the survey answers didn't go through${
+              data.error ? ` (${data.error})` : ""
+            }. Please try again.`,
+          );
+        }
+        setSurveySubmitted(true);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit.");
     } finally {
@@ -184,22 +255,27 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   // Check confidence items too
   const confidenceItems = questions.filter((q) => q.type === "confidence_check");
   const allConfidenceAnswered = confidenceItems.every((q) => answers[q.item_id]);
-  const canSubmit = allAnswered && allConfidenceAnswered && !submitted;
+  const surveyComplete = !survey || findMissingAnswers(survey, surveyAnswers).length === 0;
+  const allDone = submitted && (!survey || surveySubmitted);
+  const canSubmit =
+    (submitted || (allAnswered && allConfidenceAnswered)) && surveyComplete && !allDone;
+  const questionCount = multipleChoiceQuestions.length;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-          Lesson {quizStatus.lesson_number} Quiz
+          Lesson {quizStatus.lesson_number} {survey ? "Quiz and Survey" : "Quiz"}
         </p>
         <h2 className="mt-1 text-xl font-semibold text-slate-900">
           Answer the questions below
         </h2>
-        {submitted && (
+        {allDone && (
           <p className="mt-2 text-sm font-semibold text-emerald-600">
             Your answers have been submitted.
           </p>
         )}
+        {surveyNote && !allDone && <p className="mt-2 text-sm text-slate-500">{surveyNote}</p>}
       </div>
 
       {questions.map((item, index) => {
@@ -266,6 +342,48 @@ export default function StudentQuizView({ user, onProgress }: Props) {
         );
       })}
 
+      {survey &&
+        survey.questions.map((item, index) => (
+          <div key={item.item_id} className="rounded-2xl border border-slate-200 bg-white p-6">
+            <div className="flex items-start gap-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
+                {questionCount + index + 1}
+              </span>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-slate-800">{item.stem}</p>
+                {item.example && <p className="mt-1 text-xs text-slate-500">{item.example}</p>}
+                <div className="mt-3 grid gap-2">
+                  {item.response_fields.map((field) => {
+                    const value = surveyAnswers[field.field_id] ?? "";
+                    const cls =
+                      "w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 focus:border-[#BA0C2F] focus:outline-none disabled:bg-slate-50 disabled:text-slate-600";
+                    return (field.text_length ?? "short") === "long" ? (
+                      <textarea
+                        key={field.field_id}
+                        aria-label={field.label}
+                        rows={4}
+                        value={value}
+                        disabled={surveySubmitted}
+                        onChange={(e) => handleSurveyAnswer(field.field_id, e.target.value)}
+                        className={cls}
+                      />
+                    ) : (
+                      <input
+                        key={field.field_id}
+                        aria-label={field.label}
+                        value={value}
+                        disabled={surveySubmitted}
+                        onChange={(e) => handleSurveyAnswer(field.field_id, e.target.value)}
+                        className={cls}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+
       {error && (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
           {error}
@@ -281,7 +399,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
         >
           {submitting
             ? "Submitting..."
-            : submitted
+            : allDone
               ? "Submitted"
               : "Submit answers"}
         </button>

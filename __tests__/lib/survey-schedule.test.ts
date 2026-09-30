@@ -1,119 +1,79 @@
 import { describe, it, expect } from "vitest";
 import {
+  pickTaskSurvey,
   resolveSurveyStatus,
-  isLateSubmission,
   validateSchedule,
   validateSurveyIsPublishable,
 } from "@/lib/survey-schedule";
-import type { SurveyItem, SurveySchedule } from "@/lib/types";
+import type { SurveyItem } from "@/lib/types";
 
-const schedule = (
-  overrides: Partial<SurveySchedule> = {},
-): SurveySchedule => ({
-  publish_at: "2026-01-10T09:00:00.000Z",
-  due_at: "2026-01-17T09:00:00.000Z",
-  allow_late_submissions: false,
-  allow_response_editing: false,
-  show_immediately: true,
-  ...overrides,
-});
+const PUBLISH = "2026-01-10T09:00:00.000Z";
+const DUE = "2026-01-17T09:00:00.000Z";
+const at = (iso: string) => new Date(iso);
 
 const question = (overrides: Partial<SurveyItem> = {}): SurveyItem => ({
   item_id: "q1",
   question_number: 1,
   category: "familiarity",
   stem: "What did you notice?",
-  response_fields: [
-    { field_id: "f1", label: "Your answer", response_type: "text" },
-  ],
+  response_fields: [{ field_id: "f1", label: "Your answer", response_type: "text" }],
   ...overrides,
 });
 
 describe("resolveSurveyStatus", () => {
-  it("is draft when there is no schedule", () => {
-    expect(resolveSurveyStatus({ status: "draft", schedule: undefined })).toBe(
-      "draft",
-    );
+  it("is draft until published", () => {
+    expect(resolveSurveyStatus({ status: "draft", schedule: { publish_at: PUBLISH } })).toBe("draft");
   });
 
-  it("is scheduled before the publish time", () => {
-    const status = resolveSurveyStatus(
-      { status: "draft", schedule: schedule() },
-      new Date("2026-01-09T12:00:00.000Z"),
-    );
-    expect(status).toBe("scheduled");
+  it("is published right away when there are no dates", () => {
+    expect(resolveSurveyStatus({ status: "published", schedule: {} })).toBe("published");
+    expect(resolveSurveyStatus({ status: "published", schedule: undefined })).toBe("published");
   });
 
-  it("is published between publish and due", () => {
-    const status = resolveSurveyStatus(
-      { status: "scheduled", schedule: schedule() },
-      new Date("2026-01-12T12:00:00.000Z"),
-    );
-    expect(status).toBe("published");
-  });
-
-  it("is closed after the due time when late submissions are not allowed", () => {
-    const status = resolveSurveyStatus(
-      { status: "published", schedule: schedule() },
-      new Date("2026-01-18T12:00:00.000Z"),
-    );
-    expect(status).toBe("closed");
-  });
-
-  it("stays published after the due time when late submissions are allowed", () => {
-    const status = resolveSurveyStatus(
-      {
-        status: "published",
-        schedule: schedule({ allow_late_submissions: true }),
-      },
-      new Date("2026-01-18T12:00:00.000Z"),
-    );
-    expect(status).toBe("published");
-  });
-});
-
-describe("isLateSubmission", () => {
-  it("is false before the due time", () => {
+  it("is scheduled before the publish date", () => {
     expect(
-      isLateSubmission(schedule(), new Date("2026-01-12T00:00:00.000Z")),
-    ).toBe(false);
+      resolveSurveyStatus({ status: "published", schedule: { publish_at: PUBLISH } }, at("2026-01-09T00:00:00Z")),
+    ).toBe("scheduled");
   });
 
-  it("is true after the due time", () => {
+  it("is published between the publish and due dates", () => {
     expect(
-      isLateSubmission(schedule(), new Date("2026-01-20T00:00:00.000Z")),
-    ).toBe(true);
+      resolveSurveyStatus({ status: "published", schedule: { publish_at: PUBLISH, due_at: DUE } }, at("2026-01-12T00:00:00Z")),
+    ).toBe("published");
   });
 
-  it("is false with no schedule", () => {
-    expect(isLateSubmission(undefined)).toBe(false);
+  it("is closed after the due date", () => {
+    expect(
+      resolveSurveyStatus({ status: "published", schedule: { due_at: DUE } }, at("2026-01-18T00:00:00Z")),
+    ).toBe("closed");
+  });
+
+  it("stays open with no due date", () => {
+    expect(
+      resolveSurveyStatus({ status: "published", schedule: { publish_at: PUBLISH } }, at("2030-01-01T00:00:00Z")),
+    ).toBe("published");
   });
 });
 
 describe("validateSchedule", () => {
-  it("accepts a valid schedule", () => {
-    expect(validateSchedule(schedule())).toEqual([]);
+  it("accepts no dates at all", () => {
+    expect(validateSchedule({})).toEqual([]);
+    expect(validateSchedule(undefined)).toEqual([]);
   });
 
-  it("requires a publish date/time", () => {
-    expect(validateSchedule(schedule({ publish_at: "" }))).toContain(
-      "Publish date and time are required.",
-    );
+  it("accepts just one date", () => {
+    expect(validateSchedule({ publish_at: PUBLISH })).toEqual([]);
+    expect(validateSchedule({ due_at: DUE })).toEqual([]);
   });
 
-  it("requires a due date/time", () => {
-    expect(validateSchedule(schedule({ due_at: "" }))).toContain(
-      "Due date and time are required.",
-    );
-  });
-
-  it("rejects a due time that is not after the publish time", () => {
-    const errors = validateSchedule(
-      schedule({ due_at: "2026-01-10T09:00:00.000Z" }),
-    );
-    expect(errors).toContain(
+  it("rejects a due date that is not after the publish date", () => {
+    expect(validateSchedule({ publish_at: DUE, due_at: PUBLISH })).toContain(
       "Due date and time must be after the publish date and time.",
     );
+  });
+
+  it("rejects an invalid date", () => {
+    expect(validateSchedule({ due_at: "not a date" })).toContain("Due date and time are invalid.");
   });
 });
 
@@ -128,17 +88,23 @@ describe("validateSurveyIsPublishable", () => {
     );
   });
 
-  it("rejects a question with no response fields", () => {
-    const errors = validateSurveyIsPublishable({
-      questions: [question({ response_fields: [] })],
-    });
+  it("rejects a question with no prompt or no response field", () => {
+    const errors = validateSurveyIsPublishable({ questions: [question({ stem: " ", response_fields: [] })] });
+    expect(errors).toContain("Question 1 needs a prompt before publishing.");
     expect(errors).toContain("Question 1 needs at least one response field.");
   });
+});
 
-  it("rejects a question with an empty prompt", () => {
-    const errors = validateSurveyIsPublishable({
-      questions: [question({ stem: "  " })],
-    });
-    expect(errors).toContain("Question 1 needs a prompt before publishing.");
+describe("pickTaskSurvey", () => {
+  it("returns null when there is no survey", () => {
+    expect(pickTaskSurvey([])).toBeNull();
+  });
+
+  it("uses the most recently updated survey", () => {
+    const picked = pickTaskSurvey([
+      { id: "old", updated_at: "2026-01-01T00:00:00Z" },
+      { id: "new", updated_at: "2026-02-01T00:00:00Z" },
+    ]);
+    expect(picked?.id).toBe("new");
   });
 });

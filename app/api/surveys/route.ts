@@ -84,6 +84,20 @@ export async function POST(request: Request) {
     ? await getSurvey(classId, assignmentId, surveyId)
     : null;
 
+  // Each learning task has one survey (#111).
+  if (!existing) {
+    const current = await listSurveys(classId, assignmentId);
+    if (current.length > 0) {
+      return NextResponse.json(
+        {
+          error: "This learning task already has a survey. Edit that survey instead.",
+          surveyId: current[0].survey_id,
+        },
+        { status: 409 },
+      );
+    }
+  }
+
   const survey: Survey = {
     survey_id: existing?.survey_id ?? surveyId ?? crypto.randomUUID(),
     class_id: classId,

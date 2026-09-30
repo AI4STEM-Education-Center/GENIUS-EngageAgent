@@ -17,9 +17,9 @@ const questions: SurveyItem[] = [
 ];
 
 describe("buildTeacherSurveySource", () => {
-  const resp = (id: string, status: "draft" | "submitted", late = false): SurveyResponse => ({
+  const resp = (id: string, status: "draft" | "submitted"): SurveyResponse => ({
     survey_id: "s1", class_id: "c", assignment_id: "a", student_id: id,
-    student_name: id.toUpperCase(), answers: { f1: "x" }, status, is_late: late,
+    student_name: id.toUpperCase(), answers: { f1: "x" }, status,
     submitted_at: status === "submitted" ? "2026-09-14T00:00:00.000Z" : undefined,
     updated_at: "2026-09-14T00:00:00.000Z",
   });
@@ -27,12 +27,11 @@ describe("buildTeacherSurveySource", () => {
   it("shows submitted responses and counts drafts as in progress", () => {
     const src = buildTeacherSurveySource(
       { survey_id: "s1", title: "Check", daily_experience_topic: "Collisions", questions },
-      [resp("b", "submitted", true), resp("a", "submitted"), resp("c", "draft"),
+      [resp("b", "submitted"), resp("a", "submitted"), resp("c", "draft"),
        { ...resp("d", "submitted"), survey_id: "other" }],
     );
     expect(src.entries.map((e) => e.studentId)).toEqual(["a", "b"]);
-    expect(src.entries[1].late).toBe(true);
-    expect(src.inProgress).toBe(1);
+        expect(src.inProgress).toBe(1);
   });
 });
 

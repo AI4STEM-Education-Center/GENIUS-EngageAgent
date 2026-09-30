@@ -1908,7 +1908,6 @@ const surveyResponseFromItem = (
   student_name: item.student_name as string | undefined,
   answers: (item.answers as Record<string, string>) ?? {},
   status: (item.status as SurveyResponseRecord["status"]) ?? "draft",
-  is_late: item.is_late as boolean | undefined,
   submitted_at: item.submitted_at as string | undefined,
   updated_at: (item.updated_at as string) ?? "",
 });
@@ -1936,7 +1935,6 @@ export const upsertSurveyResponse = async (
             student_name: response.student_name,
             answers: response.answers,
             status: response.status,
-            is_late: response.is_late,
             submitted_at: response.submitted_at,
             updated_at: response.updated_at,
           },

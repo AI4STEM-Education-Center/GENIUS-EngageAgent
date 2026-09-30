@@ -71,17 +71,10 @@ export async function POST(request: Request) {
     studentId,
   );
   if (existing?.status === "submitted") {
-    const canEdit = survey.schedule?.allow_response_editing ?? false;
-    if (!canEdit || action === "save") {
-      return NextResponse.json(
-        {
-          error: canEdit
-            ? "This survey is already submitted. Submit again to update your answers."
-            : "You have already submitted this survey.",
-        },
-        { status: 409 },
-      );
-    }
+    return NextResponse.json(
+      { error: "You have already submitted this survey." },
+      { status: 409 },
+    );
   }
 
   const clean = sanitizeAnswers(survey, answers);
@@ -108,7 +101,6 @@ export async function POST(request: Request) {
       typeof studentName === "string" ? studentName : existing?.student_name,
     answers: clean,
     status: action === "submit" ? "submitted" : "draft",
-    is_late: action === "submit" ? availability.late : existing?.is_late,
     submitted_at:
       action === "submit" ? now.toISOString() : existing?.submitted_at,
     updated_at: now.toISOString(),

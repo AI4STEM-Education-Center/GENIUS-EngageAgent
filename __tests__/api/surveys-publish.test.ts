@@ -74,7 +74,7 @@ beforeEach(() => {
 });
 
 describe("POST /api/surveys/publish", () => {
-  it("schedules a survey whose publish time is in the future", async () => {
+  it("schedules a survey whose publish date is in the future", async () => {
     const res = await publish(validPayload());
     expect(res.status).toBe(200);
     const data = await res.json();
@@ -83,95 +83,59 @@ describe("POST /api/surveys/publish", () => {
     expect(data.survey.published_at).toBeTruthy();
   });
 
-  it("publishes immediately when the publish time has passed", async () => {
-    const res = await publish(
-      validPayload({
-        publishAt: "2020-01-10T09:00:00.000Z",
-        dueAt: "2099-01-17T09:00:00.000Z",
-      }),
-    );
-    const data = await res.json();
-    expect(data.survey.status).toBe("published");
-  });
-
-  it("closes a survey whose due time has passed without late submissions", async () => {
-    const res = await publish(
-      validPayload({
-        publishAt: "2020-01-10T09:00:00.000Z",
-        dueAt: "2020-01-17T09:00:00.000Z",
-      }),
-    );
-    const data = await res.json();
-    expect(data.survey.status).toBe("closed");
-  });
-
-  it("keeps a past-due survey open when late submissions are allowed", async () => {
-    const res = await publish(
-      validPayload({
-        publishAt: "2020-01-10T09:00:00.000Z",
-        dueAt: "2020-01-17T09:00:00.000Z",
-        allowLateSubmissions: true,
-      }),
-    );
-    const data = await res.json();
-    expect(data.survey.status).toBe("published");
-    expect(data.survey.schedule.allow_late_submissions).toBe(true);
-  });
-
-  it("rejects a due time that is not after the publish time", async () => {
-    const res = await publish(
-      validPayload({ dueAt: "2099-01-10T09:00:00.000Z" }),
-    );
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.error).toMatch(/after the publish date/i);
-  });
-
-  it("requires publish and due times", async () => {
+  it("publishes right away with no dates", async () => {
     const res = await publish(validPayload({ publishAt: "", dueAt: "" }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.survey.status).toBe("published");
+    expect(data.survey.schedule).toEqual({ publish_at: undefined, due_at: undefined });
+  });
+
+  it("accepts only a due date", async () => {
+    const res = await publish(validPayload({ publishAt: undefined }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).survey.status).toBe("published");
+  });
+
+  it("closes a survey whose due date has passed", async () => {
+    const res = await publish(
+      validPayload({ publishAt: "2020-01-10T09:00:00.000Z", dueAt: "2020-01-17T09:00:00.000Z" }),
+    );
+    expect((await res.json()).survey.status).toBe("closed");
+  });
+
+  it("rejects a due date that is not after the publish date", async () => {
+    const res = await publish(validPayload({ dueAt: "2099-01-10T09:00:00.000Z" }));
     expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/after the publish date/i);
+  });
+
+  it("does not store the removed options (#106)", async () => {
+    const res = await publish(validPayload({ allowLateSubmissions: true, allowResponseEditing: true }));
+    const { schedule } = (await res.json()).survey;
+    expect(Object.keys(schedule).sort()).toEqual(["due_at", "publish_at"]);
   });
 
   it("requires classId, assignmentId and surveyId", async () => {
-    const res = await publish({ surveyId: "s1" });
-    expect(res.status).toBe(400);
+    expect((await publish({ surveyId: "s1" })).status).toBe(400);
   });
 
   it("returns 404 for a survey that does not exist", async () => {
-    const res = await publish(validPayload({ surveyId: "nope" }));
-    expect(res.status).toBe(404);
+    expect((await publish(validPayload({ surveyId: "nope" }))).status).toBe(404);
   });
 
   it("refuses to publish a survey with no questions", async () => {
     __seed([{ ...baseSurvey(), questions: [] }]);
     const res = await publish(validPayload());
     expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.error).toMatch(/at least one question/i);
+    expect((await res.json()).error).toMatch(/at least one question/i);
   });
 
-  it("refuses to publish a question that has no response fields", async () => {
-    const survey = baseSurvey();
-    survey.questions[0].response_fields = [];
-    __seed([survey]);
-    const res = await publish(validPayload());
-    expect(res.status).toBe(400);
-  });
-
-  it("supports editing publish settings and preserves published_at", async () => {
+  it("keeps the original publish time when the dates are changed", async () => {
     const first = await (await publish(validPayload())).json();
-    const originalPublishedAt = first.survey.published_at;
-
-    const res = await publish(
-      validPayload({
-        dueAt: "2099-02-01T09:00:00.000Z",
-        allowLateSubmissions: true,
-      }),
-    );
-    expect(res.status).toBe(200);
+    const res = await publish(validPayload({ dueAt: "2099-02-01T09:00:00.000Z" }));
     const data = await res.json();
     expect(data.survey.schedule.due_at).toBe("2099-02-01T09:00:00.000Z");
-    expect(data.survey.schedule.allow_late_submissions).toBe(true);
-    expect(data.survey.published_at).toBe(originalPublishedAt);
+    expect(data.survey.published_at).toBe(first.survey.published_at);
   });
 });

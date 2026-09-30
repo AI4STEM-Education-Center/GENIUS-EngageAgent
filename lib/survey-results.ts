@@ -11,7 +11,6 @@ export type SurveyResultEntry = {
   name: string;
   answers: Record<string, string>;
   submittedAt?: string;
-  late: boolean;
 };
 
 export type SurveyResultSource = {
@@ -39,7 +38,6 @@ export const buildTeacherSurveySource = (
       name: r.student_name || r.student_id,
       answers: r.answers,
       submittedAt: r.submitted_at,
-      late: Boolean(r.is_late),
     }))
     .sort(byName);
 

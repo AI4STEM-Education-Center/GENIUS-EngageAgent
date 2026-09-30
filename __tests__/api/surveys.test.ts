@@ -131,6 +131,14 @@ describe("POST /api/surveys", () => {
     expect(data.survey.questions[0].response_fields[0].text_length).toBe("long");
   });
 
+  it("allows only one survey per learning task (#111)", async () => {
+    const first = await (await post(validPayload({ title: "First" }))).json();
+    const res = await post(validPayload({ title: "Second" }));
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.surveyId).toBe(first.survey.survey_id);
+  });
+
   it("updates an existing survey and preserves its id and created_at", async () => {
     const created = await (await post(validPayload())).json();
     const { survey_id, created_at } = created.survey;
@@ -154,7 +162,6 @@ describe("POST /api/surveys", () => {
 describe("GET /api/surveys", () => {
   it("lists surveys for a class assignment", async () => {
     await post(validPayload({ title: "One" }));
-    await post(validPayload({ title: "Two" }));
     await post(validPayload({ assignmentId: "a2", title: "Other assignment" }));
 
     const res = await GET(
@@ -162,7 +169,8 @@ describe("GET /api/surveys", () => {
     );
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.surveys).toHaveLength(2);
+    expect(data.surveys).toHaveLength(1);
+    expect(data.surveys[0].title).toBe("One");
   });
 
   it("gets a single survey by id", async () => {

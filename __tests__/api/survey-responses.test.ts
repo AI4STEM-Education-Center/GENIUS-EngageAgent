@@ -11,7 +11,7 @@ const makeSurvey = (schedule: Record<string, unknown> | undefined) => ({
   assignment_id: "a1",
   title: "Daily experience",
   daily_experience_topic: "Collisions",
-  status: "published",
+  status: schedule === undefined ? "draft" : "published",
   questions: [
     {
       item_id: "q1", question_number: 1, category: "familiarity", stem: "Q one",
@@ -29,7 +29,6 @@ const makeSurvey = (schedule: Record<string, unknown> | undefined) => ({
 
 const openSchedule = (over: Record<string, unknown> = {}) => ({
   publish_at: PAST, due_at: FUTURE,
-  allow_late_submissions: false, allow_response_editing: false, show_immediately: true,
   ...over,
 });
 
@@ -83,22 +82,13 @@ describe("POST /api/survey-responses", () => {
   it("submits when every question is answered", async () => {
     const d = await (await post({ ...base, answers: full, action: "submit" })).json();
     expect(d.response.status).toBe("submitted");
-    expect(d.response.is_late).toBe(false);
     expect(d.response.submitted_at).toBeTruthy();
   });
 
-  it("refuses changes after submitting when editing is not allowed", async () => {
+  it("refuses to change answers after submitting", async () => {
     await post({ ...base, answers: full, action: "submit" });
     const res = await post({ ...base, answers: full, action: "submit" });
     expect(res.status).toBe(409);
-  });
-
-  it("allows resubmitting when editing after submit is allowed", async () => {
-    __set(makeSurvey(openSchedule({ allow_response_editing: true })));
-    await post({ ...base, answers: full, action: "submit" });
-    const res = await post({ ...base, answers: { ...full, f1: "changed" }, action: "submit" });
-    expect(res.status).toBe(200);
-    expect((await res.json()).response.answers.f1).toBe("changed");
   });
 
   it("refuses a survey that is not open yet", async () => {
@@ -108,18 +98,17 @@ describe("POST /api/survey-responses", () => {
     expect((await res.json()).reason).toBe("scheduled");
   });
 
-  it("refuses a closed survey when late submissions are not allowed", async () => {
+  it("refuses a survey whose due date has passed", async () => {
     __set(makeSurvey(openSchedule({ due_at: PAST_DUE })));
     const res = await post({ ...base, answers: full, action: "submit" });
     expect(res.status).toBe(403);
     expect((await res.json()).reason).toBe("closed");
   });
 
-  it("accepts a late submission and marks it late", async () => {
-    __set(makeSurvey(openSchedule({ due_at: PAST_DUE, allow_late_submissions: true })));
+  it("accepts a published survey with no dates", async () => {
+    __set(makeSurvey({}));
     const d = await (await post({ ...base, answers: full, action: "submit" })).json();
     expect(d.response.status).toBe("submitted");
-    expect(d.response.is_late).toBe(true);
   });
 
   it("refuses an unpublished draft survey", async () => {
