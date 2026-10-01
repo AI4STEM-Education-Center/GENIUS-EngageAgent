@@ -1,6 +1,6 @@
 import { getEngagementStrategyLabel } from "./engagement-strategies";
 import { getLesson } from "./quiz-data";
-import type { Lesson, QuizItem } from "./types";
+import type { Lesson, Plan, QuizItem } from "./types";
 
 /**
  * Class-level strategy recommendation rule (decision rule v1).
@@ -19,7 +19,8 @@ import type { Lesson, QuizItem } from "./types";
  * that is not exactly one of the item's option letters, count as incorrect and
  * are not linked to any misconception.
  *
- * This module only computes; nothing in the app calls it yet.
+ * This module only computes. Step 2 of the teacher page calls it to build the
+ * class summary and the master plan.
  */
 
 export type RecommendedStrategy =
@@ -335,6 +336,169 @@ export function buildLearnerSummary(
     }
   }
   return lines.join("\n");
+}
+
+function joinWithAnd(parts: string[]): string {
+  if (parts.length <= 1) {
+    return parts.join("");
+  }
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/** A misconception statement in quotes, without its final period. */
+function quoteStatement(statement: string): string {
+  return `"${statement.replace(/\.$/, "")}"`;
+}
+
+/** The class summary shown to the teacher on the Step 2 page. */
+export function buildTeacherSummary(recommendation: StrategyRecommendation): string {
+  const { counts } = recommendation;
+  const questions = counts.responses / counts.students;
+  const lines = [
+    counts.students === 1
+      ? `1 student answered the Lesson ${counts.lessonNumber} quiz (${questions} questions).`
+      : `${counts.students} students answered the Lesson ${counts.lessonNumber} quiz (${questions} questions each, ${counts.responses} answers in total).`,
+    `Correct answers: ${counts.correct} of ${counts.responses} (${formatPercent(counts.correct, counts.responses)}). Unanswered questions count as incorrect.`,
+    "",
+  ];
+  if (counts.incorrect === 0) {
+    lines.push("There were no incorrect answers.");
+    return lines.join("\n");
+  }
+
+  lines.push(
+    counts.incorrect === 1
+      ? "What the 1 incorrect answer points to:"
+      : `What the ${counts.incorrect} incorrect answers point to:`,
+  );
+  // Same order as buildErrorLines: largest count first, ties in list order.
+  const withAnswers = counts.misconceptions
+    .map((misconception, index) => ({ misconception, index }))
+    .filter(({ misconception }) => misconception.count > 0)
+    .sort((a, b) => b.misconception.count - a.misconception.count || a.index - b.index);
+  for (const { misconception } of withAnswers) {
+    lines.push(
+      `  • ${quoteStatement(misconception.statement)}: ${misconception.count} of ${counts.incorrect} (${formatPercent(misconception.count, counts.incorrect)})`,
+    );
+  }
+  if (counts.unlinked > 0) {
+    lines.push(
+      `  • Other incorrect answers, not tied to a specific misconception: ${counts.unlinked} of ${counts.incorrect} (${formatPercent(counts.unlinked, counts.incorrect)})`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Why each lesson's analogy label came out the way it did, in words for the
+ * teacher (see LESSON_ANALOGY_CORE_IDEAS).
+ */
+export const LESSON_ANALOGY_REASONS: Record<number, string> = {
+  1: "both of this lesson's core ideas are things students can see in everyday life, such as what gets damaged when two objects collide",
+  2: "3 of this lesson's 4 core ideas involve things students can't easily see, such as the forces between colliding objects and the energy they transfer",
+  3: "this lesson's core idea involves something students can't easily see: how even hard objects bend slightly when they collide",
+  4: "3 of this lesson's 4 core ideas are things students can see in everyday life, such as how materials bend, stretch, or break when pushed",
+  5: "3 of this lesson's 4 core ideas involve things students can't easily see, such as the equally strong forces two colliding objects exert on each other",
+  6: "3 of the 5 core ideas this lesson applies involve things students can't easily see, such as the equal forces and energy transfer in a collision",
+  7: "2 of this lesson's 3 core ideas involve things students can't easily see, such as how kinetic energy depends on an object's mass and speed",
+  8: "2 of this lesson's 4 core ideas are things students can see in everyday life, such as how a bigger push makes an object speed up more",
+};
+
+/** Why the rule chose this strategy, addressed to the teacher. */
+export function buildRecommendationReason(recommendation: StrategyRecommendation): string {
+  const { counts } = recommendation;
+  const accuracy = formatPercent(counts.correct, counts.responses);
+
+  switch (recommendation.decidedAtStep) {
+    case 1:
+      return `We recommend engaged critiquing because your class already has a good grasp of the main idea: ${accuracy} of the answers were correct (${counts.correct} of ${counts.responses}). Comparing competing claims about the same situation, and using evidence to decide which one holds up, will help students deepen it and can bring out any misconceptions that remain.`;
+    case 2: {
+      const candidates = recommendation.targetCandidates;
+      const [first] = candidates;
+      const share = `${first.count} of the ${counts.incorrect} incorrect answers (${formatPercent(first.count, counts.incorrect)})`;
+      if (candidates.length === 1) {
+        return `We recommend cognitive conflict because one misconception stands out: ${share} ${first.count === 1 ? "reflects" : "reflect"} ${quoteStatement(first.statement)}. Students will first make a prediction using this idea, then see evidence it cannot explain, which helps them reconsider it.`;
+      }
+      const statements = joinWithAnd(candidates.map((misconception) => quoteStatement(misconception.statement)));
+      return `We recommend cognitive conflict because ${candidates.length} misconceptions are equally common, each behind ${share}: ${statements}. Please choose the one you would like your students to work on first; they will make a prediction using that idea, then see evidence it cannot explain.`;
+    }
+    case 3: {
+      const maxCount = counts.misconceptions.reduce(
+        (max, misconception) => Math.max(max, misconception.count),
+        0,
+      );
+      const errors = maxCount > 0
+        ? `no single misconception stands out (the most common one is behind only ${maxCount} of the ${counts.incorrect} incorrect answers)`
+        : "the incorrect answers don't point to a specific misconception";
+      const lessonReason = LESSON_ANALOGY_REASONS[recommendation.lessonNumber];
+      return recommendation.strategy === "analogy"
+        ? `We recommend an analogy because your students are still building this idea (${accuracy} of answers correct), ${errors}, and ${lessonReason}. Comparing the idea to something familiar gives students a picture to reason with.`
+        : `We recommend experience bridging because your students are still building this idea (${accuracy} of answers correct), ${errors}, and ${lessonReason}. Starting from experiences students already have helps them notice the science in them.`;
+    }
+  }
+}
+
+const CLASS_PLAN_DETAILS: Record<RecommendedStrategy, { tactics: string[]; checks: string[] }> = {
+  "engaged critiquing": {
+    tactics: [
+      "Present a claim or sample answer for students to evaluate.",
+      "Ask students to point to the evidence and reasoning that support or weaken it.",
+      "Have students revise the claim and explain what changed.",
+    ],
+    checks: ["Check whether students can justify their critique with evidence from the lesson."],
+  },
+  "cognitive conflict": {
+    tactics: [
+      "Ask students to predict an outcome using their current idea.",
+      "Show evidence that contradicts the target misconception.",
+      "Have students explain the result and revise their first prediction.",
+    ],
+    checks: ["Check whether students can explain why the new idea fits the evidence better than their first prediction."],
+  },
+  analogy: {
+    tactics: [
+      "Introduce a familiar situation that shares the structure of the core idea.",
+      "Map each part of the analogy to the science idea explicitly.",
+      "Discuss where the analogy breaks down.",
+    ],
+    checks: ["Check whether students can map the analogy back to the lesson's core idea."],
+  },
+  "experience bridging": {
+    tactics: [
+      "Start from an everyday experience students are likely to share.",
+      "Connect that experience to the lesson's core idea step by step.",
+      "Ask students to describe a similar situation from their own lives.",
+    ],
+    checks: ["Check whether students can use the core idea to explain their own example."],
+  },
+};
+
+/** The master plan for Step 2, built from the rule's result. */
+export function buildClassPlan(recommendation: StrategyRecommendation): Plan {
+  const { strategy, lessonNumber } = recommendation;
+  const label = getEngagementStrategyLabel(strategy);
+  const reason = buildRecommendationReason(recommendation);
+  const relevance: Record<string, number> = {
+    "cognitive conflict": 0,
+    analogy: 0,
+    "experience bridging": 0,
+    "engaged critiquing": 0,
+  };
+  relevance[strategy] = 100;
+
+  return {
+    name: `Lesson ${lessonNumber} Cohort Plan`,
+    strategy,
+    relevance,
+    overallRecommendation: `Use ${label.toLowerCase()} as the lead strategy for this cohort.`,
+    recommendationReason: reason,
+    summary: `${label} is the best starting point for the current cohort.`,
+    tldr: `Lead with ${label.toLowerCase()} for this cohort.`,
+    rationale: `${reason} Launch whole-class content with ${label} first, then differentiate as needed.`,
+    tactics: CLASS_PLAN_DETAILS[strategy].tactics,
+    cadence: "Whole-class first, then differentiate",
+    checks: CLASS_PLAN_DETAILS[strategy].checks,
+  };
 }
 
 function formatQuizItems(lesson: Lesson): string {

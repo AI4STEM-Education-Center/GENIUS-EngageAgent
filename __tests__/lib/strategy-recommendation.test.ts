@@ -3,12 +3,16 @@ import { describe, expect, it } from "vitest";
 import { engagementStrategies } from "@/lib/engagement-strategies";
 import { getAllLessons, getLesson } from "@/lib/quiz-data";
 import {
+  buildClassPlan,
   buildLearnerSummary,
   buildPromptVariables,
+  buildRecommendationReason,
+  buildTeacherSummary,
   countClassResponses,
   formatPercent,
   getLessonAnalogyLabel,
   getMultipleChoiceItems,
+  LESSON_ANALOGY_REASONS,
   recommendStrategy,
   resolveOptionMisconception,
   type RecommendedStrategy,
@@ -319,5 +323,131 @@ describe("buildPromptVariables", () => {
     expect(variables.QUIZ_ITEMS).toContain("Q1. ");
     expect(variables.QUIZ_ITEMS).toContain("(correct)");
     expect(variables.QUIZ_ITEMS).toContain(`[misconception 1-a: ${requireLesson(2).misconceptions["1-a"]}]`);
+  });
+});
+
+describe("buildRecommendationReason", () => {
+  it("case 1: explains engaged critiquing with the class accuracy", () => {
+    expect(buildRecommendationReason(recommendStrategy(2, case1))).toBe(
+      "We recommend engaged critiquing because your class already has a good grasp of the main idea: 75.0% of the answers were correct (60 of 80). Comparing competing claims about the same situation, and using evidence to decide which one holds up, will help students deepen it and can bring out any misconceptions that remain.",
+    );
+  });
+
+  it("case 2: explains cognitive conflict with the target's share of incorrect answers", () => {
+    expect(buildRecommendationReason(recommendStrategy(2, case2))).toBe(
+      'We recommend cognitive conflict because one misconception stands out: 8 of the 24 incorrect answers (33.3%) reflect "Momentum and energy are the same (or both are always conserved)". Students will first make a prediction using this idea, then see evidence it cannot explain, which helps them reconsider it.',
+    );
+  });
+
+  it("case 4: lists the tied misconceptions and asks the teacher to choose", () => {
+    expect(buildRecommendationReason(recommendStrategy(1, case4))).toBe(
+      'We recommend cognitive conflict because 2 misconceptions are equally common, each behind 12 of the 32 incorrect answers (37.5%): "If nothing looks damaged after the collision, the force must have been weak" and "Heavier objects always cause more damage. (not thinking about other factors)". Please choose the one you would like your students to work on first; they will make a prediction using that idea, then see evidence it cannot explain.',
+    );
+  });
+
+  it("case 3: explains experience bridging with the largest misconception and the lesson", () => {
+    expect(buildRecommendationReason(recommendStrategy(4, case3))).toBe(
+      "We recommend experience bridging because your students are still building this idea (62.5% of answers correct), no single misconception stands out (the most common one is behind only 7 of the 30 incorrect answers), and 3 of this lesson's 4 core ideas are things students can see in everyday life, such as how materials bend, stretch, or break when pushed. Starting from experiences students already have helps them notice the science in them.",
+    );
+  });
+
+  it("case 5: explains an analogy with the largest misconception and the lesson", () => {
+    expect(buildRecommendationReason(recommendStrategy(7, case5))).toBe(
+      "We recommend an analogy because your students are still building this idea (50.0% of answers correct), no single misconception stands out (the most common one is behind only 10 of the 40 incorrect answers), and 2 of this lesson's 3 core ideas involve things students can't easily see, such as how kinetic energy depends on an object's mass and speed. Comparing the idea to something familiar gives students a picture to reason with.",
+    );
+  });
+
+  it("says the incorrect answers point to no misconception when none is linked", () => {
+    const blanks = makeSubmissions(4, { 1: ["D"], 2: [""], 3: [""], 4: [""] });
+    expect(buildRecommendationReason(recommendStrategy(4, blanks))).toBe(
+      "We recommend experience bridging because your students are still building this idea (25.0% of answers correct), the incorrect answers don't point to a specific misconception, and 3 of this lesson's 4 core ideas are things students can see in everyday life, such as how materials bend, stretch, or break when pushed. Starting from experiences students already have helps them notice the science in them.",
+    );
+  });
+
+  it("describes each lesson in a way that matches its analogy label", () => {
+    for (let lessonNumber = 1; lessonNumber <= 8; lessonNumber += 1) {
+      const reason = LESSON_ANALOGY_REASONS[lessonNumber];
+      if (getLessonAnalogyLabel(lessonNumber) === "recommend") {
+        expect(reason).toContain("can't easily see");
+      } else {
+        expect(reason).toContain("can see in everyday life");
+      }
+    }
+  });
+});
+
+describe("buildTeacherSummary", () => {
+  it("case 2: lists misconceptions without IDs, largest first, then the other incorrect answers", () => {
+    expect(buildTeacherSummary(recommendStrategy(2, case2))).toBe(
+      [
+        "20 students answered the Lesson 2 quiz (4 questions each, 80 answers in total).",
+        "Correct answers: 56 of 80 (70.0%). Unanswered questions count as incorrect.",
+        "",
+        "What the 24 incorrect answers point to:",
+        '  • "Momentum and energy are the same (or both are always conserved)": 8 of 24 (33.3%)',
+        '  • "If motion changes, there is a change in force": 5 of 24 (20.8%)',
+        '  • "A force is needed to keep something moving at constant speed": 4 of 24 (16.7%)',
+        "  • \"Energy is lost/disappears in an inelastic ('sticky') collision\": 4 of 24 (16.7%)",
+        '  • "Balanced forces mean the object must be at rest": 1 of 24 (4.2%)',
+        "  • Other incorrect answers, not tied to a specific misconception: 2 of 24 (8.3%)",
+      ].join("\n"),
+    );
+  });
+
+  it("says there were no incorrect answers when every answer is correct", () => {
+    const allCorrect = makeSubmissions(3, { 1: repeat("D", 3), 2: repeat("A", 3), 3: repeat("D", 3), 4: repeat("C", 3) });
+    expect(buildTeacherSummary(recommendStrategy(3, allCorrect))).toBe(
+      [
+        "3 students answered the Lesson 3 quiz (4 questions each, 12 answers in total).",
+        "Correct answers: 12 of 12 (100.0%). Unanswered questions count as incorrect.",
+        "",
+        "There were no incorrect answers.",
+      ].join("\n"),
+    );
+  });
+
+  it("uses the singular for one student and one incorrect answer", () => {
+    const oneStudent = makeSubmissions(4, { 1: ["D"], 2: ["C"], 3: ["C"], 4: [""] });
+    expect(buildTeacherSummary(recommendStrategy(4, oneStudent))).toBe(
+      [
+        "1 student answered the Lesson 4 quiz (4 questions).",
+        "Correct answers: 3 of 4 (75.0%). Unanswered questions count as incorrect.",
+        "",
+        "What the 1 incorrect answer points to:",
+        "  • Other incorrect answers, not tied to a specific misconception: 1 of 1 (100.0%)",
+      ].join("\n"),
+    );
+  });
+});
+
+describe("buildClassPlan", () => {
+  const cases: Array<[string, number, Record<string, string>[], RecommendedStrategy]> = [
+    ["case 1", 2, case1, "engaged critiquing"],
+    ["case 2", 2, case2, "cognitive conflict"],
+    ["case 3", 4, case3, "experience bridging"],
+    ["case 4", 1, case4, "cognitive conflict"],
+    ["case 5", 7, case5, "analogy"],
+  ];
+
+  it.each(cases)("%s: uses the rule's strategy and reason", (_name, lessonNumber, submissions, strategy) => {
+    const recommendation = recommendStrategy(lessonNumber, submissions);
+    const plan = buildClassPlan(recommendation);
+    expect(plan.strategy).toBe(strategy);
+    expect(plan.name).toBe(`Lesson ${lessonNumber} Cohort Plan`);
+    expect(plan.recommendationReason).toBe(buildRecommendationReason(recommendation));
+    expect(plan.relevance).toEqual(
+      Object.fromEntries(
+        engagementStrategies.map((known) => [known.id, known.id === strategy ? 100 : 0]),
+      ),
+    );
+  });
+
+  it.each(cases)("%s: fills every plan field", (_name, lessonNumber, submissions) => {
+    const plan = buildClassPlan(recommendStrategy(lessonNumber, submissions));
+    for (const field of ["name", "overallRecommendation", "recommendationReason", "summary", "tldr", "rationale", "cadence"] as const) {
+      expect(plan[field].length).toBeGreaterThan(0);
+    }
+    expect(plan.tactics.length).toBeGreaterThan(0);
+    expect(plan.checks.length).toBeGreaterThan(0);
   });
 });
