@@ -19,6 +19,8 @@ type Props = {
   user: UserContext;
 };
 
+const STATUS_POLL_MS = 15000;
+
 const INITIAL_PROGRESS: Record<StudentStepId, StepProgress> = {
   assessment: { kind: "not-available" },
   "content-review": { kind: "not-available" },
@@ -88,11 +90,38 @@ export default function StudentView({ user }: Props) {
   const assignmentId = user.assignmentId;
   const studentId = user.userId;
 
-  // Bumped whenever a child reports a step just completed, to re-poll the
-  // authoritative server status. The fetch lives inside the effect (rather
-  // than a shared callback also invoked from an event handler) so this stays
-  // a plain "synchronize with an external system" effect.
+  // Bumped to re-poll the authoritative server status: whenever a child
+  // reports a progress change, on a timer, and when the tab regains focus --
+  // so a step unlocks without a reload once the teacher publishes (#109).
+  // The fetch lives inside the effect (rather than a shared callback also
+  // invoked from an event handler) so this stays a plain "synchronize with
+  // an external system" effect.
   const [statusRefreshToken, setStatusRefreshToken] = useState(0);
+
+  useEffect(() => {
+    if (!classId || !assignmentId || !studentId) return;
+
+    const refreshStatus = () => setStatusRefreshToken((token) => token + 1);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshStatus();
+    };
+
+    const intervalId = window.setInterval(refreshStatus, STATUS_POLL_MS);
+    window.addEventListener("focus", refreshStatus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshStatus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [classId, assignmentId, studentId]);
+
+  // The previous poll's statuses (null before the first one), so auto-advance
+  // can tell a step that *just* unlocked from one that was already open.
+  const prevServerStatusRef = useRef<Record<StudentStepId, ActivityStatus> | null>(null);
+  // Status is polled, so only report completion to GENIUS once per page load.
+  const notifiedCompletionRef = useRef(false);
 
   useEffect(() => {
     if (!classId || !assignmentId || !studentId) return;
@@ -111,22 +140,30 @@ export default function StudentView({ user }: Props) {
         for (const activity of data.activities) {
           next[activity.id] = activity.status;
         }
+        const prev = prevServerStatusRef.current;
+        prevServerStatusRef.current = next;
         setServerStatus(next);
 
         // The last real job is Material Rating -- report task completion to
         // GENIUS once it's done, not at quiz submission (#98).
-        if (next["content-rating"] === "completed") {
+        if (next["content-rating"] === "completed" && !notifiedCompletionRef.current) {
+          notifiedCompletionRef.current = true;
           notifyTaskCompleted(classId, assignmentId, user.geniusId);
         }
 
-        // Auto-advance to the next step only right as it newly unlocks, so
-        // revisiting an already-completed step doesn't bounce the student away.
+        // Auto-advance to the next step only on the first load or right as it
+        // newly unlocks (or the current step newly completes), so revisiting
+        // an already-completed step doesn't bounce the student away on the
+        // next poll.
         const currentIndex = STUDENT_VIEW_STEPS.findIndex((step) => step.id === activeStepRef.current);
-        const currentStepDone = STUDENT_VIEW_STEPS[currentIndex].activityIds.every((id) => next[id] === "completed");
-        if (currentStepDone && currentIndex < STUDENT_VIEW_STEPS.length - 1) {
+        const isDone = (status: Record<StudentStepId, ActivityStatus>) =>
+          STUDENT_VIEW_STEPS[currentIndex].activityIds.every((id) => status[id] === "completed");
+        if (isDone(next) && currentIndex < STUDENT_VIEW_STEPS.length - 1) {
           const nextStep = STUDENT_VIEW_STEPS[currentIndex + 1];
-          const nextStepLocked = next[nextStep.activityIds[0]] === "locked";
-          if (!nextStepLocked) {
+          const isOpen = (status: Record<StudentStepId, ActivityStatus>) =>
+            status[nextStep.activityIds[0]] !== "locked";
+          const justBecameReady = !prev || !isDone(prev) || !isOpen(prev);
+          if (isOpen(next) && justBecameReady) {
             setActiveStep(nextStep.id);
           }
         }
@@ -155,9 +192,10 @@ export default function StudentView({ user }: Props) {
     if (lastReportedKindRef.current[step] === next.kind) return;
     lastReportedKindRef.current[step] = next.kind;
     setProgress((prev) => ({ ...prev, [step]: next }));
-    if (next.kind === "completed") {
-      setStatusRefreshToken((token) => token + 1);
-    }
+    // Any transition (e.g. content-review seeing newly published material, or
+    // a step completing) is a hint the server status changed -- re-poll now
+    // rather than waiting for the next tick.
+    setStatusRefreshToken((token) => token + 1);
   }, []);
 
   const displayStates = buildDisplayStates(serverStatus, progress);
