@@ -21,7 +21,7 @@
       "type": "multiple_choice",
       "question_number": 1,
       "stem": "A cart bumps a box at rest on ice. After the bump, the box moves forward at nearly constant speed. Which statement best describes the forces on the box while it is sliding?",
-      "image": "images/L2_Q1.png",
+      "image": "/quiz-images/L2_Q1.webp",
       "options": {
         "A": "Gravity makes the box move forward after the bump.",
         "B": "The box must have a forward force on it to keep moving.",
@@ -51,6 +51,7 @@
       "type": "multiple_choice",
       "question_number": 2,
       "stem": "A moving lump of clay hits a block and sticks to it. After the collision, the clay and block are no longer moving. Where did the clay's kinetic energy go?",
+      "image": "/quiz-images/L2_Q2.webp",
       "options": {
         "A": "It vanished when the objects stopped moving.",
         "B": "It disappeared because the clay changed shape permanently.",
@@ -80,6 +81,7 @@
       "type": "multiple_choice",
       "question_number": 3,
       "stem": "A cart is pulled on a low-friction track. The spring scale reading stays the same, and the cart speeds up. What does this show?",
+      "image": "/quiz-images/L2_Q3.webp",
       "options": {
         "A": "A force is only needed to start the cart, not to speed it up.",
         "B": "The pull force can stay the same while the cart's motion changes.",
@@ -108,6 +110,7 @@
       "type": "multiple_choice",
       "question_number": 4,
       "stem": "On a nearly frictionless track, a moving cart hits a cart at rest and they stick together. Which statement about the two-cart system is best?",
+      "image": "/quiz-images/L2_Q4.webp",
       "options": {
         "A": "Neither momentum nor kinetic energy is conserved because the carts stick.",
         "B": "Total kinetic energy is conserved, but momentum is not because the carts stick.",

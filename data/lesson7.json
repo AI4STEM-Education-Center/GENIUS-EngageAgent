@@ -19,6 +19,7 @@
       "type": "multiple_choice",
       "question_number": 1,
       "stem": "Car A and Car B have the same mass. Car B is moving twice as fast as Car A. How does the kinetic energy of Car B compare to Car A?",
+      "image": "/quiz-images/L7_Q1.webp",
       "options": {
         "A": "Half of Car A",
         "B": "Two times Car A",
@@ -47,7 +48,7 @@
       "type": "multiple_choice",
       "question_number": 2,
       "stem": "Cart A has mass 2 kg and moves at 2 m/s. Cart B has mass 1 kg and moves at 4 m/s. Which cart has more kinetic energy?",
-      "image": "images/L7_Q2.png",
+      "image": "/quiz-images/L7_Q2.webp",
       "options": {
         "A": "Cart A, because it has more mass.",
         "B": "Cart B, because it is moving faster.",
@@ -77,6 +78,7 @@
       "type": "multiple_choice",
       "question_number": 3,
       "stem": "Two carts move toward identical foam barriers. Both carts have the same momentum, but Cart A is heavier and moving slower, while Cart B is lighter and moving faster. Which statement is most accurate?",
+      "image": "/quiz-images/L7_Q3.webp",
       "options": {
         "A": "Cart A has more kinetic energy because it has more mass.",
         "B": "You cannot compare kinetic energy unless you know the stopping time.",
@@ -106,6 +108,7 @@
       "type": "multiple_choice",
       "question_number": 4,
       "stem": "A puck glides across very smooth ice at a nearly constant speed for several seconds. Which statement best describes what happens to the puck's kinetic energy while it keeps moving at the same speed?",
+      "image": "/quiz-images/L7_Q4.webp",
       "options": {
         "A": "It becomes momentum, so kinetic energy is gone.",
         "B": "It stays about the same because its speed stays about the same.",

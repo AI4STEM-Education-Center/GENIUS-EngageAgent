@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { getAllLessons, getLesson, getLessonQuizItems } from "@/lib/quiz-data";
 
@@ -76,6 +78,25 @@ describe("getLessonQuizItems", () => {
       expect(item.options).toHaveProperty("C");
       expect(item.options).toHaveProperty("D");
     }
+  });
+
+  it("provides a local illustration for every multiple choice question", () => {
+    const lessons = getAllLessons();
+    const mcqs = lessons.flatMap((lesson) =>
+      lesson.quiz_items.filter((item) => item.type === "multiple_choice"),
+    );
+    expect(mcqs).toHaveLength(32);
+
+    for (const item of mcqs) {
+      if (!item.image) throw new Error(`Missing illustration for ${item.item_id}`);
+      expect(item.image).toBe(`/quiz-images/${item.item_id}.webp`);
+      expect(existsSync(join(process.cwd(), "public", item.image.slice(1)))).toBe(true);
+    }
+
+    const confidenceChecks = lessons.flatMap((lesson) =>
+      lesson.quiz_items.filter((item) => item.type === "confidence_check"),
+    );
+    expect(confidenceChecks.every((item) => !item.image)).toBe(true);
   });
 
   it("each lesson should have a learning objective", () => {
