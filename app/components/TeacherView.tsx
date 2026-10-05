@@ -16,12 +16,17 @@ import type {
   ImageState,
   ImageVersion,
   VideoState,
-  StudentStrategyResult,
   Lesson,
   QuizItem,
   StudentAnswer,
   TextMode,
 } from "@/lib/types";
+import {
+  buildClassPlan,
+  buildTeacherSummary,
+  recommendStrategy,
+  type StrategyRecommendation,
+} from "@/lib/strategy-recommendation";
 
 const MAX_IMAGE_VERSIONS = 10;
 const SSO_TOKEN_STORAGE_KEY = "engage-sso-token";
@@ -44,52 +49,6 @@ type PublishedContentPayloadItem = {
   content_json?: string;
   media?: SharedContentMedia;
 };
-
-type StrategyBatchResponse = {
-  results?: StudentStrategyResult[];
-  distribution?: Record<string, number>;
-  errors?: Array<{ id?: string; name?: string; error?: string }>;
-  error?: string;
-};
-
-type StrategyJobStartResponse = {
-  jobId?: string;
-  queuedStudents?: number;
-  totalStudents?: number;
-  status?: "queued";
-  missingEnv?: string[];
-  error?: string;
-};
-
-type StrategyJobStatusResponse = {
-  job?: {
-    jobId?: string;
-    classId?: string;
-    assignmentId?: string;
-    totalStudents?: number;
-    processedStudents?: number;
-    completedStudents?: number;
-    failedStudents?: number;
-    status?: "queued" | "running" | "completed" | "completed_with_errors" | "failed_to_queue";
-    errorMessage?: string | null;
-    createdAt?: string;
-    updatedAt?: string;
-  };
-  results?: StudentStrategyResult[];
-  errors?: Array<{ id?: string; name?: string; error?: string }>;
-  distribution?: Record<string, number>;
-  error?: string;
-};
-
-type StrategyJobStatus = NonNullable<StrategyJobStatusResponse["job"]>["status"];
-
-type CohortAnalysisRequestOptions = {
-  forceRefresh?: boolean;
-};
-
-const COHORT_ANALYSIS_CHUNK_SIZE = 4;
-const COHORT_ANALYSIS_MAX_ATTEMPTS = 2;
-const COHORT_ANALYSIS_JOB_POLL_MS = 1500;
 
 const collectPublishedMedia = (
   items: PublishedContentPayloadItem[] | undefined,
@@ -245,60 +204,6 @@ const CONTENT_TEXT_MODE_LABELS: Record<TextMode, string> = {
 const isTextModeValue = (value: string): value is TextMode =>
   value === "questions" || value === "phenomenon" || value === "dialogue";
 
-const parseJsonResponse = async <T,>(response: Response): Promise<T | null> => {
-  const text = await response.text();
-  if (!text.trim()) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    return null;
-  }
-};
-
-const delay = (ms: number) =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
-  });
-
-const formatStrategyBatchError = (
-  status: number,
-  message?: string,
-) => {
-  if (message) {
-    return message;
-  }
-
-  if (status === 504) {
-    return "A cohort analysis batch timed out before the server could finish. Try again; cached students will be reused.";
-  }
-
-  if (status === 502 || status === 503) {
-    return "The server was temporarily unavailable during cohort analysis. Try again.";
-  }
-
-  return `Cohort analysis failed (HTTP ${status}).`;
-};
-
-const isTerminalCohortJobStatus = (
-  status: StrategyJobStatus | undefined,
-) =>
-  status === "completed" ||
-  status === "completed_with_errors" ||
-  status === "failed_to_queue";
-
-const chunkItems = <T,>(items: T[], size: number) => {
-  const chunks: T[][] = [];
-
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-
-  return chunks;
-};
-
 const getContentModeLabels = (item: ContentItem) => {
   if (item.textModes && item.textModes.length > 0) {
     return item.textModes.map((mode) => CONTENT_TEXT_MODE_LABELS[mode] ?? mode);
@@ -400,11 +305,7 @@ export default function TeacherView({ user }: Props) {
   const [annotationError, setAnnotationError] = useState<string | null>(null);
 
   // Cohort
-  const [cohortResults, setCohortResults] = useState<StudentStrategyResult[]>([]);
-  const [cohortDistribution, setCohortDistribution] = useState<Record<string, number>>({});
-  const [loadingCohort, setLoadingCohort] = useState(false);
-  const [cohortProgress, setCohortProgress] = useState<{ processed: number; total: number; currentName: string }>({ processed: 0, total: 0, currentName: "" });
-  const [showStudentRecommendations, setShowStudentRecommendations] = useState(false);
+  const [classRecommendation, setClassRecommendation] = useState<StrategyRecommendation | null>(null);
   const [showCohortHelp, setShowCohortHelp] = useState(false);
   const [openStrategyInfo, setOpenStrategyInfo] = useState<Set<string>>(new Set());
 
@@ -533,14 +434,6 @@ export default function TeacherView({ user }: Props) {
     });
   };
 
-  const buildCohortDistribution = (results: StudentStrategyResult[]) => {
-    const distribution: Record<string, number> = {};
-    results.forEach((result) => {
-      distribution[result.plan.strategy] = (distribution[result.plan.strategy] ?? 0) + 1;
-    });
-    return distribution;
-  };
-
   const autoAnswerTestStudents = async () => {
     if (!classId || !assignmentId) {
       setError("Missing class or assignment context.");
@@ -595,79 +488,6 @@ export default function TeacherView({ user }: Props) {
     }
   };
 
-  const buildCohortMasterPlan = (
-    results: StudentStrategyResult[],
-    distribution: Record<string, number>,
-  ): Plan | null => {
-    if (results.length === 0) {
-      return null;
-    }
-
-    const rankedStrategies = strategies
-      .map((strategy) => {
-        const matchingResults = results.filter((result) => result.plan.strategy === strategy.id);
-        const averageRelevance = matchingResults.length > 0
-          ? Math.round(
-              matchingResults.reduce((sum, result) => sum + (result.plan.relevance?.[strategy.id] ?? 0), 0) / matchingResults.length,
-            )
-          : 0;
-
-        return {
-          id: strategy.id,
-          label: strategy.label,
-          count: distribution[strategy.id] ?? 0,
-          averageRelevance,
-          matchingResults,
-        };
-      })
-      .sort((left, right) => right.count - left.count || right.averageRelevance - left.averageRelevance);
-
-    const primary = rankedStrategies[0];
-    const representative = primary.matchingResults
-      .slice()
-      .sort((left, right) => (right.plan.relevance?.[primary.id] ?? 0) - (left.plan.relevance?.[primary.id] ?? 0))[0] ?? results[0];
-
-    const relevance = Object.fromEntries(
-      strategies.map((strategy) => [
-        strategy.id,
-        Math.round(((distribution[strategy.id] ?? 0) / results.length) * 100),
-      ]),
-    ) as Record<string, number>;
-
-    const supportingStrategies = rankedStrategies
-      .filter((strategy) => strategy.id !== primary.id && strategy.count > 0)
-      .map((strategy) => `${strategy.label} (${strategy.count})`);
-
-    const lessonLabel = selectedLesson ? `Lesson ${selectedLesson}` : "this lesson";
-    const cohortLabel = `${primary.count} of ${results.length} student${results.length === 1 ? '' : 's'}`;
-
-    return {
-      ...representative.plan,
-      name: `${lessonLabel} Cohort Plan`,
-      strategy: primary.id,
-      relevance,
-      overallRecommendation: `Use ${primary.label.toLowerCase()} as the lead strategy for this cohort.`,
-      recommendationReason: supportingStrategies.length > 0
-        ? `${cohortLabel} aligned most closely with ${primary.label}. Secondary patterns also appeared in ${supportingStrategies.join(', ')}, so start whole-class instruction with ${primary.label} and differentiate as needed.`
-        : `${cohortLabel} aligned most closely with ${primary.label}, making it the clearest whole-class starting point from the submitted responses.`,
-      summary: `${primary.label} is the best starting point for the current cohort.`,
-      tldr: `Lead with ${primary.label.toLowerCase()} for this cohort.`,
-      rationale: supportingStrategies.length > 0
-        ? `Student-level analysis points to ${primary.label} as the dominant pattern across the submitted quiz responses. Launch whole-class content there first, then differentiate for students who may benefit from ${supportingStrategies.join(' or ')}.`
-        : `Student-level analysis points to ${primary.label} as the dominant pattern across the submitted quiz responses. Launch whole-class content there first, then monitor which students need a different scaffold.`,
-      cadence: representative.plan.cadence || 'Whole-class first, then differentiate',
-      tactics: representative.plan.tactics?.length > 0 ? representative.plan.tactics : [
-        `Start the class with a ${primary.label.toLowerCase()} prompt tied to ${lessonLabel}.`,
-        'Ask students to explain their thinking before revealing the next support.',
-        'Use the responses to decide which students need a follow-up scaffold.',
-      ],
-      checks: representative.plan.checks?.length > 0 ? representative.plan.checks : [
-        'Check whether students can explain why the new idea fits better than their first response.',
-      ],
-    };
-  };
-
-
   // Load lessons list
   useEffect(() => {
     fetch("/api/lessons/1")
@@ -713,6 +533,7 @@ export default function TeacherView({ user }: Props) {
 
     setSelectedLesson(null);
     setPlan(null);
+    setClassRecommendation(null);
     setSelectedStrategies([]);
     setAnnotationDecision(null);
     setAnnotationReason("");
@@ -1142,8 +963,7 @@ export default function TeacherView({ user }: Props) {
     setVideos({});
     setSelectedForPublish(new Set());
     setPublishedContentIds(new Set());
-    setCohortResults([]);
-    setCohortDistribution({});
+    setClassRecommendation(null);
     const res = await fetch(`/api/lessons/${lessonNumber}`);
     const data = await res.json();
     setQuizItems(data.quiz_items ?? []);
@@ -1234,358 +1054,38 @@ export default function TeacherView({ user }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep, quizStatus, classId, assignmentId, selectedLesson]);
 
-  useEffect(() => {
-    if (!loadingCohort) {
-      return;
-    }
-
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [loadingCohort]);
-
-  const runSynchronousCohortAnalysis = async ({
-    forceRefresh,
-    lessonNumber,
-    studentsForApi,
-    uncachedStudents,
-    resultsMap,
-  }: {
-    forceRefresh: boolean;
-    lessonNumber: number;
-    studentsForApi: Array<{
-      id: string;
-      name: string;
-      assignment?: string;
-      answers: Record<string, string | undefined>;
-    }>;
-    uncachedStudents: Array<{
-      id: string;
-      name: string;
-      assignment?: string;
-      answers: Record<string, string | undefined>;
-    }>;
-    resultsMap: Map<string, StudentStrategyResult>;
-  }) => {
-    const actionLabel = forceRefresh ? "Reanalyzing" : "Analyzing";
-    const studentScopeLabel = forceRefresh ? "students" : "uncached students";
-    const studentChunks = chunkItems(
-      uncachedStudents,
-      COHORT_ANALYSIS_CHUNK_SIZE,
-    );
-
-    for (let chunkIndex = 0; chunkIndex < studentChunks.length; chunkIndex += 1) {
-      let pendingStudents = studentChunks[chunkIndex];
-
-      for (let attempt = 1; attempt <= COHORT_ANALYSIS_MAX_ATTEMPTS; attempt += 1) {
-        const batchStart = chunkIndex * COHORT_ANALYSIS_CHUNK_SIZE + 1;
-        const batchEnd = Math.min(
-          batchStart + pendingStudents.length - 1,
-          uncachedStudents.length,
-        );
-
-        setCohortProgress({
-          processed: resultsMap.size,
-          total: studentsForApi.length,
-          currentName:
-            attempt === 1
-              ? `${actionLabel} batch ${chunkIndex + 1} of ${studentChunks.length} (${batchStart}-${batchEnd} of ${uncachedStudents.length} ${studentScopeLabel})...`
-              : `Retrying ${pendingStudents.length} student${pendingStudents.length === 1 ? "" : "s"} in batch ${chunkIndex + 1} of ${studentChunks.length}...`,
-        });
-
-        const res = await fetch("/api/strategy-batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            students: pendingStudents,
-            classId,
-            assignmentId,
-            lessonNumber,
-            forceRefresh,
-          }),
-        });
-        const data = await parseJsonResponse<StrategyBatchResponse>(res);
-
-        for (const result of data?.results ?? []) {
-          resultsMap.set(result.id, result);
-        }
-
-        const orderedResults = studentsForApi
-          .filter((student) => resultsMap.has(student.id))
-          .map((student) => resultsMap.get(student.id) as StudentStrategyResult);
-        setCohortResults(orderedResults);
-        setCohortProgress({
-          processed: orderedResults.length,
-          total: studentsForApi.length,
-          currentName:
-            orderedResults.length < studentsForApi.length
-              ? `Completed ${orderedResults.length} of ${studentsForApi.length} students.`
-              : "Finalizing cohort recommendation...",
-        });
-
-        const failedStudents = pendingStudents.filter((student) =>
-          (data?.errors ?? []).some((error) => error.id === student.id),
-        );
-
-        if (res.ok && failedStudents.length === 0) {
-          break;
-        }
-
-        const isRetryable =
-          res.status === 0 ||
-          res.status === 502 ||
-          res.status === 503 ||
-          res.status === 504 ||
-          failedStudents.length > 0;
-        if (isRetryable && attempt < COHORT_ANALYSIS_MAX_ATTEMPTS) {
-          pendingStudents = failedStudents.length > 0 ? failedStudents : pendingStudents;
-          await delay(1000 * attempt);
-          continue;
-        }
-
-        if (failedStudents.length > 0) {
-          const failedNames = failedStudents.map((student) => student.name).join(", ");
-          throw new Error(
-            `Failed to analyze ${failedStudents.length} student${failedStudents.length === 1 ? "" : "s"} after retry: ${failedNames}.`,
-          );
-        }
-
-        if (!res.ok) {
-          throw new Error(
-            formatStrategyBatchError(res.status, data?.error),
-          );
-        }
-
-        throw new Error("Cohort analysis returned an invalid response.");
-      }
-    }
-  };
-
-  const requestCohortAnalysis = async ({
-    forceRefresh = false,
-  }: CohortAnalysisRequestOptions = {}) => {
+  const analyzeClass = () => {
     if (!classId || !assignmentId) return;
     if (!selectedLesson) {
       setError("Select a lesson before generating strategies.");
       return;
     }
-    const lessonNumber = selectedLesson;
     if (studentAnswers.length === 0) {
       setError("No student answers available. Wait for students to submit.");
       return;
     }
 
-    setLoadingCohort(true);
     setError(null);
     setPlan(null);
+    setClassRecommendation(null);
     setSelectedStrategies([]);
     setContent([]);
     setImages({});
     setVideos({});
     imageHistoryCache.clear();
     setSelectedForPublish(new Set());
-    setCohortResults([]);
-    setCohortDistribution({});
-    setCohortProgress({
-      processed: 0,
-      total: studentAnswers.length,
-      currentName: forceRefresh
-        ? "Starting cohort reanalysis..."
-        : "Loading cache...",
-    });
 
     try {
-      let cohortWarning: string | null = null;
-      const studentsForApi = studentAnswers.map((sa) => ({
-        id: sa.student_id,
-        name: sa.student_name,
-        assignment: `Lesson ${lessonNumber}`,
-        answers: sa.answers,
-      }));
-
-      const cacheUrl = `/api/strategy-cache?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&lessonNumber=${encodeURIComponent(lessonNumber)}`;
-      let cacheData: { results?: Array<{ studentId?: string; plan?: unknown }> } = { results: [] };
-      if (!forceRefresh) {
-        const cacheRes = await fetch(cacheUrl);
-        if (cacheRes.ok) {
-          cacheData = await cacheRes.json();
-        }
-      }
-
-      const cachedMap = new Map<string, Plan>();
-      for (const entry of cacheData.results ?? []) {
-        if (entry.studentId && entry.plan) {
-          cachedMap.set(entry.studentId, entry.plan as Plan);
-        }
-      }
-
-      const resultsMap = new Map<string, StudentStrategyResult>();
-      for (const student of studentsForApi) {
-        const cached = cachedMap.get(student.id);
-        if (!cached) continue;
-        resultsMap.set(student.id, { id: student.id, name: student.name, plan: cached });
-      }
-
-      const initialResults = studentsForApi
-        .filter((student) => resultsMap.has(student.id))
-        .map((student) => resultsMap.get(student.id) as StudentStrategyResult);
-      setCohortResults(initialResults);
-      setCohortProgress({
-        processed: initialResults.length,
-        total: studentsForApi.length,
-        currentName:
-          initialResults.length > 0
-            ? `Loaded ${initialResults.length} cached student${initialResults.length === 1 ? "" : "s"}.`
-            : forceRefresh
-              ? "Starting cohort reanalysis..."
-              : "Starting cohort analysis...",
-      });
-
-      const uncachedStudents = forceRefresh
-        ? studentsForApi
-        : studentsForApi.filter(
-            (student) => !cachedMap.has(student.id),
-          );
-      if (uncachedStudents.length > 0) {
-        const startRes = await fetch("/api/strategy-job", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            students: uncachedStudents,
-            classId,
-            assignmentId,
-            lessonNumber,
-            forceRefresh,
-          }),
-        });
-        const startData = await parseJsonResponse<StrategyJobStartResponse>(startRes);
-
-        if (startRes.status === 501) {
-          const missingEnv = (startData?.missingEnv ?? [])
-            .filter((name) => typeof name === "string" && name.length > 0);
-          cohortWarning =
-            missingEnv.length > 0
-              ? `Cohort analysis queue is not configured on this environment (${missingEnv.join(", ")}). Running inline ${forceRefresh ? "reanalysis" : "analysis"} instead.`
-              : `${startData?.error ?? "Cohort analysis queue is not configured on this environment."} Running inline ${forceRefresh ? "reanalysis" : "analysis"} instead.`;
-          setCohortProgress({
-            processed: initialResults.length,
-            total: studentsForApi.length,
-            currentName: forceRefresh
-              ? "Queue not configured here; reanalyzing inline instead..."
-              : "Queue not configured here; analyzing inline instead...",
-          });
-          await runSynchronousCohortAnalysis({
-            forceRefresh,
-            lessonNumber,
-            studentsForApi,
-            uncachedStudents,
-            resultsMap,
-          });
-        } else {
-          if (!startRes.ok || !startData?.jobId) {
-            throw new Error(
-              startData?.error ?? "Failed to start cohort analysis.",
-            );
-          }
-
-          for (;;) {
-            const statusRes = await fetch(
-              `/api/strategy-job/${encodeURIComponent(startData.jobId)}`,
-              {
-                cache: "no-store",
-              },
-            );
-            const statusData = await parseJsonResponse<StrategyJobStatusResponse>(statusRes);
-
-            if (!statusRes.ok || !statusData?.job) {
-              throw new Error(
-                statusData?.error ?? "Failed to load cohort analysis status.",
-              );
-            }
-
-            for (const result of statusData.results ?? []) {
-              resultsMap.set(result.id, result);
-            }
-
-            const orderedResults = studentsForApi
-              .filter((student) => resultsMap.has(student.id))
-              .map((student) => resultsMap.get(student.id) as StudentStrategyResult);
-            setCohortResults(orderedResults);
-
-            const processedStudents = statusData.job.processedStudents ?? 0;
-            const queuedStudents = statusData.job.totalStudents ?? uncachedStudents.length;
-            const terminal = isTerminalCohortJobStatus(statusData.job.status);
-
-            setCohortProgress({
-              processed: Math.min(
-                studentsForApi.length,
-                initialResults.length + processedStudents,
-              ),
-              total: studentsForApi.length,
-              currentName: terminal
-                ? "Finalizing cohort recommendation..."
-                : statusData.job.status === "queued"
-                  ? forceRefresh
-                    ? `Queued ${queuedStudents} student${queuedStudents === 1 ? "" : "s"} for reanalysis...`
-                    : `Queued ${queuedStudents} uncached student${queuedStudents === 1 ? "" : "s"} for analysis...`
-                  : forceRefresh
-                    ? `Reanalyzing ${processedStudents} of ${queuedStudents} student${queuedStudents === 1 ? "" : "s"}...`
-                    : `Analyzing ${processedStudents} of ${queuedStudents} uncached student${queuedStudents === 1 ? "" : "s"}...`,
-            });
-
-            if (terminal) {
-              if (statusData.job.status === "failed_to_queue") {
-                throw new Error(
-                  statusData.job.errorMessage ?? "Failed to queue cohort analysis.",
-                );
-              }
-
-              if ((statusData.job.failedStudents ?? 0) > 0) {
-                const failedNames = (statusData.errors ?? [])
-                  .map((error) => error.name)
-                  .filter((name): name is string => Boolean(name))
-                  .join(", ");
-                cohortWarning =
-                  failedNames.length > 0
-                    ? `Finished with ${statusData.job.failedStudents} failed student${statusData.job.failedStudents === 1 ? "" : "s"}: ${failedNames}.`
-                    : `Finished with ${statusData.job.failedStudents} failed student${statusData.job.failedStudents === 1 ? "" : "s"}.`;
-              }
-
-              break;
-            }
-
-            await delay(COHORT_ANALYSIS_JOB_POLL_MS);
-          }
-        }
-      }
-
-      const results = studentsForApi
-        .filter((student) => resultsMap.has(student.id))
-        .map((student) => resultsMap.get(student.id) as StudentStrategyResult);
-
-      const distribution = buildCohortDistribution(results);
-      const masterPlan = buildCohortMasterPlan(results, distribution);
-
-      setCohortResults(results);
-      setCohortDistribution(distribution);
-      setCohortProgress({ processed: studentsForApi.length, total: studentsForApi.length, currentName: "" });
-
-      if (masterPlan) {
-        setPlan(masterPlan);
-        setSelectedStrategies([masterPlan.strategy]);
-      }
-
-      if (cohortWarning) {
-        setError(cohortWarning);
-      }
+      const recommendation = recommendStrategy(
+        selectedLesson,
+        studentAnswers.map((studentAnswer) => studentAnswer.answers),
+      );
+      const masterPlan = buildClassPlan(recommendation);
+      setClassRecommendation(recommendation);
+      setPlan(masterPlan);
+      setSelectedStrategies([masterPlan.strategy]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unexpected error.");
-    } finally {
-      setLoadingCohort(false);
     }
   };
 
@@ -2254,109 +1754,31 @@ export default function TeacherView({ user }: Props) {
                         ?
                       </button>
                     </div>
-                    <p className="mt-1 text-sm text-slate-600">Generate strategies for all students who have answered. Use reanalysis when you want to ignore cached recommendations and rerun every student.</p>
+                    <p className="mt-1 text-sm text-slate-600">Recommend one strategy for the whole class from the submitted quiz answers.</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => void requestCohortAnalysis()}
-                      disabled={loadingCohort || studentAnswers.length === 0}
+                      onClick={analyzeClass}
+                      disabled={studentAnswers.length === 0}
                       className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
                     >
-                      {loadingCohort ? "Running..." : `Analyze ${studentAnswers.length} students`}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void requestCohortAnalysis({ forceRefresh: true })}
-                      disabled={loadingCohort || studentAnswers.length === 0}
-                      className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-                    >
-                      {loadingCohort ? "Running..." : "Reanalyze All"}
+                      Analyze {studentAnswers.length} students
                     </button>
                   </div>
                 </div>
 
                 {showCohortHelp && (
                   <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
-                    Cohort analysis reviews each student’s submitted quiz answers, classifies the likely strategy for each student, and then aggregates those results into one cohort-wide master plan.
+                    How we choose: we look at your class&apos;s answers to this lesson&apos;s quiz in three steps. (1) If more than 70% of the answers are correct, we recommend engaged critiquing to deepen the idea. (2) Otherwise, if more than a quarter of the incorrect answers point to the same misconception, we recommend cognitive conflict to address it directly. (3) Otherwise, it depends on the lesson: we recommend an analogy if most of its core ideas are things students can&apos;t easily see, and experience bridging if they are things students can see in everyday life. The same answers always lead to the same recommendation. You know your class best, so please feel free to choose a different strategy below.
                   </div>
                 )}
 
-                {loadingCohort && (
-                  <div className="mt-3 grid gap-2">
-                    <div className="flex items-center gap-2 text-xs text-slate-500">
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
-                      {cohortProgress.currentName || "Loading..."}
-                    </div>
-                    <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
-                      <span>Do not refresh this page while cohort analysis is running.</span>
-                      <span>{Math.round((cohortProgress.processed / Math.max(1, cohortProgress.total)) * 100)}%</span>
-                    </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
-                      <div className="h-full rounded-full bg-slate-700 transition-all" style={{ width: `${Math.round((cohortProgress.processed / Math.max(1, cohortProgress.total)) * 100)}%` }} />
-                    </div>
-                  </div>
-                )}
-
-                {cohortResults.length > 0 && !loadingCohort && (
-                  <div className="mt-4 grid gap-4">
-                    <div className="grid gap-3">
-                      <p className="text-xs font-semibold uppercase text-slate-400">Strategy distribution</p>
-                      {strategies.map((strategy) => {
-                        const count = cohortDistribution[strategy.id] ?? 0;
-                        const percent = Math.round((count / cohortResults.length) * 100);
-                        const isInfoOpen = openStrategyInfo.has(strategy.id);
-                        return (
-                          <div key={strategy.id} className="rounded-2xl border border-slate-200 bg-white p-3">
-                            <div className="flex items-start justify-between gap-3 text-sm">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleStrategyInfo(strategy.id)}
-                                    aria-label={`Explain ${strategy.label}`}
-                                    aria-expanded={isInfoOpen}
-                                    title={strategy.description}
-                                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-[11px] font-semibold text-slate-500 transition hover:bg-slate-100"
-                                  >
-                                    i
-                                  </button>
-                                  <span className="font-semibold text-slate-800">{strategy.label}</span>
-                                </div>
-                                {isInfoOpen && (
-                                  <p className="mt-2 text-xs leading-5 text-slate-500">{getStrategyDescription(strategy.id)}</p>
-                                )}
-                              </div>
-                              <span className="shrink-0 text-xs font-semibold text-slate-500">{count} students ({percent}%)</span>
-                            </div>
-                            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                              <div className={`h-full ${strategy.color}`} style={{ width: `${percent}%` }} />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="grid gap-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-semibold uppercase text-slate-400">Student recommendations</p>
-                        <button type="button" onClick={() => setShowStudentRecommendations((prev) => !prev)}
-                          className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100">
-                          {showStudentRecommendations ? "Hide" : "Show all"}
-                        </button>
-                      </div>
-                      {showStudentRecommendations && (
-                        <div className="grid gap-2">
-                          {cohortResults.map((result) => (
-                            <div key={result.id} className="rounded-2xl border border-slate-200 bg-white p-3">
-                              <div className="flex items-center justify-between text-sm">
-                                <span className="font-semibold text-slate-800">{result.name}</span>
-                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{getStrategyLabel(result.plan.strategy)}</span>
-                              </div>
-                              <p className="mt-1 text-xs text-slate-500">{result.plan.tldr}</p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                {classRecommendation && (
+                  <div className="mt-4 grid gap-2">
+                    <p className="text-xs font-semibold uppercase text-slate-400">How your class did</p>
+                    <div className="whitespace-pre-wrap rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-700">
+                      {buildTeacherSummary(classRecommendation)}
                     </div>
                   </div>
                 )}
@@ -2394,9 +1816,7 @@ export default function TeacherView({ user }: Props) {
                             <p className="mt-2 text-xs leading-5 text-slate-500">{getStrategyDescription(plan.strategy)}</p>
                           )}
                           <p className="mt-2 text-sm text-slate-600">{plan.overallRecommendation}</p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            Based on cohort analysis: {cohortDistribution[plan.strategy] ?? 0} of {cohortResults.length} student{cohortResults.length === 1 ? '' : 's'} aligned most closely with this strategy.
-                          </p>
+                          <p className="mt-1 text-xs text-slate-500">{plan.recommendationReason}</p>
                         </div>
                         <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${selectedStrategies.includes(plan.strategy) ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                           {selectedStrategies.includes(plan.strategy) ? 'Selected for content' : 'Not selected'}
