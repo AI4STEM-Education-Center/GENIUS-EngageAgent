@@ -2133,9 +2133,28 @@ export default function TeacherView({ user }: Props) {
                     </span>
                   </div>
                   <div className="max-h-80 overflow-y-auto rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                    {quizItems.map((item) => (
+                    {quizItems.map((item, index) => (
                       <div key={item.item_id} className={`mb-3 ${item.type === "confidence_check" ? "ml-6 text-slate-500 italic" : ""}`}>
                         <p className="text-sm font-medium">{item.stem}</p>
+                        {item.type === "multiple_choice" && item.image && (
+                          <button
+                            type="button"
+                            onClick={() => setFocusImage({
+                              url: item.image!,
+                              title: `Question ${item.question_number ?? index + 1} visual reference`,
+                            })}
+                            aria-label={`Enlarge visual reference for question ${item.question_number ?? index + 1}`}
+                            className="mt-3 block max-w-md cursor-zoom-in overflow-hidden rounded-xl border border-slate-200 bg-white"
+                          >
+                            <img
+                              src={item.image}
+                              alt={`Visual reference for question ${item.question_number ?? index + 1}`}
+                              loading="lazy"
+                              decoding="async"
+                              className="h-auto max-h-64 w-full object-contain"
+                            />
+                          </button>
+                        )}
                         <div className="mt-1 grid gap-1">
                           {Object.entries(item.options).map(([key, value]) => (
                             <p key={key} className="text-xs text-slate-500">{key}. {value}</p>
