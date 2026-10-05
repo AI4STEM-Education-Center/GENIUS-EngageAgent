@@ -39,9 +39,9 @@ const INITIAL_SERVER_STATUS: Record<StudentStepId, ActivityStatus> = {
 // a server round trip.
 //
 // The stepper only shows two steps to students -- Content Review and
-// Material Rating are grouped into one "Explore and ASK" step (Material
-// Rating renders inline once the question is submitted, not as its own
-// tab) -- so a view step's status is derived from the real activities it
+// Material Rating are grouped into one "Explore and ask" step (Material
+// Rating is a card below the questions, locked until they're submitted,
+// not its own tab) -- so a view step's status is derived from the real activities it
 // groups (STUDENT_VIEW_STEPS[].activityIds). Whether the *group* is locked
 // follows only its first/primary activity (content-review): Material
 // Rating being internally "locked" until the review is done is expected
@@ -190,9 +190,9 @@ export default function StudentView({ user }: Props) {
 
         {/* The assessment and content-review views stay mounted (hidden when
             inactive) so they keep polling/reporting progress regardless of
-            which tab is visible. Material Rating renders inside each material
-            card once the review question is submitted, per #101, rather than
-            as its own tab or a second copy of the material. */}
+            which tab is visible. Material Rating is a card below the review
+            questions, locked until they're submitted (#101, #110), rather
+            than its own tab or a second copy of the material. */}
         <div className={activeStep === "assessment" ? "" : "hidden"}>
           <StudentQuizView user={user} onProgress={(p) => reportProgress("assessment", p)} />
         </div>

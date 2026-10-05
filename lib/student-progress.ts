@@ -27,12 +27,12 @@ export const STUDENT_STEPS: { id: StudentStepId; title: string }[] = [
 /**
  * The stepper shows two steps to students, even though three activities are
  * tracked underneath: Content Review and Material Rating are grouped into a
- * single "Explore and ASK" step, with Material Rating appearing inline once
- * the review question has been submitted rather than as its own tab.
+ * single "Explore and ask" step, with Material Rating shown as a card below
+ * the questions (locked until they're submitted) rather than as its own tab.
  */
 export type StudentViewStepId = "assessment" | "explore-and-ask";
 
 export const STUDENT_VIEW_STEPS: { id: StudentViewStepId; title: string; activityIds: StudentStepId[] }[] = [
   { id: "assessment", title: "Get ready for the lesson", activityIds: ["assessment"] },
-  { id: "explore-and-ask", title: "Explore and ASK", activityIds: ["content-review", "content-rating"] },
+  { id: "explore-and-ask", title: "Explore and ask", activityIds: ["content-review", "content-rating"] },
 ];

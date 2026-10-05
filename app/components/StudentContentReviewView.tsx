@@ -14,8 +14,9 @@ import {
 type Props = {
   user: UserContext;
   onProgress?: (progress: StepProgress) => void;
-  // Material Rating renders inline in each material card, but only once the
-  // server has marked content-review complete (content-rating depends on it).
+  // Material Rating renders as its own card below "Your questions" (#110).
+  // It's always visible, but stays locked until the server has marked
+  // content-review complete (content-rating depends on it).
   ratingUnlocked?: boolean;
   onRatingProgress?: (progress: StepProgress) => void;
 };
@@ -54,7 +55,8 @@ export default function StudentContentReviewView({
 
   const [ratings, setRatings] = useState<Record<string, number>>({});
   const [savedRatings, setSavedRatings] = useState<Record<string, number>>({});
-  const [savingId, setSavingId] = useState<string | null>(null);
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+  const [ratingError, setRatingError] = useState<string | null>(null);
 
   const classId = user.classId;
   const assignmentId = user.assignmentId;
@@ -253,44 +255,59 @@ export default function StudentContentReviewView({
     }
   };
 
-  const submitRating = async (contentItemId: string, rating: number) => {
+  // Clicking 1-5 only selects; nothing is saved until the student presses
+  // Submit (#110). A material with a saved rating is locked, so only newly
+  // published, still-unrated materials can be picked after submitting.
+  const selectRating = (contentItemId: string, rating: number) => {
+    if (savedRatings[contentItemId] != null || ratingSubmitting) return;
+    setRatings((prev) => ({ ...prev, [contentItemId]: rating }));
+  };
+
+  const submitRatings = async () => {
     if (!classId || !assignmentId) return;
 
-    setRatings((prev) => ({ ...prev, [contentItemId]: rating }));
-    setSavingId(contentItemId);
-
-    try {
-      const res = await fetch("/api/content-rating", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          classId,
-          assignmentId,
-          studentId: user.userId,
-          contentItemId,
-          rating,
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error("Failed to save rating.");
-      }
-
-      setSavedRatings((prev) => ({ ...prev, [contentItemId]: rating }));
-    } catch {
-      // Revert on failure
-      setRatings((prev) => {
-        const reverted = { ...prev };
-        if (savedRatings[contentItemId] != null) {
-          reverted[contentItemId] = savedRatings[contentItemId];
-        } else {
-          delete reverted[contentItemId];
-        }
-        return reverted;
-      });
-    } finally {
-      setSavingId(null);
+    const pending = contentItems.filter((item) => savedRatings[item.id] == null);
+    if (pending.some((item) => ratings[item.id] == null)) {
+      setRatingError("Rate every material before submitting.");
+      return;
     }
+
+    setRatingSubmitting(true);
+    setRatingError(null);
+
+    const results = await Promise.all(
+      pending.map(async (item) => {
+        try {
+          const res = await fetch("/api/content-rating", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              classId,
+              assignmentId,
+              studentId: user.userId,
+              contentItemId: item.id,
+              rating: ratings[item.id],
+            }),
+          });
+          return { id: item.id, ok: res.ok };
+        } catch {
+          return { id: item.id, ok: false };
+        }
+      }),
+    );
+
+    // Keep whatever did save, so a retry only resends the failed ones.
+    setSavedRatings((prev) => {
+      const next = { ...prev };
+      for (const r of results) {
+        if (r.ok) next[r.id] = ratings[r.id];
+      }
+      return next;
+    });
+    if (results.some((r) => !r.ok)) {
+      setRatingError("Some ratings didn't save. Please try submitting again.");
+    }
+    setRatingSubmitting(false);
   };
 
   if (loading) {
@@ -326,11 +343,14 @@ export default function StudentContentReviewView({
     );
   }
 
+  const allRatingsSubmitted = contentItems.every((item) => savedRatings[item.id] != null);
+  const allRatingsSelected = contentItems.every((item) => ratings[item.id] != null);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-          Explore and ASK
+          Explore and ask
         </p>
         <h2 className="mt-1 text-xl font-semibold text-slate-900">
           What do you notice? What do you wonder?
@@ -343,9 +363,6 @@ export default function StudentContentReviewView({
 
       {contentItems.map((item) => {
         const itemMedia = media[item.id];
-        const currentRating = ratings[item.id];
-        const isSaved = savedRatings[item.id] === currentRating;
-        const isSaving = savingId === item.id;
 
         return (
           <div key={item.id} className="rounded-2xl border border-slate-200 bg-white p-6">
@@ -388,41 +405,6 @@ export default function StudentContentReviewView({
               </div>
             </div>
 
-            {ratingUnlocked && (
-              <div className="mt-4 border-t border-slate-100 pt-4">
-                <p className="text-xs font-semibold text-slate-500">
-                  How engaging is this content?
-                  <span className="ml-2 font-normal text-slate-400">
-                    1 = Not engaging, 5 = Extremely engaging
-                  </span>
-                </p>
-                <div className="mt-2 flex items-center gap-2">
-                  {[1, 2, 3, 4, 5].map((value) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => submitRating(item.id, value)}
-                      disabled={isSaving}
-                      className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold transition ${
-                        currentRating === value
-                          ? "bg-[#BA0C2F] text-white"
-                          : "border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                      }`}
-                      title={RATING_LABELS[value]}
-                    >
-                      {value}
-                    </button>
-                  ))}
-                  {currentRating && (
-                    <span className="ml-2 text-xs text-slate-400">
-                      {RATING_LABELS[currentRating]}
-                      {isSaved && !isSaving && " (saved)"}
-                      {isSaving && " (saving...)"}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         );
       })}
@@ -503,6 +485,76 @@ export default function StudentContentReviewView({
             )}
           </>
         )}
+      </div>
+
+      <div
+        className={`rounded-2xl border border-slate-200 bg-white p-6 ${ratingUnlocked ? "" : "opacity-60"}`}
+      >
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+          Material rating
+        </p>
+        {!ratingUnlocked ? (
+          <p className="mt-1 text-sm text-slate-500">
+            Submit your questions first, then rate how engaging the material was.
+          </p>
+        ) : allRatingsSubmitted ? (
+          <p className="mt-1 text-sm font-semibold text-emerald-600">
+            Submitted - thanks for rating the material.
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-slate-500">
+            How engaging was the material? 1 = Not engaging, 5 = Extremely engaging
+          </p>
+        )}
+
+        <div className="mt-4 flex flex-col gap-4">
+          {contentItems.map((item) => {
+            const currentRating = ratings[item.id];
+            const locked = !ratingUnlocked || savedRatings[item.id] != null || ratingSubmitting;
+
+            return (
+              <div key={item.id}>
+                <p className="text-sm font-semibold text-slate-800">{item.title}</p>
+                <div className="mt-2 flex items-center gap-2">
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => selectRating(item.id, value)}
+                      disabled={locked}
+                      className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold transition disabled:cursor-not-allowed ${
+                        currentRating === value
+                          ? "bg-[#BA0C2F] text-white"
+                          : `border border-slate-200 text-slate-600 ${locked ? "" : "hover:border-slate-300 hover:bg-slate-50"}`
+                      }`}
+                      title={RATING_LABELS[value]}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                  {currentRating && (
+                    <span className="ml-2 text-xs text-slate-400">{RATING_LABELS[currentRating]}</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {ratingUnlocked && !allRatingsSubmitted && (
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={submitRatings}
+              disabled={ratingSubmitting || !allRatingsSelected}
+              className="rounded-xl bg-[#BA0C2F] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {ratingSubmitting ? "Submitting..." : "Submit"}
+            </button>
+          </div>
+        )}
+
+        {ratingError && <p className="mt-3 text-sm text-rose-600">{ratingError}</p>}
       </div>
     </div>
   );
