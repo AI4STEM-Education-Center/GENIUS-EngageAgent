@@ -16,7 +16,7 @@
       "type": "multiple_choice",
       "question_number": 1,
       "stem": "A phone drops onto a soft pillow. The phone looks the same afterward. Which statement best describes the collision?",
-      "image": "images/L1_Q1.png",
+      "image": "/quiz-images/L1_Q1.webp",
       "options": {
         "A": "Soft objects cannot exert forces.",
         "B": "Only the phone pushed; the pillow did not.",
@@ -45,6 +45,7 @@
       "type": "multiple_choice",
       "question_number": 2,
       "stem": "A bug hits a car windshield while the car is moving on the highway. The windshield looks the same afterward. Which statement best describes the collision?",
+      "image": "/quiz-images/L1_Q2.webp",
       "options": {
         "A": "The bug and the windshield pushed on each other during contact.",
         "B": "There was no collision because the windshield did not change shape.",
@@ -73,7 +74,7 @@
       "type": "multiple_choice",
       "question_number": 3,
       "stem": "A heavy bowling ball hits a window very slowly. A light golf ball hits the same window very fast. The bowling ball does not break the window, but the golf ball broke the window. Which statement best explain it?",
-      "image": "images/L1_Q3.png",
+      "image": "/quiz-images/L1_Q3.webp",
       "options": {
         "A": "Speed can matter as well as mass.",
         "B": "Smaller objects have stronger gravity.",
@@ -102,7 +103,7 @@
       "type": "multiple_choice",
       "question_number": 4,
       "stem": "A large truck and a small compact car collide head-on. The car is badly crumpled, but the truck shows much less damage. Which statement best explains why the damage differs?",
-      "image": "images/L1_Q4.png",
+      "image": "/quiz-images/L1_Q4.webp",
       "options": {
         "A": "The truck must have exerted a much larger force to the car.",
         "B": "The car was damaged because it exerted no force on the truck.",

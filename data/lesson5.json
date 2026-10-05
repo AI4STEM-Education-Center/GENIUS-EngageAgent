@@ -23,6 +23,7 @@
       "type": "multiple_choice",
       "question_number": 1,
       "stem": "A large delivery truck collides with a small mosquito. During the brief time they are in contact, how do the forces they exert on each other compare?",
+      "image": "/quiz-images/L5_Q1.webp",
       "options": {
         "A": "They exert forces of equal strength on each other.",
         "B": "The truck exerts a stronger force on the mosquito.",
@@ -52,6 +53,7 @@
       "type": "multiple_choice",
       "question_number": 2,
       "stem": "A soccer player (Player A) collides with a stationary player (Player B). In a second trial, Player A runs twice as fast before hitting Player B. In both trials, the collision lasts for the same amount of time. Which statement best explains the forces involved?",
+      "image": "/quiz-images/L5_Q2.webp",
       "options": {
         "A": "Player A exerts a larger force than Player B in the second collision.",
         "B": "The peak force is the same in both collisions because Player B is standing still.",
@@ -81,7 +83,7 @@
       "type": "multiple_choice",
       "question_number": 3,
       "stem": "Two students stand on skateboards facing each other. Student A pushes on Student B's hands to start B rolling away. While their hands are in contact, how do the forces compare?",
-      "image": "images/L5_Q3.png",
+      "image": "/quiz-images/L5_Q3.webp",
       "options": {
         "A": "Student B exerts no force because B is passive.",
         "B": "Student B exerts a larger force because B is being pushed backward.",
@@ -111,6 +113,7 @@
       "type": "multiple_choice",
       "question_number": 4,
       "stem": "A moving hockey puck hits a stationary puck of the same mass in a very brief collision. The moving puck has more kinetic energy before impact. During the collision, how do the peak forces on the two pucks compare?",
+      "image": "/quiz-images/L5_Q4.webp",
       "options": {
         "A": "The peak forces are equal in strength on both pucks.",
         "B": "The stationary puck exerts a larger peak force because it is not moving.",

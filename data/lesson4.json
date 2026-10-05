@@ -22,7 +22,7 @@
       "type": "multiple_choice",
       "question_number": 1,
       "stem": "A plastic spoon is bent. At first it springs back. If bent farther, it stays bent. If bent even farther, it snaps. Which statement best matches the terms?",
-      "image": "images/L4_Q1.png",
+      "image": "/quiz-images/L4_Q1.webp",
       "options": {
         "A": "The elastic limit is when it snaps.",
         "B": "The breaking point is when it first bends.",
@@ -52,6 +52,7 @@
       "type": "multiple_choice",
       "question_number": 2,
       "stem": "Two rulers are the same length but made of different materials. You push down on the center of each ruler with the same force and then let go. Ruler A springs back. Ruler B stays slightly bent. Which conclusion is best?",
+      "image": "/quiz-images/L4_Q2.webp",
       "options": {
         "A": "Both reached their elastic limit.",
         "B": "Ruler B did not deform because the force was not strong enough.",
@@ -81,6 +82,7 @@
       "type": "multiple_choice",
       "question_number": 3,
       "stem": "You push on a thick wooden table with your finger. The table does not appear to move or change shape. Which statement is scientifically accurate?",
+      "image": "/quiz-images/L4_Q3.webp",
       "options": {
         "A": "No deformation occurred because the table looks exactly the same as before.",
         "B": "Deformation only begins once the force is strong enough to leave a permanent dent.",
@@ -111,6 +113,7 @@
       "type": "multiple_choice",
       "question_number": 4,
       "stem": "Two beams are made of the same plastic. Beam X is twice as thick as Beam Y. If you apply the same amount of force to both, which will happen?",
+      "image": "/quiz-images/L4_Q4.webp",
       "options": {
         "A": "Beam Y deforms more because it is thinner.",
         "B": "Both deform the same because the same force is applied.",

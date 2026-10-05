@@ -58,6 +58,7 @@ export type QuizItem = {
   type: "multiple_choice" | "confidence_check";
   question_number?: number;
   stem: string;
+  image?: string;
   options: Record<string, string>;
   correct_answer?: string;
   matched_misconception?: string;

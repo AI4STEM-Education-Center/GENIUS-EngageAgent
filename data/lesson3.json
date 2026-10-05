@@ -15,6 +15,7 @@
       "type": "multiple_choice",
       "question_number": 1,
       "stem": "A steel ball hits a thick steel plate and bounces. Afterward, the plate looks exactly the same as before. During the moment of collision, did the steel plate deform at all?",
+      "image": "/quiz-images/L3_Q1.webp",
       "options": {
         "A": "No, steel is too hard to deform.",
         "B": "Yes, but only the ball deformed; the plate did not.",
@@ -44,6 +45,7 @@
       "type": "multiple_choice",
       "question_number": 2,
       "stem": "High-speed video shows a golf club hitting a golf ball. The ball looks flattened for a split second, then returns to its original shape. What is the best conclusion?",
+      "image": "/quiz-images/L3_Q2.webp",
       "options": {
         "A": "The ball's shape change was temporary.",
         "B": "Solid objects do not change shape when hit.",
@@ -73,6 +75,7 @@
       "type": "multiple_choice",
       "question_number": 3,
       "stem": "Two balls are the same material. One has twice the diameter of the other. You press each ball into soft clay with the same downward force. Which is most likely?",
+      "image": "/quiz-images/L3_Q3.webp",
       "options": {
         "A": "Neither makes a dent because the balls are solid.",
         "B": "Both make the same dent because the force is the same.",
@@ -101,7 +104,7 @@
       "type": "multiple_choice",
       "question_number": 4,
       "stem": "You press a nail into a block of soft wood with the same downward force two times. Trial 1: you press using the flat head of the nail. Trial 2: you press using the sharp tip of the nail. Which is most likely?",
-      "image": "images/L3_Q4.png",
+      "image": "/quiz-images/L3_Q4.webp",
       "options": {
         "A": "Neither makes a dent because the nail is solid.",
         "B": "Both make the same dent because the force is the same.",

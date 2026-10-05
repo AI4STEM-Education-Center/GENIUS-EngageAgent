@@ -22,7 +22,7 @@
       "type": "multiple_choice",
       "question_number": 1,
       "stem": "A cart is launched by the same spring. Trial 1 compresses the spring 2 cm. Trial 2 compresses it 5 cm. Which trial gives the cart more kinetic energy right after launch?",
-      "image": "images/L8_Q1.png",
+      "image": "/quiz-images/L8_Q1.webp",
       "options": {
         "A": "Trial 1",
         "B": "Trial 2",
@@ -51,6 +51,7 @@
       "type": "multiple_choice",
       "question_number": 2,
       "stem": "Two carts start from rest on the same low-friction track. You push each cart with the same constant force for the same amount of time. Cart A has a smaller mass than Cart B. Which statement is most accurate?",
+      "image": "/quiz-images/L8_Q2.webp",
       "options": {
         "A": "The heavier cart speeds up more because it has more mass.",
         "B": "Both carts reach the same speed because the force is the same.",
@@ -80,6 +81,7 @@
       "type": "multiple_choice",
       "question_number": 3,
       "stem": "A cart is launched from a spring and is now rolling across a flat low-friction track. The spring is no longer touching the cart. Which statement best describes the horizontal forces acting on the cart while it is coasting?",
+      "image": "/quiz-images/L8_Q3.webp",
       "options": {
         "A": "The forward force of the launch is still \"inside\" the cart, pushing it forward.",
         "B": "There is a constant forward force from the spring that keeps the cart moving.",
@@ -110,6 +112,7 @@
       "type": "multiple_choice",
       "question_number": 4,
       "stem": "A spring launches a cart. After the launch, the spring is at rest and the cart is moving. If you measure the energy, the cart has slightly less kinetic energy than the potential energy that was originally stored in the compressed spring. Where did the \"missing\" energy go?",
+      "image": "/quiz-images/L8_Q4.webp",
       "options": {
         "A": "The energy was used up by the spring to overcome its own weight.",
         "B": "Some energy was transferred into thermal (heat) and sound energy during the contact.",

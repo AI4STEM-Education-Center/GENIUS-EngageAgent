@@ -307,6 +307,15 @@ export default function StudentQuizView({ user, onProgress }: Props) {
                 >
                   {item.stem}
                 </p>
+                {!isConfidence && item.image && (
+                  <img
+                    src={item.image}
+                    alt={`Visual reference for question ${item.question_number ?? index + 1}`}
+                    loading="lazy"
+                    decoding="async"
+                    className="mt-4 h-auto max-h-[28rem] w-full max-w-2xl rounded-xl border border-slate-200 bg-white object-contain"
+                  />
+                )}
                 <div className="mt-3 grid gap-2">
                   {Object.entries(item.options).map(([key, value]) => {
                     const isSelected = selected === key;

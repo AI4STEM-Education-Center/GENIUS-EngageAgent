@@ -14,7 +14,7 @@
       "type": "multiple_choice",
       "question_number": 1,
       "stem": "Two soccer players collide head-to-head. Player 1 is bigger and faster. Which statement is best about the forces during the collision?",
-      "image": "images/L6_Q1.png",
+      "image": "/quiz-images/L6_Q1.webp",
       "options": {
         "A": "Only the faster player exerts force.",
         "B": "Both exert equal forces on each other.",
@@ -44,6 +44,7 @@
       "type": "multiple_choice",
       "question_number": 2,
       "stem": "The same soccer ball hits the same metal goalpost in two trials. In Trial 1, the ball is moving slowly. In Trial 2, the ball is moving much faster. In which trial will the ball flatten more during the impact?",
+      "image": "/quiz-images/L6_Q2.webp",
       "options": {
         "A": "Trial 1, because slower collisions cause more flattening.",
         "B": "Same, because the metal goalpost the ball hit is the same in both trials.",
@@ -72,6 +73,7 @@
       "type": "multiple_choice",
       "question_number": 3,
       "stem": "A fast skater (Player A) bumps into a slower skater (Player B). During the brief contact, how do the forces compare?",
+      "image": "/quiz-images/L6_Q3.webp",
       "options": {
         "A": "Player A exerts a larger force because A is faster.",
         "B": "Only Player A exerts a force because A is moving.",
@@ -101,6 +103,7 @@
       "type": "multiple_choice",
       "question_number": 4,
       "stem": "A larger football player and a smaller football player collide. The smaller player's speed changes more after the collision. What is the best explanation?",
+      "image": "/quiz-images/L6_Q4.webp",
       "options": {
         "A": "The larger player exerted a larger force on the smaller player.",
         "B": "The smaller player exerted no force because they were smaller.",
