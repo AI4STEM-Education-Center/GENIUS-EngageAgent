@@ -5,6 +5,7 @@ import Link from "next/link";
 import SurveyBuilderView from "./SurveyBuilderView";
 import MaterialActivityView from "./MaterialActivityView";
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "./SlidesWorkspace";
+import PublishedSlidesList from "./PublishedSlidesList";
 import { STRATEGIES as SLIDE_STRATEGIES, type SlideStrategy } from "@/lib/slides/model";
 import { parseMaterialActivity } from "@/lib/material-activities";
 import { downloadStudentMaterial, type PreparedMaterialFile } from "@/lib/material-export";
@@ -44,7 +45,7 @@ type Props = {
 type MaterialFormat = "text-image" | "slides" | "video";
 const materialFormats = [
   { id: "text-image", label: "Text + Image", description: "An activity with text and an illustration, ready to share with students." },
-  { id: "slides", label: "Slides", description: "Teaching slides with AI review, revisions, and PowerPoint download. Analogy uses six core slides, with an optional clarification page." },
+  { id: "slides", label: "Slides", description: "Teaching slides with AI review and revisions. Read them on the web, send them to students, or download PowerPoint. Analogy uses six core slides, with an optional clarification page." },
   { id: "video", label: "Video", description: "An activity with text and a short animated video, generated from its illustration." },
 ] as const;
 const isMaterialFormat = (value: unknown): value is MaterialFormat =>
@@ -234,6 +235,7 @@ const parsePersistedContentItem = (
   fallbackId?: string,
 ): ContentItem | null => {
   if (!isRecord(value)) return null;
+  if (value.type === "Slides" || "slides" in value) return null;
 
   const id = typeof value.id === "string" ? value.id : fallbackId;
   const type = typeof value.type === "string" ? value.type : "";
@@ -310,6 +312,8 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
   const slideEditorsRef = useRef<Partial<Record<SlideStrategy, SlidesWorkspaceHandle | null>>>({});
   const [slideBusy, setSlideBusy] = useState<Partial<Record<SlideStrategy, boolean>>>({});
   const [slideReady, setSlideReady] = useState<Partial<Record<SlideStrategy, boolean>>>({});
+  const [slidesPublicationVersion, setSlidesPublicationVersion] = useState(0);
+  const onSlidesPublished = useCallback(() => setSlidesPublicationVersion((value) => value + 1), []);
   const onSlideBusyChange = useCallback((strategy: SlideStrategy, busy: boolean) => {
     setSlideBusy((previous) => previous[strategy] === busy ? previous : { ...previous, [strategy]: busy });
   }, []);
@@ -2080,11 +2084,13 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
               </div>}
 
               <div hidden={materialFormat !== "slides"} className={materialFormat === "slides" ? "grid gap-6" : "hidden"}>
+                {nativeSlidesAvailable && materialFormat === "slides" && <PublishedSlidesList
+                  key={`${classId}:${assignmentId}`} classId={classId} assignmentId={assignmentId} refreshVersion={slidesPublicationVersion} />}
                 {isHydrated && nativeSlidesAvailable && selectedLesson && slideStrategies.map((strategy) => (
                   <SlidesWorkspace key={`${classId}:${assignmentId}:${selectedLesson}:${strategy}`} user={user}
                     ref={(editor) => { slideEditorsRef.current[strategy] = editor; }}
                     embeddedContext={{ lessonNumber: selectedLesson, strategy, classroomContext }}
-                    onBusyChange={onSlideBusyChange} onReadyChange={onSlideReadyChange} />
+                    onBusyChange={onSlideBusyChange} onReadyChange={onSlideReadyChange} onPublished={onSlidesPublished} />
                 ))}
               </div>
               <div hidden={materialFormat === "slides"} className={materialFormat === "slides" ? "hidden" : "grid gap-6"}>

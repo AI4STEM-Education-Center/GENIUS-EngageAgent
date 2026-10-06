@@ -1577,6 +1577,8 @@ export const listPublishedContent = async (
     const result = await client.send(
       new QueryCommand({
         TableName: dynamoTableName,
+        // A newly sent material must be readable immediately after publishing.
+        ConsistentRead: true,
         KeyConditionExpression:
           "#pk = :pk AND begins_with(#sk, :skPrefix)",
         ExpressionAttributeNames: {

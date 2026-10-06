@@ -25,6 +25,7 @@ export type ContentItem = {
   textModes?: TextMode[];
   visualBrief?: string;
   activity?: import("./material-activities").MaterialActivity;
+  slides?: import("./slides/publication").PublishedSlideReference;
 };
 
 export type ImageVersion = {

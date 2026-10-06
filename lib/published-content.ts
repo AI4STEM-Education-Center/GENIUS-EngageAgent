@@ -1,5 +1,6 @@
 import type { ContentItem, TextMode } from "@/lib/types";
 import { parseMaterialActivity } from "@/lib/material-activities";
+import { isPublishedSlideReference } from "@/lib/slides/publication";
 
 export type SharedContentMedia = {
   image?: string;
@@ -95,6 +96,9 @@ const parsePublishedContentItem = (item: PublishedItemResponse) => {
         ? parsed.visualBrief
         : undefined;
     const activity = parseMaterialActivity(parsed.activity, strategy);
+    const slides = type === "Slides" && isPublishedSlideReference(parsed.slides)
+      ? { publicationId: parsed.slides.publicationId, slideCount: parsed.slides.slideCount, lessonNumber: parsed.slides.lessonNumber }
+      : undefined;
 
     return {
       contentItem: {
@@ -106,6 +110,7 @@ const parsePublishedContentItem = (item: PublishedItemResponse) => {
         ...(textModes.length > 0 ? { textModes } : {}),
         ...(visualBrief ? { visualBrief } : {}),
         ...(activity ? { activity } : {}),
+        ...(slides ? { slides } : {}),
       } satisfies ContentItem,
       embeddedMedia: normalizeSharedMedia(parsed.media),
     };

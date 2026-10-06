@@ -5,6 +5,12 @@ import StudentContentReviewView from "@/app/components/StudentContentReviewView"
 import { conflictActivity } from "../fixtures/material-activities";
 import type { UserContext } from "@/lib/auth";
 
+vi.mock("@/app/components/PublishedSlidesReader", () => ({ default: ({ classId, assignmentId, publicationId, audience, onQuestion }: {
+  classId: string; assignmentId: string; publicationId: string; audience: string; onQuestion?: () => void;
+}) => <section aria-label="Published slides" data-class={classId} data-assignment={assignmentId} data-publication={publicationId} data-audience={audience}>
+  <button onClick={onQuestion}>Write my slide question</button>
+</section> }));
+
 const student: UserContext = {
   geniusId: "student", userId: "student", name: "Test student",
   email: null, role: "student", classId: "class", assignmentId: "assignment",
@@ -121,4 +127,39 @@ it("keeps prediction before evidence while retaining the platform question-submi
   fireEvent.change(screen.getByPlaceholderText("What are you wondering about this material?"), { target: { value: question } });
   fireEvent.click(screen.getByRole("button", { name: "Submit" }));
   await waitFor(() => expect(fetchMock.mock.calls.some(([input, init]) => input === "/api/review-questions" && init?.method === "POST" && String(init.body).includes(question))).toBe(true));
+});
+
+it("reads slide publications in the student reader and submits through the existing question form", async () => {
+  const publicationId = "4e96360b-17a4-4a54-84da-df0c5d2ef012";
+  const onProgress = vi.fn();
+  fetchMock.mockImplementation(async (input: string, init?: RequestInit) => {
+    if (input.startsWith("/api/content-publish")) return { ok: true, json: async () => ({ items: [{
+      content_item_id: "slides-deck", content_json: JSON.stringify({ type: "Slides", title: "A slide inquiry", body: "Legacy body must stay hidden.",
+        strategy: "cognitive conflict", slides: { publicationId, lessonNumber: 8, slideCount: 5 }, activity: conflictActivity }),
+      media: { image: "https://example.test/early-evidence.png" },
+    }] }) };
+    if (input.startsWith("/api/review-questions") && init?.method === "POST") return { ok: true, json: async () => ({ success: true }) };
+    return { ok: true, json: async () => ({}) };
+  });
+  render(<StudentContentReviewView user={student} onProgress={onProgress} ratingUnlocked={false} />);
+  const reader = await screen.findByRole("region", { name: "Published slides" });
+  expect(reader.dataset).toMatchObject({ class: student.classId, assignment: student.assignmentId, publication: publicationId, audience: "student" });
+  expect(screen.queryByText("Legacy body must stay hidden.")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Inquiry activity" })).toBeNull();
+  expect(screen.queryByRole("img")).toBeNull();
+  await waitFor(() => expect(onProgress).toHaveBeenLastCalledWith({ kind: "active" }));
+  fireEvent.click(within(reader).getByRole("button", { name: "Write my slide question" }));
+  const question = screen.getByPlaceholderText("What are you wondering about this material?");
+  expect(document.activeElement).toBe(question);
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  fireEvent.change(question, { target: { value: "How does winding change where the toy stops?" } });
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+  await waitFor(() => expect(onProgress).toHaveBeenLastCalledWith({ kind: "completed" }));
+  const submission = fetchMock.mock.calls.find(([input, init]) => input === "/api/review-questions" && init?.method === "POST");
+  expect(JSON.parse(String(submission?.[1]?.body))).toEqual({ classId: student.classId, assignmentId: student.assignmentId,
+    studentId: student.userId, questions: ["How does winding change where the toy stops?"] });
+  const rating = await ratingCard();
+  expect(within(rating).getByText(/Submit your questions first/)).toBeTruthy();
+  fireEvent.click(within(reader).getByRole("button", { name: "Write my slide question" }));
+  expect(document.activeElement).toBe(screen.getByText("Your questions").parentElement);
 });

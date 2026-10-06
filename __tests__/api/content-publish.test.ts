@@ -44,6 +44,20 @@ beforeEach(() => {
 });
 
 describe("POST /api/content-publish", () => {
+  it.each([
+    { type: "Slides" }, { slides: { publicationId: "fake" } }, { id: "slides-existing-deck" },
+  ])("rejects reserved Slides writes before publishing any batch items: %j", async (reserved) => {
+    const response = await POST(new Request("http://localhost:3000/api/content-publish", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ classId: "c1", assignmentId: "a1", contentItems: [
+        { id: "regular", type: "material", title: "Normal" }, { id: "b", type: "material", ...reserved },
+      ] }),
+    }));
+    expect(response.status).toBe(400);
+    const listed = await GET(new Request("http://localhost:3000/api/content-publish?classId=c1&assignmentId=a1"));
+    expect((await listed.json()).items).toHaveLength(0);
+  });
+
   it("should publish content items", async () => {
     const req = new Request("http://localhost:3000/api/content-publish", {
       method: "POST",
