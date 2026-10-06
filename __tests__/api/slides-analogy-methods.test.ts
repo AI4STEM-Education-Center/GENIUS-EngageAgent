@@ -1,23 +1,37 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ complete: vi.fn(), generate: vi.fn(), edit: vi.fn(), session: vi.fn(), context: vi.fn(), answers: vi.fn() }));
-vi.mock("openai", async importOriginal => ({ ...await importOriginal<object>(), default: class {
-  chat = { completions: { create: mocks.complete } };
-  images = { generate: mocks.generate, edit: mocks.edit };
-} }));
+const mocks = vi.hoisted(() => ({ begin: vi.fn(), complete: vi.fn(), generate: vi.fn(), edit: vi.fn(), session: vi.fn(), context: vi.fn(), answers: vi.fn() }));
+vi.mock("@/lib/slides/jobs", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/lib/slides/jobs")>();
+  const { installSlideJobHarness, beginTestSlideJob, completedImageResponse } = await import("../fixtures/slide-job-harness");
+  installSlideJobHarness(actual.finishSlideJob, async (params, spec, request) => {
+    if (spec.kind === "image") {
+      const tool = params.tools?.find(value => value.type === "image_generation");
+      const reply = await (tool?.type === "image_generation" && "action" in tool && tool.action === "edit" ? mocks.edit : mocks.generate)(params, { signal: request.signal });
+      return completedImageResponse(reply) as import("openai").default.Responses.Response;
+    }
+    return mocks.complete(params, { signal: request.signal });
+  });
+  return { ...actual, beginSlideJob: mocks.begin.mockImplementation(beginTestSlideJob) };
+});
 vi.mock("@/lib/session", () => ({ sessionUser: mocks.session, sameOriginRequest: (request: Request) => request.headers.get("origin") === "http://localhost" }));
 vi.mock("@/lib/workspace", async importOriginal => ({ ...await importOriginal<object>(), workspaceContext: mocks.context }));
 vi.mock("@/lib/nosql", () => ({ listStudentAnswers: mocks.answers }));
 
-import { POST } from "@/app/api/slides/route";
-import { POST as check } from "@/app/api/slides/check/route";
-import { POST as image } from "@/app/api/slides/image/route";
+import { POST as startDraft } from "@/app/api/slides/route";
+import { POST as startCheck } from "@/app/api/slides/check/route";
+import { POST as startImage } from "@/app/api/slides/image/route";
 import { analogyPromptRevision } from "@/lib/slides/prompt-versions";
 import { analogyMethodDeck, analogyMethodDraft } from "../fixtures/analogy-methods";
 
+import { finishSlideRoute, completedTextResponse } from "../fixtures/slide-job-harness";
+const POST = (request: Request) => finishSlideRoute(startDraft, request);
+const image = (request: Request) => finishSlideRoute(startImage, request);
+const check = (request: Request) => finishSlideRoute(startCheck, request);
+
 const base = { classId: "ea-class-test", assignmentId: "ea-task-test", lessonNumber: 5, strategy: "analogy" };
 const request = (data: unknown) => new Request("http://localhost/api/slides", { method: "POST", headers: { "Content-Type": "application/json", origin: "http://localhost" }, body: JSON.stringify(data) });
-const completion = (value: unknown) => ({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(value) } }] });
+const completion = completedTextResponse;
 const generated = (method: "reference-story" | "predict-transfer" = "reference-story") => {
   const draft = analogyMethodDraft(method);
   delete draft.analogyMethod; // Application-owned metadata is absent from model output.
@@ -44,13 +58,13 @@ it.each(["reference", "optimized"] as const)("injects the selected reference met
   expect(body.draft.visuals.map((visual: { id: string }) => visual.id)).toEqual(["analogue", "target"]);
   expect(body.promptProvenance).toMatchObject({ version: promptVersion, analogyMethod: "reference-story", revision: analogyPromptRevision("reference-story") });
   const call = mocks.complete.mock.calls[0][0];
-  const schema = call.response_format.json_schema.schema;
+  const schema = call.text.format.schema;
   expect(schema.properties).not.toHaveProperty("analogyMethod");
   expect(schema.properties.visuals.minItems).toBe(2);
   expect(schema.properties.visuals.maxItems).toBe(2);
   expect(schema.properties.analogyPlan.properties).not.toHaveProperty("changedInput");
   expect(schema.properties.slides.items.anyOf[2].properties.stage.enum).toEqual(["mapping"]);
-  expect(JSON.parse(call.messages[1].content).appOwnedImagePlacement[1]).toEqual({ slide: 2, images: ["analogue"] });
+  expect(JSON.parse(call.input[0].content).appOwnedImagePlacement[1]).toEqual({ slide: 2, images: ["analogue"] });
   expect(mocks.complete).toHaveBeenCalledTimes(1);
   expect(mocks.generate).not.toHaveBeenCalled();
 });
@@ -81,8 +95,8 @@ it("derives the reference method from a revision draft when the caller omits the
   expect(response.status).toBe(200);
   expect((await response.json()).draft.analogyMethod).toBe("reference-story");
   const call = mocks.complete.mock.calls[0][0];
-  expect(call.response_format.json_schema.schema.properties.visuals.minItems).toBe(2);
-  expect(JSON.parse(call.messages[1].content).appOwnedImagePlacement[2]).toEqual({ slide: 3, images: ["analogue", "target"] });
+  expect(call.text.format.schema.properties.visuals.minItems).toBe(2);
+  expect(JSON.parse(call.input[0].content).appOwnedImagePlacement[2]).toEqual({ slide: 3, images: ["analogue", "target"] });
 });
 
 it("rejects an explicit method change on reference and legacy revision drafts before any provider call", async () => {
@@ -122,13 +136,13 @@ it("grounds reference target image review in the actual third-page scaffold and 
   mocks.complete.mockResolvedValueOnce(completion({ issues: [] }));
   const response = await check(request({ ...base, draft: deck.draft, visualId: "target", asset: deck.assets.target, referenceAsset: familiar }));
   expect(response.status).toBe(200);
-  const content = mocks.complete.mock.calls[0][0].messages[1].content;
+  const content = mocks.complete.mock.calls[0][0].input[0].content;
   const context = JSON.parse(content[0].text);
   expect(context.mappingSlide).toEqual(deck.draft.slides[2]);
   expect(context.mappingSlide).not.toEqual(deck.draft.slides[1]);
   expect(context.openingSlide).toEqual(deck.draft.slides[0]);
   expect(context.studentScaffold).toEqual({ hint: deck.draft.analogyPlan!.mappingHint, starter: deck.draft.analogyPlan!.responseStarter });
-  expect(content.filter((part: { type: string }) => part.type === "image_url").map((part: { image_url: { url: string } }) => part.image_url.url)).toEqual([familiar.data, deck.assets.target.data]);
+  expect(content.filter((part: { type: string }) => part.type === "input_image").map((part: { image_url: string }) => part.image_url)).toEqual([familiar.data, deck.assets.target.data]);
   expect(mocks.complete).toHaveBeenCalledTimes(1);
 });
 

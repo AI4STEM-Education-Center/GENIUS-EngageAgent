@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { buildStudentMaterialHtml } from "@/lib/material-export";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildStudentMaterialHtml, downloadStudentMaterial } from "@/lib/material-export";
 import type { ContentItem } from "@/lib/types";
 import { analogyActivity, conflictActivity } from "../fixtures/material-activities";
 
 const image = "data:image/png;base64,aGVsbG8=";
 const item: ContentItem = { id: "material", type: "phenomenon", title: "A bounce", body: "Full flattened story must not leak.", strategy: "cognitive conflict", activity: conflictActivity };
 const documentFor = (html: string) => new DOMParser().parseFromString(html, "text/html");
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("standalone student material download", () => {
   it("embeds the full activity and image without private image plans or flattened text", () => {
@@ -64,5 +65,47 @@ describe("standalone student material download", () => {
     expect(doc.querySelectorAll("img")).toHaveLength(1);
     expect(() => buildStudentMaterialHtml(item, "https://example.test/image.png")).toThrow(/embedded/);
     expect(() => buildStudentMaterialHtml(item, "data:image/svg+xml;base64,aGVsbG8=")).toThrow(/embedded/);
+  });
+
+  it("retains identical HTML bytes for automatic blob download and a persistent data URI fallback", async () => {
+    const create = vi.fn().mockReturnValue("blob:material"); const revoke = vi.fn();
+    vi.stubGlobal("URL", Object.assign(class extends URL {}, { createObjectURL: create, revokeObjectURL: revoke }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(["hello"], { type: "image/png" }) }));
+    const clicked: HTMLAnchorElement[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { clicked.push(this); });
+    const file = await downloadStudentMaterial(item, "https://example.test/image.png");
+    expect(file.url).toBe("blob:material");
+    expect(file.fileName).toBe("A-bounce.html");
+    const decoded = Buffer.from(file.dataUri.split(",")[1], "base64").toString("utf8");
+    expect(decoded).toBe(buildStudentMaterialHtml(item, image));
+    const blobText = await new Promise<string>(resolve => {
+      const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(create.mock.calls[0][0]);
+    });
+    expect(blobText).toBe(decoded);
+    expect(clicked[0].href).toBe(file.url);
+    expect(clicked[0].download).toBe(file.fileName);
+    expect(clicked[0].isConnected).toBe(false);
+    expect(revoke).not.toHaveBeenCalled();
+  });
+
+  it("still returns the fallback file when a browser blocks the automatic anchor click", async () => {
+    vi.stubGlobal("URL", Object.assign(class extends URL {}, { createObjectURL: () => "blob:blocked-material" }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(["hello"], { type: "image/png" }) }));
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => { throw new Error("Automatic download blocked"); });
+    const file = await downloadStudentMaterial(item, image);
+    expect(file.dataUri).toMatch(/^data:text\/html;charset=utf-8;base64,/);
+    expect(document.querySelector('a[download]')).toBeNull();
+  });
+
+  it("does not create or click a stale file after its image request is aborted", async () => {
+    let finish: (value: unknown) => void = () => {};
+    const create = vi.fn();
+    vi.stubGlobal("URL", Object.assign(class extends URL {}, { createObjectURL: create }));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise(resolve => { finish = resolve; })));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const controller = new AbortController(); const request = downloadStudentMaterial(item, image, controller.signal);
+    controller.abort(); finish({ ok: true, blob: async () => new Blob(["hello"], { type: "image/png" }) });
+    await expect(request).rejects.toThrow();
+    expect(create).not.toHaveBeenCalled(); expect(click).not.toHaveBeenCalled();
   });
 });

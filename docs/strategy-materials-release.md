@@ -24,4 +24,14 @@ Use the existing Amplify application connected to this repository. The build use
 
 Local tests and a successful production build do not establish that the live site has deployed. Acceptance must separately verify the production teacher login, a private QA class/task, all three strategy generators, image checks, refresh recovery and real downloaded files. Verify long provider requests and payloads through the actual Amplify ingress. If a provider or gateway fails, the interface retains completed draft work and offers a retry.
 
+### Production timeout correction
+
+The first production smoke test on October 6 reached the new teacher interface, generated all three Text + Image activities and their stored images, but the synchronous slide requests returned HTTP 504 before producing a draft. The follow-up uses the [OpenAI Responses background API](https://developers.openai.com/api/docs/guides/background) for slide generation, revision and checks, and the [image-generation tool](https://developers.openai.com/api/docs/guides/tools-image-generation) for background image work. Each website request submits or polls a job; it does not continue local work after returning an HTTP response.
+
+The existing workspace table stores an opaque job ID, owner/class/task context, bounded validation metadata and a server-only provider response ID. Every poll and cancellation rechecks the signed teacher session and class/task ownership. Provider calls explicitly use `store: false`; polling tickets expire before the provider's approximately ten-minute background retrieval window. Completed drafts are recovered from the browser's existing draft store. In-flight work is not automatically restarted after reload. Cancellation is best effort; the client does not automatically resubmit paid generation on a network failure.
+
+The application rejects expired tickets after nine minutes. Physical DynamoDB cleanup requires TTL to be enabled for the top-level `expiresAt` attribute; that table setting has not been verified by this release. A lost initial submission response can leave provider work running until it completes, which is why submission is never automatically repeated.
+
+Text + Image HTML downloads retain an explicit **Save material file** link in addition to automatic saving. This supports embedded browsers that do not complete automatic blob downloads. A narrow CC/EB prompt correction also requires deformation to match the named material and component; a schematic cannot invent a dent in an ordinary cart body merely because it contacts foam. Analogy prompts are unchanged by this correction.
+
 Rollback through the existing Amplify deployment history to the preceding application commit. Preserve class/task, assessment, media and student-response records.

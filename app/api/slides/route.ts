@@ -1,14 +1,14 @@
-import OpenAI from "openai";
 import { getAllLessons } from "@/lib/quiz-data";
 import { slideOutputFormat, slidePrompt } from "@/lib/slides/prompts";
 import { authorizeSlides, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, slideContext, slideDiagnosticContext, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
 import { existingGenerationKey, resolveSlideModel, slideModelCatalog, slideTextRequestLimits, slideTextSettings } from "@/lib/slides/model-config";
 import { analogyPromptRevision, isSlidePromptVersion, SLIDE_PROMPT_REVISION } from "@/lib/slides/prompt-versions";
-import { SIX_STEP_CONTEXT_FIELDS } from "@/lib/slides/analogy";
+import { beginSlideJob } from "@/lib/slides/jobs";
 import { loadSlideSource } from "@/lib/slides/source-prompts";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// Submit a background job; generation and polling use separate short requests.
+export const maxDuration = 30;
 
 export async function GET(request: Request) {
   try {
@@ -31,29 +31,23 @@ export async function POST(request: Request) {
     const analogyMethod = requestAnalogyMethod(body.analogyMethod, strategy, draft);
     if (body.feedback !== undefined && (typeof body.feedback !== "string" || body.feedback.length > 6000)) throw new SlideRequestError("Revision feedback must be at most 6000 characters.");
     const model = resolveSlideModel("text", body.textModel);
-    const apiKey = existingGenerationKey();
+    existingGenerationKey();
     const diagnostic = await slideDiagnosticContext(authorized, lesson.lessonNumber);
     const source = await loadSlideSource(strategy, analogyMethod);
     const prompt = slidePrompt(lesson, strategy, draft, body.feedback as string | undefined, diagnostic, { version: promptVersion, referenceText: source.text, classroomContext, analogyMethod });
     const limits = slideTextRequestLimits(model, "generate");
-    const client = new OpenAI({ apiKey, maxRetries: 0, timeout: limits.timeoutMs });
-    const result = await client.chat.completions.create({
-      model, ...slideTextSettings(model),
-      messages: [{ role: "system", content: prompt.system }, { role: "user", content: prompt.user }],
-      response_format: slideOutputFormat(strategy, analogyMethod), max_completion_tokens: limits.maxCompletionTokens,
-    }, { signal: request.signal });
-    const choice = result.choices[0];
-    if (choice?.finish_reason !== "stop" || !choice.message.content || choice.message.refusal) throw new SlideRequestError("The model did not return a complete slide draft. Please try again.", 502);
-    let parsed: unknown;
-    try { parsed = JSON.parse(choice.message.content); }
-    catch { throw new SlideRequestError("The model returned an unreadable draft. Please try again.", 502); }
-    // Retain bounded, editable text even if it needs shortening; export stays strict.
-    const generated = requestDraft(parsed, strategy, true, analogyMethod);
-    if (strategy === "analogy" && !generated.analogyPlan) throw new SlideRequestError("The analogy design is incomplete. Please retry generation.", 502);
-    if (analogyMethod === "six-step" && (SIX_STEP_CONTEXT_FIELDS.some(field => !generated.analogyPlan?.[field]?.trim()) || generated.analogyPlan?.mappingHint !== "")) {
-      throw new SlideRequestError("The teacher-led analogy design is incomplete. Please retry generation.", 502);
-    }
-    return slideJson({ draft: generated, model,
-      promptProvenance: { version: promptVersion, revision: strategy === "analogy" ? analogyPromptRevision(analogyMethod) : SLIDE_PROMPT_REVISION, sourceSha256: source.sha256, ...(analogyMethod ? { analogyMethod } : {}) } });
+    const format = slideOutputFormat(strategy, analogyMethod).json_schema;
+    const { reasoning_effort } = slideTextSettings(model);
+    return await beginSlideJob(request, authorized, {
+      model,
+      ...(reasoning_effort ? { reasoning: { effort: reasoning_effort } } : {}),
+      instructions: prompt.system,
+      input: [{ role: "user", content: prompt.user }],
+      text: { format: { ...format, type: "json_schema", schema: format.schema! } },
+      max_output_tokens: limits.maxCompletionTokens,
+    }, {
+      kind: "draft", model, strategy, ...(analogyMethod ? { analogyMethod } : {}),
+      promptProvenance: { version: promptVersion, revision: strategy === "analogy" ? analogyPromptRevision(analogyMethod) : SLIDE_PROMPT_REVISION, sourceSha256: source.sha256, ...(analogyMethod ? { analogyMethod } : {}) },
+    });
   } catch (error) { return slideFailure(error); }
 }

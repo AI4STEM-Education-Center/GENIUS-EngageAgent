@@ -7,7 +7,7 @@ import MaterialActivityView from "./MaterialActivityView";
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "./SlidesWorkspace";
 import { STRATEGIES as SLIDE_STRATEGIES, type SlideStrategy } from "@/lib/slides/model";
 import { parseMaterialActivity } from "@/lib/material-activities";
-import { downloadStudentMaterial } from "@/lib/material-export";
+import { downloadStudentMaterial, type PreparedMaterialFile } from "@/lib/material-export";
 import type { UserContext } from "@/lib/auth";
 import { MOCK_USER_STORAGE_KEY, parseMockUserRole } from "@/lib/mock-auth";
 import {
@@ -299,6 +299,9 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
   const [content, setContent] = useState<ContentItem[]>([]);
   const [loadingContent, setLoadingContent] = useState(false);
   const [downloadingMaterialId, setDownloadingMaterialId] = useState<string | null>(null);
+  const [preparedMaterial, setPreparedMaterial] = useState<(PreparedMaterialFile & { item: ContentItem; imageUrl: string; workspace: string }) | null>(null);
+  const materialDownloadJob = useRef<{ controller: AbortController; item: ContentItem; imageUrl: string; workspace: string } | null>(null);
+  const materialWorkspace = JSON.stringify([user.geniusId, classId, assignmentId]);
   const initialFormatRef = useRef(initialMaterialFormat);
   const [materialFormat, setMaterialFormat] = useState<MaterialFormat>(initialMaterialFormat ?? "text-image");
   const [classroomContext, setClassroomContext] = useState("");
@@ -314,6 +317,16 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     setSlideReady((previous) => previous[strategy] === ready ? previous : { ...previous, [strategy]: ready });
   }, []);
   const [images, setImages] = useState<Record<string, ImageState>>({});
+  useEffect(() => {
+    const current = (source: { item: ContentItem; imageUrl: string; workspace: string }) => source.workspace === materialWorkspace
+      && content.some(item => item === source.item) && images[source.item.id]?.status === "ready" && images[source.item.id]?.url === source.imageUrl;
+    if (preparedMaterial && !current(preparedMaterial)) setPreparedMaterial(null);
+    if (materialDownloadJob.current && !current(materialDownloadJob.current)) {
+      materialDownloadJob.current.controller.abort(); materialDownloadJob.current = null; setDownloadingMaterialId(null);
+    }
+  }, [content, images, materialWorkspace, preparedMaterial]);
+  useEffect(() => () => { if (preparedMaterial) URL.revokeObjectURL(preparedMaterial.url); }, [preparedMaterial]);
+  useEffect(() => () => { materialDownloadJob.current?.controller.abort(); materialDownloadJob.current = null; }, []);
   const [videos, setVideos] = useState<Record<string, VideoState>>({});
   const [focusImage, setFocusImage] = useState<{ url: string; title: string } | null>(null);
   const [focusVideo, setFocusVideo] = useState<{ url: string; title: string } | null>(null);
@@ -1195,15 +1208,20 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
   };
 
   const downloadMaterial = async (item: ContentItem) => {
-    if (images[item.id]?.status !== "ready" || !images[item.id]?.url || downloadingMaterialId) return;
+    if (images[item.id]?.status !== "ready" || !images[item.id]?.url || materialDownloadJob.current) return;
+    const job = { controller: new AbortController(), item, imageUrl: images[item.id].url!, workspace: materialWorkspace };
+    materialDownloadJob.current = job;
     setDownloadingMaterialId(item.id);
+    setPreparedMaterial(null);
     setError(null);
     try {
-      await downloadStudentMaterial(item, images[item.id].url!);
+      const file = await downloadStudentMaterial(item, job.imageUrl, job.controller.signal);
+      if (job.controller.signal.aborted || materialDownloadJob.current !== job) { URL.revokeObjectURL(file.url); return; }
+      setPreparedMaterial({ ...file, item, imageUrl: job.imageUrl, workspace: job.workspace });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to download the material.");
+      if (!job.controller.signal.aborted) setError(err instanceof Error ? err.message : "Unable to download the material.");
     } finally {
-      setDownloadingMaterialId(null);
+      if (materialDownloadJob.current === job) { materialDownloadJob.current = null; setDownloadingMaterialId(null); }
     }
   };
 
@@ -2218,6 +2236,12 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                               className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:text-slate-400">
                               {downloadingMaterialId === item.id ? "Preparing download..." : "Download material (HTML)"}
                             </button>}
+                            {materialFormat === "text-image" && preparedMaterial?.item === item && preparedMaterial.workspace === materialWorkspace
+                              && images[item.id]?.status === "ready" && preparedMaterial.imageUrl === images[item.id]?.url && <div className="mt-2 text-sm text-slate-600">
+                                <p>Material ready. If downloading did not start, use the save link.</p>
+                                <a href={preparedMaterial.dataUri || preparedMaterial.url} download={preparedMaterial.fileName}
+                                  className="mt-2 inline-flex min-h-10 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 font-semibold text-slate-700 hover:bg-slate-100">Save material file</a>
+                              </div>}
                             {item.activity ? <MaterialActivityView key={item.id} activity={item.activity} preview media={{ image: images[item.id]?.url, video: materialFormat === "video" ? videos[item.id]?.url : undefined }} /> : <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-600">{item.body}</p>}
                           </div>
                         </div>
