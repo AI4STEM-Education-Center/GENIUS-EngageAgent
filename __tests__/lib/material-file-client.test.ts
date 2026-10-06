@@ -26,6 +26,16 @@ it("skips upload without authorized workspace context or above the exact raw-byt
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
+it("uploads exactly 4.4 MB but does not submit a Blob one byte larger", async () => {
+  expect(MAX_MATERIAL_FILE_BYTES).toBe(4_400_000);
+  fetchMock.mockResolvedValue({ ok: true, json: async () => ({ url: "https://files.example.test/material.html", fileName: "Material.html" }) });
+  const boundary = new Blob([new Uint8Array(MAX_MATERIAL_FILE_BYTES)], { type: "text/html;charset=utf-8" });
+  expect(await uploadMaterialFile(boundary, "Material.html", scope)).toBeDefined();
+  expect(fetchMock.mock.calls[0][1].body).toBe(boundary);
+  expect(await uploadMaterialFile(new Blob([boundary, "x"], { type: boundary.type }), "Material.html", scope)).toBeUndefined();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
 it.each([401, 413, 503])("falls back without retry when the attachment endpoint returns %s", async status => {
   fetchMock.mockResolvedValue({ ok: false, status });
   expect(await uploadMaterialFile(blob, "Material.html", scope)).toBeUndefined();

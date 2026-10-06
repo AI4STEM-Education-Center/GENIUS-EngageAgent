@@ -4,14 +4,14 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import JSZip from "jszip";
 import { authorizeSlides, SlideRequestError } from "./slides/server";
 
-export const MAX_MATERIAL_FILE_BYTES = 4_000_000;
+export const MAX_MATERIAL_FILE_BYTES = 4_400_000;
 export const MATERIAL_FILE_URL_SECONDS = 600;
 export const PPTX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 async function readFileBytes(request: Request): Promise<Buffer> {
   const declared = request.headers.get("content-length");
   if (declared && (!/^\d+$/u.test(declared) || Number(declared) > MAX_MATERIAL_FILE_BYTES)) {
-    throw new SlideRequestError("The file exceeds the 4 MB hosted-download limit. Use the local save link.", 413);
+    throw new SlideRequestError("The file exceeds the 4.4 MB hosted-download limit. Use the local save link.", 413);
   }
   const reader = request.body?.getReader();
   if (!reader) throw new SlideRequestError("Provide the prepared material file.");
@@ -24,7 +24,7 @@ async function readFileBytes(request: Request): Promise<Buffer> {
       bytes += next.value.byteLength;
       if (bytes > MAX_MATERIAL_FILE_BYTES) {
         await reader.cancel();
-        throw new SlideRequestError("The file exceeds the 4 MB hosted-download limit. Use the local save link.", 413);
+        throw new SlideRequestError("The file exceeds the 4.4 MB hosted-download limit. Use the local save link.", 413);
       }
       chunks.push(next.value);
     }
