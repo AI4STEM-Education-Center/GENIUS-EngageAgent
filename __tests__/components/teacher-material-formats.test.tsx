@@ -321,12 +321,25 @@ it("downloads the complete selected student material with its current image", as
   const download = screen.getByRole("button", { name: "Download material (HTML)" });
   await waitFor(() => expect(download).toBeEnabled());
   fireEvent.click(download);
-  await waitFor(() => expect(mocks.download).toHaveBeenCalledWith(expect.objectContaining(item), "https://example.test/current.png", expect.any(AbortSignal)));
+  await waitFor(() => expect(mocks.download).toHaveBeenCalledWith(expect.objectContaining(item), "https://example.test/current.png", expect.any(AbortSignal), { classId: user.classId, assignmentId: user.assignmentId }));
   const link = await screen.findByRole("link", { name: "Save material file" });
   expect(link).toHaveAttribute("href", "data:text/html;charset=utf-8;base64,aGVsbG8=");
   expect(link).toHaveAttribute("download", "Shared-activity.html");
   expect(link).not.toHaveAttribute("target");
   expect(mocks.revoke).not.toHaveBeenCalled();
+});
+
+it("prefers the HTTP material attachment and keeps the local Blob separate for cleanup", async () => {
+  const item = { id: "http-download", type: "phenomenon", title: "HTTP activity", body: "Compare the observations.", strategy: "analogy" };
+  seedDraft({ content: [item], images: { [item.id]: { status: "ready", url: "https://example.test/current.png" } } });
+  mocks.download.mockResolvedValueOnce({ url: "blob:http-material", dataUri: "data:text/html;base64,aGVsbG8=", httpUrl: "https://files.example.test/material.html", fileName: "Material.html" });
+  const view = render(<TeacherView user={user} />); await ready();
+  const download = screen.getByRole("button", { name: "Download material (HTML)" });
+  await waitFor(() => expect(download).toBeEnabled()); fireEvent.click(download);
+  expect(await screen.findByRole("link", { name: "Save material file" })).toHaveAttribute("href", "https://files.example.test/material.html");
+  expect(screen.getByText(/Save link expires in 10 minutes/)).toBeTruthy();
+  view.unmount(); expect(mocks.revoke).toHaveBeenCalledWith("blob:http-material");
+  expect(mocks.revoke).not.toHaveBeenCalledWith("https://files.example.test/material.html");
 });
 
 it("releases prepared material files on replacement and unmount", async () => {

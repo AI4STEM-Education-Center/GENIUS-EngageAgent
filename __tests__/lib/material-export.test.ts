@@ -97,6 +97,23 @@ describe("standalone student material download", () => {
     expect(document.querySelector('a[download]')).toBeNull();
   });
 
+  it.each([true, false])("uploads the same HTML Blob once and downloads one file with storage available=%s", async available => {
+    const create = vi.fn().mockReturnValue("blob:material");
+    vi.stubGlobal("URL", Object.assign(class extends URL {}, { createObjectURL: create }));
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, blob: async () => new Blob(["hello"], { type: "image/png" }) })
+      .mockResolvedValueOnce({ ok: available, json: async () => ({ url: "https://files.example.test/material.html", fileName: "Material.html" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const clicked: HTMLAnchorElement[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { clicked.push(this); });
+    const file = await downloadStudentMaterial(item, image, undefined, { classId: "ea-class-a", assignmentId: "ea-task-a" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1].body).toBe(create.mock.calls[0][0]);
+    expect(file.url).toBe("blob:material");
+    expect(file.httpUrl).toBe(available ? "https://files.example.test/material.html" : undefined);
+    expect(clicked).toHaveLength(1);
+    expect(clicked[0].href).toBe(available ? file.httpUrl : file.url);
+  });
+
   it("does not create or click a stale file after its image request is aborted", async () => {
     let finish: (value: unknown) => void = () => {};
     const create = vi.fn();
@@ -106,6 +123,24 @@ describe("standalone student material download", () => {
     const controller = new AbortController(); const request = downloadStudentMaterial(item, image, controller.signal);
     controller.abort(); finish({ ok: true, blob: async () => new Blob(["hello"], { type: "image/png" }) });
     await expect(request).rejects.toThrow();
+    expect(create).not.toHaveBeenCalled(); expect(click).not.toHaveBeenCalled();
+  });
+
+  it("does not automatically download a late HTTP attachment after the workspace aborts", async () => {
+    let finish: (value: unknown) => void = () => {};
+    let started: () => void = () => {};
+    const uploading = new Promise<void>(resolve => { started = resolve; });
+    const create = vi.fn();
+    vi.stubGlobal("URL", Object.assign(class extends URL {}, { createObjectURL: create }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({ ok: true, blob: async () => new Blob(["hello"], { type: "image/png" }) })
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; started(); })));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const controller = new AbortController();
+    const pending = downloadStudentMaterial(item, image, controller.signal, { classId: "ea-class-a", assignmentId: "ea-task-a" });
+    const failure = expect(pending).rejects.toThrow();
+    await uploading; controller.abort();
+    finish({ ok: true, json: async () => ({ url: "https://files.example.test/old-material.html", fileName: "Old.html" }) });
+    await failure;
     expect(create).not.toHaveBeenCalled(); expect(click).not.toHaveBeenCalled();
   });
 });

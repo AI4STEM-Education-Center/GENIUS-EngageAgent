@@ -69,6 +69,19 @@ it("removes the prepared save link when review is withdrawn or the deck is edite
   expect(mocks.revoke).toHaveBeenCalledWith("blob:edited-pptx");
 });
 
+it("prefers an HTTP attachment save link while retaining and revoking only its local Blob", async () => {
+  mocks.download.mockResolvedValueOnce({ url: "blob:http-backed-pptx", dataUri: preparedDataUri, httpUrl: "https://files.example.test/lesson.pptx", fileName: "Lesson.pptx" });
+  await generate(); fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: "Download PPTX" }));
+  const link = await screen.findByRole("link", { name: "Save PPTX file" });
+  expect(link.getAttribute("href")).toBe("https://files.example.test/lesson.pptx");
+  expect(mocks.download.mock.calls[0][2]).toEqual({ classId: user.classId, assignmentId: user.assignmentId });
+  expect(mocks.download.mock.calls[0][3]).toBeInstanceOf(AbortSignal);
+  expect(screen.getByText(/Save link expires in 10 minutes/)).toBeTruthy();
+  cleanup(); expect(mocks.revoke).toHaveBeenCalledWith("blob:http-backed-pptx");
+  expect(mocks.revoke).not.toHaveBeenCalledWith("https://files.example.test/lesson.pptx");
+});
+
 it("releases a file that finishes preparing after the workspace closes", async () => {
   await generate();
   let finish: (file: { url: string; fileName: string }) => void = () => {};
@@ -76,7 +89,9 @@ it("releases a file that finishes preparing after the workspace closes", async (
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.click(screen.getByRole("button", { name: "Download PPTX" }));
   expect(screen.queryByRole("link", { name: "Save PPTX file" })).toBeNull();
+  const signal = mocks.download.mock.calls[0][3] as AbortSignal;
   cleanup();
+  expect(signal.aborted).toBe(true);
   await act(async () => { finish({ url: "blob:closed-workspace", fileName: "Closed.pptx" }); });
   expect(mocks.revoke).toHaveBeenCalledWith("blob:closed-workspace");
 });

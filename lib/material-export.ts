@@ -1,4 +1,5 @@
 import type { ContentItem } from "./types";
+import { uploadMaterialFile, type MaterialFileScope } from "./material-file-client";
 
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -67,10 +68,10 @@ ${activity ? '<button type="button" id="continue">Continue</button><noscript><p>
 </script>` : ""}</body></html>`;
 }
 
-export type PreparedMaterialFile = { url: string; dataUri: string; fileName: string };
+export type PreparedMaterialFile = { url: string; dataUri: string; fileName: string; httpUrl?: string };
 
 /** The caller retains/revokes the blob URL; both save paths contain the same standalone HTML. */
-export async function downloadStudentMaterial(item: ContentItem, imageUrl: string, signal?: AbortSignal): Promise<PreparedMaterialFile> {
+export async function downloadStudentMaterial(item: ContentItem, imageUrl: string, signal?: AbortSignal, scope?: MaterialFileScope): Promise<PreparedMaterialFile> {
   signal?.throwIfAborted();
   const response = await fetch(imageUrl.startsWith("data:") ? imageUrl : `/api/download?url=${encodeURIComponent(imageUrl)}`, { signal });
   if (!response.ok) throw new Error("Unable to download the image. Please try again.");
@@ -92,13 +93,15 @@ export async function downloadStudentMaterial(item: ContentItem, imageUrl: strin
     reader.readAsDataURL(file);
   });
   signal?.throwIfAborted();
-  const url = URL.createObjectURL(file);
   const fileName = `${item.title.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-|-$/g, "").slice(0, 100) || "engage-agent-material"}.html`;
+  const attachment = await uploadMaterialFile(file, fileName, scope, signal);
+  signal?.throwIfAborted();
+  const url = URL.createObjectURL(file);
   const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
+  link.href = attachment?.url || url;
+  link.download = attachment?.fileName || fileName;
   try { document.body.appendChild(link); link.click(); }
   catch { /* A persistent visible link supports browsers that block automatic saving. */ }
   finally { link.remove(); }
-  return { url, dataUri: fileDataUri, fileName };
+  return { url, dataUri: fileDataUri, fileName: attachment?.fileName || fileName, ...(attachment ? { httpUrl: attachment.url } : {}) };
 }
