@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { describe, expect, it } from "vitest";
-import { analyzeDailyExperiences, DEFAULT_ANALYSIS_MODEL, type ChatClient } from "@/lib/daily-experience-llm";
+import { DEFAULT_ANALYSIS_MODEL, updateDailyExperienceAnalysis, type ChatClient } from "@/lib/daily-experience-llm";
 import { dailyExperienceResponses, dailyExperienceSurvey } from "../fixtures/daily-experience";
 
 // Explicitly opt in: uses real provider credits on the made-up fixture
@@ -12,10 +12,11 @@ describe.skipIf(!enabled)("live daily-experience analysis (#114)", () => {
   it("finds soccer then basketball in the fixture class", async () => {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) as unknown as ChatClient;
     const model = process.env.OPENAI_SURVEY_ANALYSIS_MODEL ?? DEFAULT_ANALYSIS_MODEL;
-    const { summary, grouping } = await analyzeDailyExperiences({
+    const { summary, grouping } = await updateDailyExperienceAnalysis({
       client,
       survey: dailyExperienceSurvey,
       responses: dailyExperienceResponses,
+      previous: null,
       model,
     });
 

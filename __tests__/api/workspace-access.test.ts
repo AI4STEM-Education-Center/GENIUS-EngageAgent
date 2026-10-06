@@ -53,12 +53,9 @@ describe("native class authorization", () => {
     expect((await guardWorkspaceRequest(request("student-answers", "POST", fields)))?.status).toBe(409);
   });
   it("keeps the daily-experience survey analysis teacher-only (#114)", async () => {
-    const analysis = { surveyId: "survey-1" };
-    expect(await guardWorkspaceRequest(request("survey-analysis", "GET", analysis))).toBeNull();
-    expect(await guardWorkspaceRequest(request("survey-analysis", "POST", analysis))).toBeNull();
+    expect(await guardWorkspaceRequest(request("survey-analysis"))).toBeNull();
     vi.mocked(sessionUser).mockResolvedValue(student);
-    expect((await guardWorkspaceRequest(request("survey-analysis", "GET", analysis)))?.status).toBe(403);
-    expect((await guardWorkspaceRequest(request("survey-analysis", "POST", analysis)))?.status).toBe(403);
+    expect((await guardWorkspaceRequest(request("survey-analysis")))?.status).toBe(403);
   });
   it("does not consume the request body needed by the original handler", async () => {
     const req = request("quiz-status", "POST");

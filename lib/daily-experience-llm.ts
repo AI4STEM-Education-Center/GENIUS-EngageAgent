@@ -4,10 +4,11 @@ import {
   anonymizeResponses,
   normalizeLabel,
   type AnonymizedResponse,
-  type DailyExperienceSummary,
   type ExtractedActivity,
   type LabelGrouping,
+  type StudentAnalysis,
   type StudentExtraction,
+  type SurveyAnalysisRecord,
 } from "./daily-experience-analysis";
 import type { Survey, SurveyResponse } from "./types";
 
@@ -131,7 +132,11 @@ export const buildExtractionPrompt = (
   }),
 });
 
-export const buildGroupingPrompt = (topic: string, labels: string[]) => ({
+export const buildGroupingPrompt = (
+  topic: string,
+  labels: string[],
+  existing: { category: string; activity: string }[] = [],
+) => ({
   system: [
     "You group activity labels extracted from students' survey answers.",
     `The DAILY EXPERIENCE TOPIC is: "${topic}".`,
@@ -140,6 +145,12 @@ export const buildGroupingPrompt = (topic: string, labels: string[]) => ({
     "Name activities at the general level a teacher would use for a classroom example: a sport, game type, hobby or chore, not a specific title, brand or variant (\"minecraft\" and \"racing games\" -> \"Video games\").",
     "Keep genuinely different activities separate (e.g. soccer and basketball are both Sports but different activities; cooking and baking may stay separate).",
     "Return one entry per input label, copying the label exactly.",
+    ...(existing.length
+      ? [
+          "These activities are already in use for this survey. When a label is the same activity as one of them, reuse its category and activity name exactly:",
+          ...existing.map((e) => `- ${e.category} / ${e.activity}`),
+        ]
+      : []),
   ].join("\n"),
   user: JSON.stringify({ labels }),
 });
@@ -197,28 +208,58 @@ export const parseGrouping = (raw: unknown): LabelGrouping => {
 const chunk = <T,>(items: T[], size: number) =>
   Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
 
-export type DailyExperienceAnalysis = {
-  summary: DailyExperienceSummary;
-  /** Per-student results, keyed by anonymous id (stored, not shown yet). */
-  extractions: StudentExtraction[];
-  grouping: LabelGrouping;
-  /** Anonymous id -> student_id. Server-side only. */
-  idMap: Record<string, string>;
-  model: string;
+/** Submitted responses to the survey that aren't in `previous` yet, or changed since. */
+export const responsesToAnalyze = (
+  responses: SurveyResponse[],
+  surveyId: string,
+  previous: Pick<SurveyAnalysisRecord, "students"> | null,
+) =>
+  responses.filter(
+    (r) =>
+      r.survey_id === surveyId &&
+      r.status === "submitted" &&
+      previous?.students[r.student_id]?.response_updated_at !== r.updated_at,
+  );
+
+/**
+ * Whether the saved analysis is out of date: a submitted response is new or
+ * changed, or a previously analyzed student no longer has a submitted one.
+ */
+export const isAnalysisStale = (
+  responses: SurveyResponse[],
+  surveyId: string,
+  previous: Pick<SurveyAnalysisRecord, "students"> | null,
+) => {
+  const submitted = responses.filter((r) => r.survey_id === surveyId && r.status === "submitted");
+  if (!previous) return submitted.length > 0;
+  return (
+    responsesToAnalyze(responses, surveyId, previous).length > 0 ||
+    Object.keys(previous.students).length !== submitted.length
+  );
 };
 
-export const analyzeDailyExperiences = async ({
+/**
+ * Brings a survey's analysis up to date (#114). Only new or changed
+ * responses are sent for extraction (anonymized as S1..Sn, with names and
+ * ids never sent); earlier students' results are reused. Only labels not
+ * seen before are sent for grouping, along with the activities already in
+ * use so new labels join existing groups. Counting is redone in code.
+ */
+export const updateDailyExperienceAnalysis = async ({
   client,
   survey,
   responses,
+  previous,
   model = DEFAULT_ANALYSIS_MODEL,
+  now = new Date(),
 }: {
   client: ChatClient;
-  survey: Pick<Survey, "survey_id" | "daily_experience_topic" | "questions">;
+  survey: Pick<Survey, "survey_id" | "class_id" | "assignment_id" | "daily_experience_topic" | "questions">;
   responses: SurveyResponse[];
+  previous: SurveyAnalysisRecord | null;
   model?: string;
-}): Promise<DailyExperienceAnalysis> => {
-  const { anonymized, idMap } = anonymizeResponses(responses, survey.survey_id);
+  now?: Date;
+}): Promise<SurveyAnalysisRecord> => {
   const ask = async (prompt: { system: string; user: string }, format: ResponseFormatJSONSchema, step: string) => {
     const completion = await client.chat.completions.create({
       model,
@@ -232,10 +273,11 @@ export const analyzeDailyExperiences = async ({
     return parseContent(completion.choices[0]?.message?.content, step);
   };
 
-  const batches = chunk(anonymized, EXTRACTION_BATCH_SIZE);
-  const extractions = (
+  const changed = responsesToAnalyze(responses, survey.survey_id, previous);
+  const { anonymized, idMap } = anonymizeResponses(changed, survey.survey_id);
+  const extracted = (
     await Promise.all(
-      batches.map(async (batch) =>
+      chunk(anonymized, EXTRACTION_BATCH_SIZE).map(async (batch) =>
         parseExtraction(
           await ask(buildExtractionPrompt(survey, batch), extractionFormat, "extraction"),
           batch.map((s) => s.student),
@@ -244,16 +286,40 @@ export const analyzeDailyExperiences = async ({
     )
   ).flat();
 
-  const labels = [...new Set(extractions.flatMap((e) => e.activities.map((a) => normalizeLabel(a.label))))].sort();
-  const grouping = labels.length
-    ? parseGrouping(await ask(buildGroupingPrompt(survey.daily_experience_topic, labels), groupingFormat, "grouping"))
-    : {};
+  // Keep earlier results only for students who still have a submitted response.
+  const submitted = responses.filter((r) => r.survey_id === survey.survey_id && r.status === "submitted");
+  const students: Record<string, StudentAnalysis> = {};
+  for (const r of submitted) {
+    const kept = previous?.students[r.student_id];
+    if (kept && kept.response_updated_at === r.updated_at) students[r.student_id] = kept;
+  }
+  const updatedAtById = new Map(changed.map((r) => [r.student_id, r.updated_at]));
+  for (const { student, activities } of extracted) {
+    const studentId = idMap[student];
+    students[studentId] = { response_updated_at: updatedAtById.get(studentId) ?? "", activities };
+  }
 
+  const grouping: LabelGrouping = { ...(previous?.grouping ?? {}) };
+  const labels = [...new Set(Object.values(students).flatMap((s) => s.activities.map((a) => normalizeLabel(a.label))))];
+  const newLabels = labels.filter((l) => !grouping[l]).sort();
+  if (newLabels.length) {
+    const existing = [...new Map(Object.values(grouping).map((g) => [`${g.category}\u0000${g.activity}`, g])).values()];
+    Object.assign(
+      grouping,
+      parseGrouping(await ask(buildGroupingPrompt(survey.daily_experience_topic, newLabels, existing), groupingFormat, "grouping")),
+    );
+  }
+
+  const extractions: StudentExtraction[] = Object.entries(students).map(([student, s]) => ({ student, activities: s.activities }));
   return {
-    summary: aggregateDailyExperiences(extractions, grouping, anonymized.length),
-    extractions,
-    grouping,
-    idMap,
+    class_id: survey.class_id,
+    assignment_id: survey.assignment_id,
+    survey_id: survey.survey_id,
+    daily_experience_topic: survey.daily_experience_topic,
     model,
+    analyzed_at: now.toISOString(),
+    summary: aggregateDailyExperiences(extractions, grouping, submitted.length),
+    students,
+    grouping,
   };
 };

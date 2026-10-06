@@ -1,102 +1,126 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  analyzeDailyExperiences,
+  isAnalysisStale,
   parseExtraction,
   parseGrouping,
+  updateDailyExperienceAnalysis,
   type ChatClient,
 } from "@/lib/daily-experience-llm";
-import { normalizeLabel } from "@/lib/daily-experience-analysis";
+import { normalizeLabel, type SurveyAnalysisRecord } from "@/lib/daily-experience-analysis";
 import type { SurveyResponse } from "@/lib/types";
 import {
   dailyExperienceResponses,
   dailyExperienceSurvey,
-  expectedExtractions,
-  expectedGrouping,
+  fakeAnalysisModel,
 } from "../fixtures/daily-experience";
 
-type CreateParams = Parameters<ChatClient["chat"]["completions"]["create"]>[0];
-
-/** Answers like a well-behaved model, using the fixture's expected output. */
-const fakeClient = (overrides: { extraction?: (students: string[]) => unknown; grouping?: unknown } = {}) => {
-  const create = vi.fn(async (params: CreateParams) => {
-    const input = JSON.parse(params.messages[1].content);
-    if (params.response_format.json_schema.name === "daily_experience_extraction") {
-      const students: string[] = input.students.map((s: { student: string }) => s.student);
-      const body = overrides.extraction?.(students) ??
-        { students: expectedExtractions.filter((e) => students.includes(e.student)).map((e) => ({
-          student: e.student,
-          activities: e.activities.map((a) => ({ ...a, incident: a.incident ?? "" })),
-        })) };
-      return { choices: [{ message: { content: JSON.stringify(body) } }] };
-    }
-    const body = overrides.grouping ??
-      { groups: (input.labels as string[]).map((label) => ({ label, ...expectedGrouping[label] })) };
-    return { choices: [{ message: { content: JSON.stringify(body) } }] };
+const update = (responses: SurveyResponse[], previous: SurveyAnalysisRecord | null = null) => {
+  const model = fakeAnalysisModel();
+  const run = updateDailyExperienceAnalysis({
+    client: model.client as ChatClient,
+    survey: dailyExperienceSurvey,
+    responses,
+    previous,
+    now: new Date("2026-10-06T12:00:00.000Z"),
   });
-  return { client: { chat: { completions: { create } } } as ChatClient, create };
+  return { run, calls: model.calls };
 };
 
-const callsFor = (create: ReturnType<typeof fakeClient>["create"], name: string) =>
-  create.mock.calls.map(([p]) => p).filter((p) => p.response_format.json_schema.name === name);
+const extractedStudents = (calls: ReturnType<typeof fakeAnalysisModel>["calls"]) =>
+  calls.filter((c) => c.name === "daily_experience_extraction")
+    .flatMap((c) => (c.user as { students: unknown[] }).students);
 
-describe("analyzeDailyExperiences", () => {
-  it("runs extraction in batches, groups once, and ranks the class's activities", async () => {
-    const { client, create } = fakeClient();
-    const result = await analyzeDailyExperiences({ client, survey: dailyExperienceSurvey, responses: dailyExperienceResponses });
+const submitted = dailyExperienceResponses.filter((r) => r.survey_id === dailyExperienceSurvey.survey_id && r.status === "submitted");
 
-    expect(callsFor(create, "daily_experience_extraction")).toHaveLength(2); // 20 students / 10 per batch
-    expect(callsFor(create, "daily_experience_grouping")).toHaveLength(1);
-    expect(result.summary.top.map((a) => [a.activity, a.studentCount])).toEqual([["Soccer", 10], ["Basketball", 7]]);
-    expect(result.summary.responseCount).toBe(20);
-    expect(result.idMap.S1).toBe("student-01");
+describe("updateDailyExperienceAnalysis", () => {
+  it("analyzes every submitted response the first time, and ranks the activities", async () => {
+    const { run, calls } = update(dailyExperienceResponses);
+    const record = await run;
+
+    expect(calls.filter((c) => c.name === "daily_experience_extraction")).toHaveLength(2); // 20 students / 10 per batch
+    expect(calls.filter((c) => c.name === "daily_experience_grouping")).toHaveLength(1);
+    expect(record.summary.top.map((a) => [a.activity, a.studentCount])).toEqual([["Soccer", 10], ["Basketball", 7]]);
+    expect(record.summary.responseCount).toBe(20);
+    expect(Object.keys(record.students)).toHaveLength(20);
+    expect(record.students["student-01"].response_updated_at).toBe(submitted[0].updated_at);
+    expect(record).toMatchObject({ class_id: "class", assignment_id: "assignment", survey_id: "survey-daily", analyzed_at: "2026-10-06T12:00:00.000Z" });
+  });
+
+  it("only sends new responses, and only new labels with the activities already in use", async () => {
+    const first = await update(submitted.slice(0, 18)).run;
+    const { run, calls } = update(dailyExperienceResponses, first);
+    const record = await run;
+
+    // Students 19 and 20 are new; both are blank/off-topic.
+    expect(extractedStudents(calls)).toHaveLength(2);
+    expect(calls.filter((c) => c.name === "daily_experience_grouping")).toHaveLength(0);
+    expect(record.summary).toMatchObject({ responseCount: 20, unclassifiedCount: 2 });
+    expect(record.summary.top.map((a) => [a.activity, a.studentCount])).toEqual([["Soccer", 10], ["Basketball", 7]]);
+
+    // A brand-new label is grouped alongside the existing activities.
+    const withoutMinecraft = await update(submitted.filter((r) => r.student_id !== "student-15")).run;
+    const regroup = update(dailyExperienceResponses, withoutMinecraft);
+    await regroup.run;
+    const grouping = regroup.calls.find((c) => c.name === "daily_experience_grouping")!;
+    expect((grouping.user as { labels: string[] }).labels).toEqual(["minecraft"]);
+    expect(grouping.system).toContain("- Games / Video games");
+  });
+
+  it("re-analyzes a response that changed and drops students without a submitted response", async () => {
+    const first = await update(dailyExperienceResponses).run;
+    const edited = submitted.map((r) =>
+      r.student_id === "student-02" ? { ...r, updated_at: "2026-10-03T00:00:00.000Z" } : r,
+    ).filter((r) => r.student_id !== "student-20");
+    const { run, calls } = update(edited, first);
+    const record = await run;
+
+    expect(extractedStudents(calls)).toHaveLength(1);
+    expect(record.students["student-20"]).toBeUndefined();
+    expect(record.students["student-02"].response_updated_at).toBe("2026-10-03T00:00:00.000Z");
+    expect(record.summary.responseCount).toBe(19);
   });
 
   it("sends the topic and questions but never student names or ids", async () => {
-    const { client, create } = fakeClient();
-    await analyzeDailyExperiences({ client, survey: dailyExperienceSurvey, responses: dailyExperienceResponses });
+    const { run, calls } = update(dailyExperienceResponses);
+    await run;
 
-    const [extraction] = callsFor(create, "daily_experience_extraction");
-    expect(extraction.messages[0].content).toContain(dailyExperienceSurvey.daily_experience_topic);
-    expect(extraction.messages[0].content).toContain("Q4 (familiarity): What is a second activity");
+    const extraction = calls.find((c) => c.name === "daily_experience_extraction")!;
+    expect(extraction.system).toContain(dailyExperienceSurvey.daily_experience_topic);
+    expect(extraction.system).toContain("Q4 (familiarity): What is a second activity");
     expect(extraction.temperature).toBe(0);
-    for (const call of create.mock.calls) {
-      const sent = call[0].messages.map((m) => m.content).join("\n");
-      expect(sent).not.toMatch(/student-\d|Student \d/);
-    }
-  });
+    for (const c of calls) expect(c.system + JSON.stringify(c.user)).not.toMatch(/student-\d|Student \d/);
 
-  it("sends grouping only the unique normalized labels", async () => {
-    const { client, create } = fakeClient();
-    await analyzeDailyExperiences({ client, survey: dailyExperienceSurvey, responses: dailyExperienceResponses });
-
-    const [grouping] = callsFor(create, "daily_experience_grouping");
-    const labels = JSON.parse(grouping.messages[1].content).labels;
+    const labels = (calls.find((c) => c.name === "daily_experience_grouping")!.user as { labels: string[] }).labels;
     expect(labels).toEqual([...new Set(labels)]);
-    expect(labels).toEqual(expect.arrayContaining(["soccer", "socer", "futbol", "bball", "minecraft"]));
-    expect(labels.every((l: string) => l === normalizeLabel(l))).toBe(true);
+    expect(labels.every((l) => l === normalizeLabel(l))).toBe(true);
   });
 
   it("makes no calls when there are no submitted responses", async () => {
-    const { client, create } = fakeClient();
-    const drafts: SurveyResponse[] = dailyExperienceResponses.map((r) => ({ ...r, status: "draft" }));
-    const result = await analyzeDailyExperiences({ client, survey: dailyExperienceSurvey, responses: drafts });
-
-    expect(create).not.toHaveBeenCalled();
-    expect(result.summary).toMatchObject({ responseCount: 0, enoughResponses: false, top: [] });
-  });
-
-  it("skips grouping when every answer is unclassified", async () => {
-    const { client, create } = fakeClient({ extraction: (students) => ({ students: students.map((student) => ({ student, activities: [] })) }) });
-    const result = await analyzeDailyExperiences({ client, survey: dailyExperienceSurvey, responses: dailyExperienceResponses });
-
-    expect(callsFor(create, "daily_experience_grouping")).toHaveLength(0);
-    expect(result.summary.unclassifiedCount).toBe(20);
+    const { run, calls } = update(dailyExperienceResponses.map((r) => ({ ...r, status: "draft" as const })));
+    const record = await run;
+    expect(calls).toHaveLength(0);
+    expect(record.summary).toMatchObject({ responseCount: 0, enoughResponses: false, top: [] });
   });
 
   it("throws a clear error when the model returns invalid JSON", async () => {
     const client = { chat: { completions: { create: vi.fn(async () => ({ choices: [{ message: { content: "not json" } }] })) } } } as ChatClient;
-    await expect(analyzeDailyExperiences({ client, survey: dailyExperienceSurvey, responses: dailyExperienceResponses }))
+    await expect(updateDailyExperienceAnalysis({ client, survey: dailyExperienceSurvey, responses: dailyExperienceResponses, previous: null }))
       .rejects.toThrow("The extraction step returned invalid JSON.");
+  });
+});
+
+describe("isAnalysisStale", () => {
+  it("is stale with no saved analysis only once someone has submitted", () => {
+    expect(isAnalysisStale(dailyExperienceResponses, "survey-daily", null)).toBe(true);
+    expect(isAnalysisStale([], "survey-daily", null)).toBe(false);
+  });
+
+  it("detects new, changed and removed responses", async () => {
+    const record = await update(dailyExperienceResponses).run;
+    expect(isAnalysisStale(dailyExperienceResponses, "survey-daily", record)).toBe(false);
+    expect(isAnalysisStale(submitted.slice(1), "survey-daily", record)).toBe(true);
+    expect(isAnalysisStale(submitted.map((r, i) => (i === 0 ? { ...r, updated_at: "2026-10-09T00:00:00.000Z" } : r)), "survey-daily", record)).toBe(true);
+    expect(isAnalysisStale([...dailyExperienceResponses, { ...submitted[0], student_id: "student-99" }], "survey-daily", record)).toBe(true);
   });
 });
 

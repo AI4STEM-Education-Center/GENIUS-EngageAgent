@@ -9,7 +9,7 @@ import {
   type SurveyResultSource,
 } from "@/lib/survey-results";
 import type { Survey, SurveyResponse } from "@/lib/types";
-import ClassInterestsPanel from "./ClassInterestsPanel";
+import StudentInterestsPanel from "./StudentInterestsPanel";
 
 type Props = {
   classId: string;
@@ -31,7 +31,6 @@ const formatWhen = (iso?: string) => {
  */
 export default function SurveyResultsSection({ classId, assignmentId }: Props) {
   const [sources, setSources] = useState<SurveyResultSource[]>([]);
-  const [surveyId, setSurveyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sourceId, setSourceId] = useState<string>("");
   const [index, setIndex] = useState(0);
@@ -59,7 +58,6 @@ export default function SurveyResultsSection({ classId, assignmentId }: Props) {
       const survey = pickTaskSurvey(surveysData?.surveys ?? []);
       if (survey) next.push(buildTeacherSurveySource(survey, responsesData?.responses ?? []));
       setSources(next);
-      setSurveyId(survey?.survey_id ?? null);
       setSourceId((current) =>
         next.some((s) => s.id === current) ? current : (next.find((s) => s.entries.length > 0) ?? next[0])?.id ?? "",
       );
@@ -174,9 +172,7 @@ export default function SurveyResultsSection({ classId, assignmentId }: Props) {
         </div>
       </div>
 
-      {source && surveyId && (
-        <ClassInterestsPanel classId={classId} assignmentId={assignmentId} surveyId={surveyId} />
-      )}
+      {source && <StudentInterestsPanel classId={classId} assignmentId={assignmentId} />}
 
       {loading && sources.length === 0 && <p className="mt-4 text-sm text-slate-500">Loading survey results…</p>}
       {!loading && sources.length === 0 && (

@@ -188,10 +188,18 @@ export const aggregateDailyExperiences = (
   };
 };
 
+/** One student's saved extraction, keyed by student_id in the record. */
+export type StudentAnalysis = {
+  /** The response's updated_at when it was analyzed, to spot edits. */
+  response_updated_at: string;
+  activities: ExtractedActivity[];
+};
+
 /**
- * A saved analysis for one survey. Per-student `extractions` and the
- * anonymous-id `id_map` are stored for later per-student personalization but
- * are never returned to the browser.
+ * A saved analysis for one survey (one per learning task since #111). It's
+ * updated automatically: only new or changed responses are sent for
+ * extraction, and earlier students' results are reused. `students` is keyed
+ * by student_id for that reuse and is never returned to the browser.
  */
 export type SurveyAnalysisRecord = {
   class_id: string;
@@ -201,7 +209,6 @@ export type SurveyAnalysisRecord = {
   model: string;
   analyzed_at: string;
   summary: DailyExperienceSummary;
-  extractions: StudentExtraction[];
+  students: Record<string, StudentAnalysis>;
   grouping: LabelGrouping;
-  id_map: Record<string, string>;
 };

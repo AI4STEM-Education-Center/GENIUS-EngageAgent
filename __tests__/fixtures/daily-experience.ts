@@ -161,3 +161,40 @@ export const expectedGrouping: LabelGrouping = {
   "video games": { category: "Games", activity: "Video games" },
   minecraft: { category: "Games", activity: "Video games" },
 };
+
+/**
+ * A fake OpenAI client that answers like a well-behaved model, using the
+ * expected output above. Extraction requests are matched by each student's
+ * answers (not their S-number, which changes when only some students are
+ * sent); grouping uses `expectedGrouping`. `calls` records every request.
+ */
+export const fakeAnalysisModel = () => {
+  const keyFor = (answers: Record<string, string>) => JSON.stringify(answers);
+  const byAnswers = new Map(
+    rawAnswers.map((a, i) => [
+      keyFor(Object.fromEntries(Object.entries(a).map(([k, v]) => [`Q${k.slice(1)}`, v.trim()]))),
+      expectedExtractions[i].activities,
+    ]),
+  );
+  const calls: { name: string; system: string; user: unknown; temperature?: number }[] = [];
+  const create = async (params: {
+    response_format: { json_schema: { name: string } };
+    temperature?: number;
+    messages: { role: string; content: string }[];
+  }) => {
+    const name = params.response_format.json_schema.name;
+    const user = JSON.parse(params.messages[1].content);
+    calls.push({ name, system: params.messages[0].content, user, temperature: params.temperature });
+    const body =
+      name === "daily_experience_extraction"
+        ? {
+            students: (user.students as { student: string; answers: Record<string, string> }[]).map((s) => ({
+              student: s.student,
+              activities: (byAnswers.get(keyFor(s.answers)) ?? []).map((a) => ({ ...a, incident: a.incident ?? "" })),
+            })),
+          }
+        : { groups: (user.labels as string[]).map((label) => ({ label, ...expectedGrouping[label] })) };
+    return { choices: [{ message: { content: JSON.stringify(body) } }] };
+  };
+  return { client: { chat: { completions: { create } } }, calls };
+};

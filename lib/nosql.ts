@@ -2223,9 +2223,8 @@ export const upsertSurveyAnalysis = async (
             model: record.model,
             analyzed_at: record.analyzed_at,
             summary: record.summary,
-            extractions: record.extractions,
+            students: record.students,
             grouping: record.grouping,
-            id_map: record.id_map,
           },
         }),
       );
@@ -2275,9 +2274,8 @@ export const getSurveyAnalysis = async (
       model: (item.model as string) ?? "",
       analyzed_at: (item.analyzed_at as string) ?? "",
       summary: item.summary as SurveyAnalysisRecord["summary"],
-      extractions: (item.extractions as SurveyAnalysisRecord["extractions"]) ?? [],
+      students: (item.students as SurveyAnalysisRecord["students"]) ?? {},
       grouping: (item.grouping as SurveyAnalysisRecord["grouping"]) ?? {},
-      id_map: (item.id_map as SurveyAnalysisRecord["id_map"]) ?? {},
     };
   }
 
