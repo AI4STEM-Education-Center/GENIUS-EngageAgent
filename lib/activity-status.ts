@@ -4,7 +4,11 @@ import {
   listPublishedContent,
   listReviewQuestions,
   listContentRatings,
+  listSurveys,
+  listSurveyResponses,
 } from "@/lib/nosql";
+import { getSurveyAvailability } from "@/lib/survey-response";
+import { pickTaskSurvey } from "@/lib/survey-schedule";
 
 export type ActivityId = "assessment" | "content-review" | "content-rating";
 export type ActivityStatus = "locked" | "available" | "completed";
@@ -14,6 +18,20 @@ export const ACTIVITIES: { id: ActivityId; order: number }[] = [
   { id: "content-review", order: 1 },
   { id: "content-rating", order: 2 },
 ];
+
+/**
+ * Whether the task's survey still holds up the assessment for this student
+ * (#113). The quiz and survey are one task with a shared submit, so the
+ * assessment is only complete once both are in. This mirrors
+ * StudentQuizView: only an *open* survey counts; a draft, not-yet-open or
+ * past-due survey doesn't hold the student up.
+ */
+const surveyStillDue = async (classId: string, assignmentId: string, studentId: string) => {
+  const survey = pickTaskSurvey(await listSurveys(classId, assignmentId));
+  if (!survey || !getSurveyAvailability(survey).open) return false;
+  const [own] = await listSurveyResponses(classId, assignmentId, survey.survey_id, studentId);
+  return own?.status !== "submitted";
+};
 
 export const computeActivityStatuses = async (
   classId: string,
@@ -26,9 +44,10 @@ export const computeActivityStatuses = async (
     listPublishedContent(classId, assignmentId),
   ]);
 
-  const assessment: ActivityStatus = answer
+  const assessmentDone = !!answer && !(await surveyStillDue(classId, assignmentId, studentId));
+  const assessment: ActivityStatus = assessmentDone
     ? "completed"
-    : quiz?.status === "published"
+    : answer || quiz?.status === "published"
       ? "available"
       : "locked";
 
