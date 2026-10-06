@@ -5,6 +5,7 @@ import { hasTeacherDecision } from "./quality";
 import { normalizePresentationPackage } from "./package";
 import { PROMPT_LABELS } from "./prompt-versions";
 import { analogyMappingIndex, resolveAnalogyMethod } from "./analogy-methods";
+import { uploadMaterialFile, type MaterialFileScope } from "../material-file-client";
 
 export async function decodeSlideAsset(asset: unknown): Promise<SlideAsset> {
   if (!isSlideAsset(asset)) throw new Error("Invalid slide image. Retry the image.");
@@ -53,8 +54,9 @@ export async function buildPresentationBytes(deck: SlideDeck, measure: MeasureTe
 }
 
 // The caller owns this URL until the prepared file is replaced or its view closes.
-export async function downloadPresentation(deck: SlideDeck, measure: MeasureText): Promise<{ url: string; dataUri: string; fileName: string }> {
-  for (const asset of Object.values(deck.assets)) await decodeSlideAsset(asset);
+export async function downloadPresentation(deck: SlideDeck, measure: MeasureText, scope?: MaterialFileScope, signal?: AbortSignal): Promise<{ url: string; dataUri: string; fileName: string; httpUrl?: string }> {
+  signal?.throwIfAborted();
+  for (const asset of Object.values(deck.assets)) { await decodeSlideAsset(asset); signal?.throwIfAborted(); }
   const blob = new Blob([await buildPresentationBytes(deck, measure)], {
     type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   });
@@ -66,13 +68,16 @@ export async function downloadPresentation(deck: SlideDeck, measure: MeasureText
     reader.onerror = () => reject(new Error("Unable to prepare the PowerPoint download."));
     reader.readAsDataURL(blob);
   });
-  const url = URL.createObjectURL(blob);
+  signal?.throwIfAborted();
   const fileName = `EngageAgent-Lesson-${deck.lessonNumber}-${deck.strategy.replaceAll(" ", "-")}${deck.promptProvenance ? `-${deck.promptProvenance.version}` : ""}.pptx`;
+  const attachment = await uploadMaterialFile(blob, fileName, scope, signal);
+  signal?.throwIfAborted();
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
+  link.href = attachment?.url || url;
+  link.download = attachment?.fileName || fileName;
   try { document.body.append(link); link.click(); }
   catch { /* A visible save link in the caller supports browsers blocking automatic downloads. */ }
   finally { link.remove(); }
-  return { url, dataUri, fileName };
+  return { url, dataUri, fileName: attachment?.fileName || fileName, ...(attachment ? { httpUrl: attachment.url } : {}) };
 }

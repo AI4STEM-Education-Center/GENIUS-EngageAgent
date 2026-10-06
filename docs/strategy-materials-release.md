@@ -34,4 +34,10 @@ The application rejects expired tickets after nine minutes. Physical DynamoDB cl
 
 Text + Image HTML downloads retain an explicit **Save material file** link in addition to automatic saving. This supports embedded browsers that do not complete automatic blob downloads. A narrow CC/EB prompt correction also requires deformation to match the named material and component; a schematic cannot invent a dent in an ordinary cart body merely because it contacts foam. Analogy prompts are unchanged by this correction.
 
+### Download compatibility
+
+The October 6 follow-up generated complete live Slides for all three strategies: Analogy six pages, Cognitive Conflict five pages, and Experience Bridging four pages. The exact bytes exposed by the platform's save links passed package checks and all fifteen exported pages rendered correctly. The embedded browser did not report a completed blob/data-URI download, so explicit exports now also prepare a normal HTTP attachment when private S3 hosting is available.
+
+On **Download PPTX** or **Download material (HTML)**, the browser uploads the already-prepared file once through a teacher/class/task-authorized endpoint, with a four-megabyte limit. The existing private bucket returns a signed attachment link valid for ten minutes. Repeating Download prepares a fresh link. File bytes and local fallback saving remain unchanged; unavailable storage or an oversized file retains the local save path. Stored objects use the `material-files/` prefix. Link expiry does not delete those objects; lifecycle cleanup and permission coverage for that prefix must be managed through the existing bucket configuration.
+
 Rollback through the existing Amplify deployment history to the preceding application commit. Preserve class/task, assessment, media and student-response records.

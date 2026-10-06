@@ -52,7 +52,7 @@ describe("teaching slide contract", () => {
       if (strategy === "cognitive conflict" && i <= 2) expect(xml).not.toContain("<p:pic>");
     }
   });
-  it("offers the identical native PPTX bytes through automatic blob download and its data URI fallback", async () => {
+  it.each([false, true])("offers identical native PPTX bytes with HTTP attachment enabled=%s and its local fallback", async http => {
     const anchor = { href: "", download: "", click: vi.fn(), remove: vi.fn() };
     const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:native-pptx");
     vi.stubGlobal("Image", class {
@@ -73,8 +73,11 @@ describe("teaching slide contract", () => {
       }
     });
     vi.stubGlobal("document", { createElement: () => anchor, body: { append: vi.fn() } });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ url: "https://files.example.test/lesson.pptx", fileName: "Lesson.pptx" }) });
+    vi.stubGlobal("fetch", fetchMock);
     try {
-      const file = await downloadPresentation(deckFixture("analogy"), measure);
+      const scope = { classId: "ea-class-a", assignmentId: "ea-task-a" };
+      const file = await downloadPresentation(deckFixture("analogy"), measure, http ? scope : undefined);
       expect(createObjectURL).toHaveBeenCalledTimes(1);
       const blob = createObjectURL.mock.calls[0][0] as Blob;
       const fallbackBytes = Buffer.from(file.dataUri.split(",")[1], "base64");
@@ -82,7 +85,12 @@ describe("teaching slide contract", () => {
       expect(file.dataUri).toMatch(/^data:application\/vnd\.openxmlformats-officedocument\.presentationml\.presentation;base64,/u);
       const zip = await JSZip.loadAsync(fallbackBytes);
       expect(Object.keys(zip.files).filter(path => /^ppt\/slides\/slide\d+\.xml$/u.test(path))).toHaveLength(5);
-      expect(anchor.href).toBe(file.url);
+      expect(anchor.href).toBe(http ? file.httpUrl : file.url);
+      if (http) {
+        expect(file.httpUrl).toBe("https://files.example.test/lesson.pptx");
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0][1].body).toBe(blob);
+      } else expect(fetchMock).not.toHaveBeenCalled();
       expect(anchor.download).toBe(file.fileName);
       expect(anchor.click).toHaveBeenCalledTimes(1);
       expect(anchor.remove).toHaveBeenCalledTimes(1);

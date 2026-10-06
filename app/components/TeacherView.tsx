@@ -1215,7 +1215,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     setPreparedMaterial(null);
     setError(null);
     try {
-      const file = await downloadStudentMaterial(item, job.imageUrl, job.controller.signal);
+      const file = await downloadStudentMaterial(item, job.imageUrl, job.controller.signal, { classId, assignmentId });
       if (job.controller.signal.aborted || materialDownloadJob.current !== job) { URL.revokeObjectURL(file.url); return; }
       setPreparedMaterial({ ...file, item, imageUrl: job.imageUrl, workspace: job.workspace });
     } catch (err) {
@@ -2239,8 +2239,9 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                             {materialFormat === "text-image" && preparedMaterial?.item === item && preparedMaterial.workspace === materialWorkspace
                               && images[item.id]?.status === "ready" && preparedMaterial.imageUrl === images[item.id]?.url && <div className="mt-2 text-sm text-slate-600">
                                 <p>Material ready. If downloading did not start, use the save link.</p>
-                                <a href={preparedMaterial.dataUri || preparedMaterial.url} download={preparedMaterial.fileName}
+                                <a href={preparedMaterial.httpUrl || preparedMaterial.dataUri || preparedMaterial.url} download={preparedMaterial.fileName}
                                   className="mt-2 inline-flex min-h-10 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 font-semibold text-slate-700 hover:bg-slate-100">Save material file</a>
+                                {preparedMaterial.httpUrl && <p className="mt-1 text-xs">Save link expires in 10 minutes. Select Download material again to refresh it.</p>}
                               </div>}
                             {item.activity ? <MaterialActivityView key={item.id} activity={item.activity} preview media={{ image: images[item.id]?.url, video: materialFormat === "video" ? videos[item.id]?.url : undefined }} /> : <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-600">{item.body}</p>}
                           </div>

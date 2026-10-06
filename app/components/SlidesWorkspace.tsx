@@ -60,8 +60,9 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const [busy, setBusy] = useState(false);
   const [reviewed, setReviewed] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
-  const [preparedDownload, setPreparedDownload] = useState<{ url: string; dataUri?: string; fileName: string; deck: SlideDeck } | null>(null);
+  const [preparedDownload, setPreparedDownload] = useState<{ url: string; dataUri?: string; httpUrl?: string; fileName: string; deck: SlideDeck } | null>(null);
   const exportRequest = useRef(0);
+  const exportJob = useRef<AbortController | null>(null);
   const [feedback, setFeedback] = useState("");
   const [decisionReason, setDecisionReason] = useState("");
   const [tab, setTab] = useState<"text" | "notes" | "images">("text");
@@ -124,7 +125,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     return () => { active = false; };
   }, [deck, restoredScope, scope]);
   useEffect(() => () => { job.current?.abort(); }, []);
-  useEffect(() => () => { exportRequest.current++; }, [deck]);
+  useEffect(() => () => { exportRequest.current++; exportJob.current?.abort(); }, [deck]);
   useEffect(() => () => { if (preparedDownload) URL.revokeObjectURL(preparedDownload.url); }, [preparedDownload]);
   useEffect(() => {
     if (preparedDownload && (preparedDownload.deck !== deck || !reviewed)) setPreparedDownload(null);
@@ -301,17 +302,18 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     });
   }
   async function download() {
-    if (!deck || !reviewed || busy || qualityIssues.length) return;
+    if (!deck || !reviewed || busy || qualityIssues.length || exportJob.current) return;
     const request = ++exportRequest.current;
+    const controller = new AbortController(); exportJob.current = controller;
     setPreparedDownload(null);
     setBusy(true); setError(""); setStatus("Preparing PowerPoint...");
     try {
-      const file = await downloadPresentation(deck, browserMeasure());
-      if (request !== exportRequest.current) { URL.revokeObjectURL(file.url); return; }
+      const file = await downloadPresentation(deck, browserMeasure(), { classId, assignmentId }, controller.signal);
+      if (request !== exportRequest.current || controller.signal.aborted) { URL.revokeObjectURL(file.url); return; }
       setPreparedDownload({ ...file, deck });
       setDownloaded(true); setStatus("PowerPoint ready. If downloading did not start, use Save PPTX file.");
-    } catch (err) { setError(err instanceof Error ? err.message : "Download failed."); setStatus(""); }
-    finally { setBusy(false); }
+    } catch (err) { if (!controller.signal.aborted) { setError(err instanceof Error ? err.message : "Download failed."); setStatus(""); } }
+    finally { if (exportJob.current === controller) { exportJob.current = null; setBusy(false); } }
   }
   const missingImages = deck?.draft.visuals.some(visual => !deck.assets[visual.id]);
   const slide = deck?.draft.slides[index];
@@ -359,7 +361,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           <button className={button} disabled={busy} onClick={() => generate(true)} title="Apply feedback and correct quality findings"><RefreshCw size={16} />Revise with AI</button>
           <button className={icon} disabled={!!issues.length} title="Enlarge preview" aria-label="Enlarge preview" onClick={() => dialog.current?.showModal()}><Expand size={17} /></button>
           <button className={button} disabled={busy || !ready || !reviewed} onClick={download}><Download size={17} />Download PPTX</button>
-          {preparedDownload?.deck === deck && !busy && ready && reviewed && <a className={button} href={preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>}
+          {preparedDownload?.deck === deck && !busy && ready && reviewed && <><a className={button} href={preparedDownload.httpUrl || preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>{preparedDownload.httpUrl && <p className="text-xs text-gray-500">Save link expires in 10 minutes. Select Download PPTX again to refresh it.</p>}</>}
         </div>
       </div>
       {deck.promptProvenance && <p className="mb-3 break-words text-xs text-gray-500">{PROMPT_LABELS[deck.promptProvenance.version]} · {deck.promptProvenance.revision}</p>}
