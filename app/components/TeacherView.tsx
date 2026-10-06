@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SurveyBuilderView from "./SurveyBuilderView";
+import MaterialActivityView from "./MaterialActivityView";
+import SlidesWorkspace, { type SlidesWorkspaceHandle } from "./SlidesWorkspace";
+import { STRATEGIES as SLIDE_STRATEGIES, type SlideStrategy } from "@/lib/slides/model";
+import { parseMaterialActivity } from "@/lib/material-activities";
+import { downloadStudentMaterial } from "@/lib/material-export";
 import type { UserContext } from "@/lib/auth";
 import { MOCK_USER_STORAGE_KEY, parseMockUserRole } from "@/lib/mock-auth";
 import {
@@ -33,7 +38,17 @@ const SSO_TOKEN_STORAGE_KEY = "engage-sso-token";
 
 type Props = {
   user: UserContext;
+  initialMaterialFormat?: MaterialFormat;
 };
+
+type MaterialFormat = "text-image" | "slides" | "video";
+const materialFormats = [
+  { id: "text-image", label: "Text + Image", description: "An activity with text and an illustration, ready to share with students." },
+  { id: "slides", label: "Slides", description: "Teaching slides with AI review, revisions, and PowerPoint download. Analogy uses six core slides, with an optional clarification page." },
+  { id: "video", label: "Video", description: "An activity with text and a short animated video, generated from its illustration." },
+] as const;
+const isMaterialFormat = (value: unknown): value is MaterialFormat =>
+  materialFormats.some((format) => format.id === value);
 
 type SharedContentMedia = {
   image?: string;
@@ -79,6 +94,8 @@ type PersistedDraft = {
   assignmentId: string;
   lessonNumber: number | null;
   currentStep: number;
+  materialFormat?: MaterialFormat;
+  classroomContext?: string;
   plan: Plan | null;
   selectedStrategies: string[];
   annotationDecision: "agree" | "disagree" | null;
@@ -230,6 +247,7 @@ const parsePersistedContentItem = (
         .filter(isTextModeValue)
     : [];
   const visualBrief = typeof value.visualBrief === "string" ? value.visualBrief : undefined;
+  const activity = parseMaterialActivity(value.activity, strategy);
 
   if (!id || !title || !body) return null;
 
@@ -241,6 +259,7 @@ const parsePersistedContentItem = (
     strategy,
     ...(textModes.length > 0 ? { textModes } : {}),
     ...(visualBrief ? { visualBrief } : {}),
+    ...(activity ? { activity } : {}),
   };
 };
 
@@ -250,7 +269,7 @@ const stepLabels = [
   "Content generation",
 ];
 
-export default function TeacherView({ user }: Props) {
+export default function TeacherView({ user, initialMaterialFormat }: Props) {
   const downloadRef = useRef<HTMLAnchorElement>(null);
   const isMountedRef = useRef(true);
   const activeVideoPollersRef = useRef<Set<string>>(new Set());
@@ -279,6 +298,21 @@ export default function TeacherView({ user }: Props) {
   // Content
   const [content, setContent] = useState<ContentItem[]>([]);
   const [loadingContent, setLoadingContent] = useState(false);
+  const [downloadingMaterialId, setDownloadingMaterialId] = useState<string | null>(null);
+  const initialFormatRef = useRef(initialMaterialFormat);
+  const [materialFormat, setMaterialFormat] = useState<MaterialFormat>(initialMaterialFormat ?? "text-image");
+  const [classroomContext, setClassroomContext] = useState("");
+  const [queuedVideoIds, setQueuedVideoIds] = useState<Set<string>>(new Set());
+  const videoStartsRef = useRef(new Set<string>());
+  const slideEditorsRef = useRef<Partial<Record<SlideStrategy, SlidesWorkspaceHandle | null>>>({});
+  const [slideBusy, setSlideBusy] = useState<Partial<Record<SlideStrategy, boolean>>>({});
+  const [slideReady, setSlideReady] = useState<Partial<Record<SlideStrategy, boolean>>>({});
+  const onSlideBusyChange = useCallback((strategy: SlideStrategy, busy: boolean) => {
+    setSlideBusy((previous) => previous[strategy] === busy ? previous : { ...previous, [strategy]: busy });
+  }, []);
+  const onSlideReadyChange = useCallback((strategy: SlideStrategy, ready: boolean) => {
+    setSlideReady((previous) => previous[strategy] === ready ? previous : { ...previous, [strategy]: ready });
+  }, []);
   const [images, setImages] = useState<Record<string, ImageState>>({});
   const [videos, setVideos] = useState<Record<string, VideoState>>({});
   const [focusImage, setFocusImage] = useState<{ url: string; title: string } | null>(null);
@@ -350,6 +384,8 @@ export default function TeacherView({ user }: Props) {
         assignmentId,
         lessonNumber: selectedLesson,
         currentStep: clampStep(currentStep),
+        materialFormat,
+        classroomContext,
         plan,
         selectedStrategies,
         annotationDecision,
@@ -367,6 +403,8 @@ export default function TeacherView({ user }: Props) {
       assignmentId,
       selectedLesson,
       currentStep,
+      materialFormat,
+      classroomContext,
       plan,
       selectedStrategies,
       annotationDecision,
@@ -543,7 +581,10 @@ export default function TeacherView({ user }: Props) {
     setVideos({});
     setSelectedForPublish(new Set());
     setPublishedContentIds(new Set());
-    setCurrentStep(1);
+    setCurrentStep(initialFormatRef.current ? 3 : 1);
+    setMaterialFormat(initialFormatRef.current ?? "text-image");
+    setClassroomContext("");
+    setQueuedVideoIds(new Set());
 
     if (raw) {
       try {
@@ -597,7 +638,9 @@ export default function TeacherView({ user }: Props) {
           setVideos(restoredVideos);
           setSelectedForPublish(new Set((draft.selectedForPublish ?? []).filter((itemId) => contentIds.has(itemId))));
           setPublishedContentIds(new Set((draft.publishedContentIds ?? []).filter((itemId) => contentIds.has(itemId))));
-          setCurrentStep(clampStep(draft.currentStep));
+          setCurrentStep(initialFormatRef.current ? 3 : clampStep(draft.currentStep));
+          setMaterialFormat(initialFormatRef.current ?? (isMaterialFormat(draft.materialFormat) ? draft.materialFormat : "text-image"));
+          setClassroomContext(typeof draft.classroomContext === "string" ? draft.classroomContext.slice(0, 1200) : "");
 
           shouldRestorePersistedMedia = restoredContent.length > 0 && Boolean(classId && assignmentId);
 
@@ -952,6 +995,7 @@ export default function TeacherView({ user }: Props) {
   }, [content, videos, isRestoringStep3State, pollVideoUntilComplete]);
 
   const selectLesson = async (lessonNumber: number) => {
+    setQueuedVideoIds(new Set());
     setSelectedLesson(lessonNumber);
     setPlan(null);
     setSelectedStrategies([]);
@@ -1055,7 +1099,7 @@ export default function TeacherView({ user }: Props) {
   }, [currentStep, quizStatus, classId, assignmentId, selectedLesson]);
 
   const analyzeClass = () => {
-    if (!classId || !assignmentId) return;
+    if (!classId || !assignmentId || generationBusy) return;
     if (!selectedLesson) {
       setError("Select a lesson before generating strategies.");
       return;
@@ -1089,15 +1133,15 @@ export default function TeacherView({ user }: Props) {
     }
   };
 
-  const requestContent = async () => {
-    if (!plan || selectedStrategies.length === 0) return;
+  const requestContent = async (format: "text-image" | "video") => {
+    if (selectedStrategies.length === 0) return;
     if (!selectedLesson) {
       setError("Select a lesson before generating content.");
       return;
     }
     setLoadingContent(true);
     setError(null);
-    setContent([]);
+    setQueuedVideoIds(new Set());
     try {
       // Two-tier model strategy: first attempt uses the primary model
       // (gpt-5-mini, higher quality). If it returns an error status — most
@@ -1112,6 +1156,9 @@ export default function TeacherView({ user }: Props) {
           body: JSON.stringify({
             lessonNumber: selectedLesson,
             selectedStrategies,
+            classId,
+            assignmentId,
+            classroomContext: classroomContext.trim(),
             ...(useFallback ? { fallback: true } : {}),
           }),
         });
@@ -1128,12 +1175,13 @@ export default function TeacherView({ user }: Props) {
       }
       const data = await res.json();
       const items = (data.items ?? []).map(
-        (item: Omit<ContentItem, "id">, index: number) => ({
+        (item: Omit<ContentItem, "id">) => ({
           ...item,
-          id: `${item.strategy ?? "strategy"}-${index}-${item.title}`,
+          id: crypto.randomUUID(),
         }),
       );
       setContent(items);
+      setQueuedVideoIds(format === "video" ? new Set<string>(items.map((item: ContentItem) => item.id)) : new Set());
       setImages({});
       setVideos({});
       imageHistoryCache.clear();
@@ -1143,6 +1191,19 @@ export default function TeacherView({ user }: Props) {
       setError(err instanceof Error ? err.message : "Unexpected error.");
     } finally {
       setLoadingContent(false);
+    }
+  };
+
+  const downloadMaterial = async (item: ContentItem) => {
+    if (images[item.id]?.status !== "ready" || !images[item.id]?.url || downloadingMaterialId) return;
+    setDownloadingMaterialId(item.id);
+    setError(null);
+    try {
+      await downloadStudentMaterial(item, images[item.id].url!);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to download the material.");
+    } finally {
+      setDownloadingMaterialId(null);
     }
   };
 
@@ -1205,7 +1266,7 @@ export default function TeacherView({ user }: Props) {
   };
 
   const publishSelectedContent = async () => {
-    if (selectedForPublish.size === 0 || !classId || !assignmentId) return;
+    if (!canPublishSelectedContent || !classId || !assignmentId) return;
     setPublishingContent(true);
     try {
       const items: PublishableContentItem[] = content
@@ -1216,7 +1277,7 @@ export default function TeacherView({ user }: Props) {
               ? getEmbeddablePublishedMediaUrl(images[item.id]?.url)
               : undefined;
           const videoUrl =
-            videos[item.id]?.status === "ready"
+            materialFormat === "video" && videos[item.id]?.status === "ready"
               ? getEmbeddablePublishedMediaUrl(videos[item.id]?.url)
               : undefined;
 
@@ -1311,16 +1372,17 @@ export default function TeacherView({ user }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, isRestoringStep3State, selectedLesson]);
 
-  const requestVideo = async (item: ContentItem) => {
+  const requestVideo = useCallback(async (item: ContentItem) => {
     const imageUrl = images[item.id]?.url;
-    if (!imageUrl) return;
+    if (!imageUrl || videoStartsRef.current.has(item.id)) return;
+    videoStartsRef.current.add(item.id);
 
     setVideos((prev) => ({ ...prev, [item.id]: { status: "loading" } }));
     try {
       const startRes = await fetch("/api/engagement-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ item, plan, answers: {}, imageUrl }),
+        body: JSON.stringify({ item, plan, answers: {}, imageUrl, classId, assignmentId, lessonNumber: selectedLesson, studentId: COHORT_STUDENT_ID }),
       });
       const startData = await startRes.json();
       if (!startRes.ok) throw new Error(startData?.error ?? "Failed to start video.");
@@ -1334,8 +1396,22 @@ export default function TeacherView({ user }: Props) {
       void pollVideoUntilComplete(item.id, requestId);
     } catch (err) {
       setVideos((prev) => ({ ...prev, [item.id]: { status: "error", error: err instanceof Error ? err.message : "Video failed." } }));
+    } finally {
+      videoStartsRef.current.delete(item.id);
     }
-  };
+  }, [images, plan, classId, assignmentId, selectedLesson, pollVideoUntilComplete]);
+
+  // Only an explicit Generate action queues videos; changing the visible format never does.
+  useEffect(() => {
+    const ready = content.filter((item) => queuedVideoIds.has(item.id) && images[item.id]?.status === "ready");
+    if (!ready.length) return;
+    setQueuedVideoIds((previous) => {
+      const next = new Set(previous);
+      ready.forEach((item) => next.delete(item.id));
+      return next;
+    });
+    for (const item of ready) void requestVideo(item);
+  }, [content, images, queuedVideoIds, requestVideo]);
 
   const downloadFile = (url: string, filename: string) => {
     const anchor = downloadRef.current;
@@ -1500,6 +1576,27 @@ export default function TeacherView({ user }: Props) {
   const selectedLessonData =
     lessons.find((lesson) => lesson.lesson_number === selectedLesson) ?? null;
 
+  const nativeSlidesAvailable = classId.startsWith("ea-class-") && Boolean(assignmentId);
+  const slideStrategies = selectedStrategies.filter((strategy): strategy is SlideStrategy => SLIDE_STRATEGIES.includes(strategy as SlideStrategy));
+  const unsupportedSlideStrategies = selectedStrategies.filter((strategy) => !SLIDE_STRATEGIES.includes(strategy as SlideStrategy));
+  const generationBusy = loadingContent || Object.values(slideBusy).some(Boolean)
+    || Object.values(images).some((state) => state.status === "loading")
+    || Object.values(videos).some((state) => state.status === "loading" || state.status === "polling");
+  const canGenerateMaterials = isHydrated && !isRestoringStep3State && !generationBusy && Boolean(selectedLesson) && selectedStrategies.length > 0
+    && (materialFormat !== "slides" || (nativeSlidesAvailable && !unsupportedSlideStrategies.length && slideStrategies.every((strategy) => slideReady[strategy])));
+  const canPublishSelectedContent = materialFormat !== "slides" && selectedForPublish.size > 0
+    && Array.from(selectedForPublish).every((id) => content.some((item) => item.id === id)
+      && (materialFormat === "video" ? videos[id]?.status === "ready" && Boolean(getEmbeddablePublishedMediaUrl(videos[id]?.url))
+        : images[id]?.status === "ready" && Boolean(getEmbeddablePublishedMediaUrl(images[id]?.url))));
+  const generateMaterials = () => {
+    if (!canGenerateMaterials) return;
+    if (materialFormat === "slides") {
+      for (const strategy of slideStrategies) slideEditorsRef.current[strategy]?.generate();
+    } else {
+      void requestContent(materialFormat);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto flex max-w-6xl flex-col gap-12 px-6 py-12">
@@ -1609,7 +1706,7 @@ export default function TeacherView({ user }: Props) {
                   <p className="text-xs font-semibold uppercase text-slate-400">Choose a lesson</p>
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                     {lessons.map((lesson) => (
-                      <button key={lesson.lesson_number} type="button" onClick={() => selectLesson(lesson.lesson_number)}
+                      <button key={lesson.lesson_number} type="button" onClick={() => selectLesson(lesson.lesson_number)} disabled={generationBusy}
                         className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${selectedLesson === lesson.lesson_number ? "border-[#BA0C2F] bg-[#BA0C2F]/5 ring-2 ring-[#BA0C2F]" : "border-slate-200 hover:border-slate-300"}`}>
                         <p className="font-semibold text-slate-800">{lesson.lesson_title}</p>
                         <p className="mt-1 text-xs text-slate-500">
@@ -1779,7 +1876,7 @@ export default function TeacherView({ user }: Props) {
                     <button
                       type="button"
                       onClick={analyzeClass}
-                      disabled={studentAnswers.length === 0}
+                      disabled={generationBusy || studentAnswers.length === 0}
                       className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
                     >
                       Analyze {studentAnswers.length} students
@@ -1843,28 +1940,7 @@ export default function TeacherView({ user }: Props) {
                       </div>
                     </div>
 
-                    <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase text-slate-400">Content generation strategies</p>
-                      <p className="text-sm text-slate-600">The cohort recommendation is selected by default. Each selected strategy generates one student-facing material, so add alternates only if you want more than one item to review.</p>
-                      <div className="flex flex-wrap gap-2">
-                        {strategies.map((strategy) => {
-                          const isSelected = selectedStrategies.includes(strategy.id);
-                          const isRecommended = plan.strategy === strategy.id;
-                          return (
-                            <button
-                              key={strategy.id}
-                              type="button"
-                              onClick={() => toggleStrategySelection(strategy.id)}
-                              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${isSelected ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-                            >
-                              {strategy.label}
-                              {isRecommended ? ' · Recommended' : ''}
-                              {isSelected ? ' · Selected' : ''}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+
                   </div>
 
                   {/* Teacher annotation */}
@@ -1900,10 +1976,33 @@ export default function TeacherView({ user }: Props) {
                 </div>
               )}
 
-              {/* Generate content button */}
-              <button type="button" onClick={requestContent} disabled={!plan || loadingContent || !selectedStrategies.length}
+                    <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+                      <p className="text-xs font-semibold uppercase text-slate-400">Material strategies</p>
+                      <p className="text-sm text-slate-600">Choose one or more strategies. A cohort recommendation is selected automatically when available; you can also choose manually before students complete the quiz.</p>
+                      <div className="flex flex-wrap gap-2">
+                        {strategies.map((strategy) => {
+                          const isSelected = selectedStrategies.includes(strategy.id);
+                          const isRecommended = plan?.strategy === strategy.id;
+                          return (
+                            <button
+                              key={strategy.id}
+                              type="button"
+                              onClick={() => toggleStrategySelection(strategy.id)}
+                              aria-pressed={isSelected}
+                              disabled={generationBusy}
+                              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${isSelected ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+                            >
+                              {strategy.label}
+                              {isRecommended ? ' · Recommended' : ''}
+                              {isSelected ? ' · Selected' : ''}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+              <button type="button" onClick={() => setCurrentStep(3)} disabled={!selectedLesson || !selectedStrategies.length}
                 className="mt-2 inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400">
-                {loadingContent ? "Generating..." : "Generate content"}
+                Continue to material generation
               </button>
 
               <div className="flex items-center justify-between">
@@ -1914,16 +2013,66 @@ export default function TeacherView({ user }: Props) {
           )}
 
           {/* Step 3: Content generation */}
-          {currentStep === 3 && (
+          <div hidden={currentStep !== 3} className={currentStep === 3 ? "" : "hidden"}>
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div className="flex flex-col gap-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 3</p>
-                <h2 className="text-2xl font-semibold text-slate-900">Engagement content</h2>
-                <p className="text-sm text-slate-600">Generate one student-facing material per selected strategy, then choose which items to send to students for rating.</p>
+                <h2 className="text-2xl font-semibold text-slate-900">Generate materials</h2>
+                <p className="text-sm text-slate-600">Choose the material you want to create using the lesson and strategies from this workflow.</p>
               </div>
 
+              <fieldset className="grid gap-3" aria-label="Material type">
+                <legend className="mb-3 text-sm font-semibold text-slate-700">Material type</legend>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {materialFormats.map((format) => (
+                    <label key={format.id} className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 text-sm font-semibold transition ${materialFormat === format.id ? "border-[#BA0C2F] bg-[#BA0C2F]/5 text-[#BA0C2F]" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                      <input type="radio" name="material-format" value={format.id} checked={materialFormat === format.id} onChange={() => setMaterialFormat(format.id)} className="h-4 w-4 accent-[#BA0C2F]" />
+                      {format.label}
+                    </label>
+                  ))}
+                </div>
+                <p className="text-sm text-slate-600">{materialFormats.find((format) => format.id === materialFormat)?.description}</p>
+              </fieldset>
+
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">
+                Classroom context (optional)
+                <textarea aria-label="Classroom context (optional)" maxLength={1200} rows={2} disabled={generationBusy}
+                  value={classroomContext} onChange={(event) => setClassroomContext(event.target.value)}
+                  placeholder="Grade, prior knowledge, familiar experiences and classroom constraints"
+                  className="rounded-xl border border-slate-200 px-3 py-2 font-normal text-slate-800" />
+                <span className="font-normal text-slate-500">Include familiar activities reported in student surveys, if available. Use what you know about this class; no survey results are assumed.</span>
+              </label>
+
+              <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl bg-slate-50 p-4">
+                <div className="min-w-0 text-sm text-slate-700">
+                  <p className="font-semibold">{selectedLessonData ? selectedLessonData.lesson_title === `Lesson ${selectedLesson}` ? selectedLessonData.lesson_title : `Lesson ${selectedLesson}: ${selectedLessonData.lesson_title}` : "Choose a lesson in Step 1"}</p>
+                  <p className="mt-1">{selectedStrategies.length ? selectedStrategies.map(getStrategyLabel).join(" · ") : "Choose strategies in Step 2"}</p>
+                </div>
+                <button type="button" onClick={generateMaterials} disabled={!canGenerateMaterials}
+                  className="min-h-11 rounded-xl bg-[#BA0C2F] px-5 py-2 text-sm font-semibold text-white hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-300">
+                  {generationBusy ? "Generating materials..." : "Generate materials"}
+                </button>
+              </div>
+              {materialFormat === "slides" && !nativeSlidesAvailable && <p role="status" className="text-sm text-amber-800">Slides are available in the teacher workspace. Open a class and task from My classes to generate slides.</p>}
+              {materialFormat === "slides" && unsupportedSlideStrategies.length > 0 && <p role="status" className="text-sm text-amber-800">Slides do not yet support {unsupportedSlideStrategies.map(getStrategyLabel).join(", ")}. Change strategies in Step 2, or choose Text + Image or Video.</p>}
+              {(!selectedLesson || !selectedStrategies.length) && <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                <span>Complete your material settings:</span>
+                {!selectedLesson && <button type="button" onClick={() => setCurrentStep(1)} className="font-semibold text-[#BA0C2F] underline">Choose lesson</button>}
+                {!selectedStrategies.length && <button type="button" onClick={() => setCurrentStep(2)} className="font-semibold text-[#BA0C2F] underline">Choose strategies</button>}
+              </div>}
+
+              <div hidden={materialFormat !== "slides"} className={materialFormat === "slides" ? "grid gap-6" : "hidden"}>
+                {isHydrated && nativeSlidesAvailable && selectedLesson && slideStrategies.map((strategy) => (
+                  <SlidesWorkspace key={`${classId}:${assignmentId}:${selectedLesson}:${strategy}`} user={user}
+                    ref={(editor) => { slideEditorsRef.current[strategy] = editor; }}
+                    embeddedContext={{ lessonNumber: selectedLesson, strategy, classroomContext }}
+                    onBusyChange={onSlideBusyChange} onReadyChange={onSlideReadyChange} />
+                ))}
+              </div>
+              <div hidden={materialFormat === "slides"} className={materialFormat === "slides" ? "hidden" : "grid gap-6"}>
+
               {content.length === 0 && (
-                <p className="text-sm text-slate-400">No content generated yet. Go back to Step 2 and generate content.</p>
+                <p className="text-sm text-slate-400">No activity generated yet. Choose a material type above and select Generate materials.</p>
               )}
 
               {content.length > 0 && (
@@ -1932,11 +2081,13 @@ export default function TeacherView({ user }: Props) {
                     <p className="text-xs font-semibold text-slate-500">
                       {selectedForPublish.size} of {content.length} selected for students
                     </p>
-                    <button type="button" onClick={publishSelectedContent} disabled={selectedForPublish.size === 0 || publishingContent}
+                    <button type="button" onClick={publishSelectedContent} disabled={!canPublishSelectedContent || publishingContent}
                       className="rounded-xl bg-[#BA0C2F] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-300">
                       {publishingContent ? "Sending..." : "Send to students"}
                     </button>
                   </div>
+
+                  {selectedForPublish.size > 0 && !canPublishSelectedContent && <p role="status" className="text-xs text-slate-500">Finish generating the selected {materialFormat === "video" ? "videos" : "images"} before sending to students.</p>}
 
                   <div className="grid gap-4">
                     {content.map((item) => {
@@ -1956,7 +2107,7 @@ export default function TeacherView({ user }: Props) {
                                 )}
                                 {images[item.id]?.status === "ready" && images[item.id]?.url && (
                                   <button type="button" className="block h-full w-full cursor-zoom-in overflow-hidden rounded-xl border border-slate-200 bg-white" onClick={() => setFocusImage({ url: images[item.id]?.url ?? "", title: item.title })}>
-                                    <img className="h-full w-full object-cover" src={images[item.id]?.url} alt={item.title} />
+                                    <img className={`h-full w-full ${item.activity ? "object-contain" : "object-cover"}`} src={images[item.id]?.url} alt={item.title} />
                                   </button>
                                 )}
                                 {images[item.id]?.status === "error" && (
@@ -1999,8 +2150,9 @@ export default function TeacherView({ user }: Props) {
                                 </button>
                               </div>
                             </div>
-                            <div className="flex w-32 shrink-0 flex-col gap-1.5 sm:w-36">
+                            {materialFormat === "video" && <div className="flex w-32 shrink-0 flex-col gap-1.5 sm:w-36">
                               <div className="aspect-square w-full">
+                                {!videos[item.id]?.status && images[item.id]?.status !== "ready" && <p className="flex h-full items-center rounded-xl bg-slate-100 p-3 text-xs text-slate-500">Waiting for the source image.</p>}
                                 {!videos[item.id]?.status && images[item.id]?.status === "ready" && (
                                   <button type="button" onClick={() => requestVideo(item)} className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 text-slate-500 transition hover:bg-slate-100">
                                     <span className="text-2xl">&#9654;</span>
@@ -2035,7 +2187,7 @@ export default function TeacherView({ user }: Props) {
                                   Refine
                                 </button>
                               </div>
-                            </div>
+                            </div>}
                           </div>
 
                           {/* Text content + select checkbox */}
@@ -2061,7 +2213,12 @@ export default function TeacherView({ user }: Props) {
                                 </button>
                               )}
                             </div>
-                            <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-600">{item.body}</p>
+                            {materialFormat === "text-image" && <button type="button" onClick={() => void downloadMaterial(item)}
+                              disabled={images[item.id]?.status !== "ready" || Boolean(downloadingMaterialId)}
+                              className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:text-slate-400">
+                              {downloadingMaterialId === item.id ? "Preparing download..." : "Download material (HTML)"}
+                            </button>}
+                            {item.activity ? <MaterialActivityView key={item.id} activity={item.activity} preview media={{ image: images[item.id]?.url, video: materialFormat === "video" ? videos[item.id]?.url : undefined }} /> : <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-600">{item.body}</p>}
                           </div>
                         </div>
                       );
@@ -2070,12 +2227,13 @@ export default function TeacherView({ user }: Props) {
                 </>
               )}
 
+              </div>
               <div className="flex items-center justify-between">
                 <button type="button" onClick={() => setCurrentStep(2)} className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-100">Previous step</button>
                 <button type="button" disabled className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-300">Next step</button>
               </div>
             </div>
-          )}
+          </div>
 
           {error && (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>

@@ -1,14 +1,7 @@
 import { NextResponse } from "next/server";
-
-type ContentItem = {
-  id: string;
-  type: string;
-  subject?: string;
-  title: string;
-  body: string;
-  textModes?: string[];
-  visualBrief?: string;
-};
+import type { ContentItem } from "@/lib/types";
+import { buildMaterialVideoInstructions } from "@/lib/material-video";
+import { parseMaterialActivity } from "@/lib/material-activities";
 
 const XAI_VIDEO_BASE = "https://api.x.ai/v1/videos";
 
@@ -45,14 +38,21 @@ export async function POST(request: Request) {
       imageUrl: string;
     };
 
-    if (!imageUrl) {
+    if (typeof imageUrl !== "string" || !imageUrl.trim()) {
       return NextResponse.json(
         { error: "imageUrl is required. Generate the image first." },
         { status: 400 },
       );
     }
+    if (!item || typeof item !== "object" || typeof item.id !== "string") {
+      return NextResponse.json({ error: "A content item is required." }, { status: 400 });
+    }
+    if ((item.strategy === "cognitive conflict" || item.strategy === "experience bridging") &&
+        item.activity !== undefined && !parseMaterialActivity(item.activity, item.strategy)) {
+      return NextResponse.json({ error: "The activity does not meet its stage and media requirements." }, { status: 400 });
+    }
 
-    const animationPrompt = buildAnimationPrompt();
+    const animationPrompt = buildMaterialVideoInstructions(item) || buildAnimationPrompt();
 
     const res = await fetch(`${XAI_VIDEO_BASE}/generations`, {
       method: "POST",

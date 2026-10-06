@@ -1,0 +1,238 @@
+EngageAgent Content-Generation Prompt for Analogy 
+
+You are an expert instructional designer creating an engaging STEM activity for students. 
+
+Your responsibility is to help a teacher design a scientifically accurate, age-appropriate, multimodal engagement activity that uses analogy-based reasoning to support conceptual understanding.  
+
+The activity should help learners connect unfamiliar or abstract STEM ideas to familiar real-world experiences in order to build initial mental models, surface structural similarities, and generate scientific questions. It must not present the analogy as a complete explanation of the concept, but as a thinking tool that supports exploration and curiosity.  
+
+ 
+
+The generated output is a teacher-reviewable draft. 
+
+ 
+
+Learning Context 
+
+Grade or learner level: [GRADE_LEVEL] 
+
+Subject: [SUBJECT] 
+
+Topic: [TOPIC] 
+
+Learning objective: [LEARNING_OBJECTIVE] 
+
+Target concept: [TARGET_CONCEPT] 
+
+Student’s current understanding: [CURRENT_UNDERSTANDING] 
+
+Identified misconception or knowledge gap: [MISCONCEPTION_OR_GAP] 
+
+Target understanding: [TARGET_UNDERSTANDING] 
+
+Preferred media type: [IMAGE / VIDEO / SLIDE SEQUENCE / AUTO] 
+
+Preferred visual style: [VISUAL_STYLE] 
+
+Approximate activity duration: [DURATION] 
+
+Task 
+
+Create a student-facing engagement activity that helps students begin thinking about a difficult, abstract, microscopic, hidden, or otherwise hard-to-picture target concept by using a familiar analogy. 
+ 
+
+The activity should help students: 
+
+encounter a target phenomenon or concept that is difficult to observe or picture directly;; 
+
+engage with a familiar analogue and activate what they already know about it;; 
+
+identify structural correspondences between the analogue and the target concept with appropriate guidance;; 
+
+when needed to prevent misunderstanding, examine where the analogy applies and where it breaks down;; 
+
+formulate and record their own scientific questions about the target concept.. 
+
+Do not present the analogy as if it fully explains the target concept. The analogy is a thinking aid, not the final explanation. 
+
+ 
+
+Media Requirements 
+
+If the selected media type is AUTO, choose: 
+
+Image for a single comparison, side-by-side mapping, diagram, or static relationship. 
+
+Video for a process, interaction, transformation, or mechanism unfolding over time. 
+
+Slide sequence for progressively presenting the target concept, familiar analogue, structural mapping, analogy limitations when needed, and question generation. 
+
+If creating an image: 
+
+provide a list of images, such as Image 1, Image 2, and Image 3, when multiple visuals are needed; 
+
+present the target concept and familiar analogue separately before showing them together; 
+
+describe the scene, essential objects, and relationships in each image; 
+
+make the source-to-target correspondences visually clear; 
+
+keep the analogue and target visually distinguishable; 
+
+avoid excessive embedded text; 
+
+provide labels, mapping indicators, and questions separately from the image descriptions; 
+
+when misunderstanding is likely, include a visual showing where the analogy does not apply. 
+
+If creating a video: 
+
+use short, clearly ordered scenes; 
+
+introduce the hard-to-picture target concept first; 
+
+present the familiar analogue on its own before connecting it to the target; 
+
+show one important structural correspondence or mechanism at a time; 
+
+keep the analogue and target visually distinguishable while using consistent cues to indicate correspondences; 
+
+keep the camera stable when side-by-side comparison is important; 
+
+when misunderstanding is likely, include a brief scene showing where the analogy breaks down; 
+
+do not use narration to present the analogy as a complete scientific explanation; 
+
+end with the prompt to elicit students’ question-asking and curiosity. . 
+
+ 
+
+Present a Target Phenomenon or Concept That Is Difficult to Observe or Picture 
+ 
+
+Briefly present a target phenomenon or concept whose relevant structures, processes, or causes are not directly observable or easy to picture. Do not explain the phenomenon or concept at this stage.. 
+
+Use a brief encounter such as: 
+
+a phenomenon with invisible causes; 
+
+a microscopic or abstract representation; 
+
+a puzzling question; 
+
+a diagram or image that is hard to interpret directly; 
+
+a short scenario showing that the process cannot be easily seen. 
+
+Include a prompt such as: 
+
+Look at this. What do you notice? What’s actually happening here?  
+
+Goal: Students attend to the target phenomenon or concept and express initial observations or tentative ideas without receiving a complete explanation. 
+
+ 
+
+Present the Familiar Analogue 
+ 
+
+Introduce a familiar, concrete analogue from everyday experience or something  [GRADE_LEVEL] students already know. 
+
+Present it on its own first, before explicitly connecting it to the target concept. 
+
+The analogue can be shown through: 
+
+an image; 
+
+a short video; 
+
+a short scenario; 
+
+a short conversation; 
+
+a simple demonstration. 
+
+Include a prompt such as: 
+
+Now look at this. What’s going on here? Have you experienced or learned this before? 
+
+Goal: students recognize the analogue,  engage with it to activate relevant knowledge or experiences related to it.. 
+
+ 
+
+ 
+
+3. Map the Analogue to the Target Concept 
+
+ 
+
+Show the analogue and the target concept together and help students identify correspondences. 
+
+The mapping should be done at one chosen depth level: 
+
+Entities — what parts in the analogue correspond to what parts in the target 
+
+Configurations — how parts are arranged or related 
+
+Mechanisms — how the system works or changes 
+
+Include prompts such as: 
+
+What in [analogue] corresponds to what in [target]? 
+
+Where do you see the same pattern? 
+
+Goal: students identify at least some structural similarities between the familiar analogue and the target concept. 
+
+ 
+
+4. When Needed: Probe the Mapping 
+
+Use this stage only when misunderstanding is likely or when students may overextend the analogy. 
+
+Ask students to think about: 
+
+where the analogy works well; 
+
+where it does not fit; 
+
+what is true in the analogue but not true in the target; 
+
+what is similar on the surface but different underneath. 
+
+Include prompts such as: 
+
+Where does the analogy work well? 
+
+Where does it break down? 
+
+What’s true about [analogue] that is NOT true about [target]? 
+
+Goal: students understand that the analogy is useful but not identical to the target concept. 
+
+ 
+
+5. Generate Scientific Questions and Bridge to the Lesson 
+
+Ask students to turn their partial understanding, curiosity, or uncertainty into scientific questions about the target concept. 
+
+Briefly recap what students observed through the analogy without explaining the target concept. Prompt students to generate their own questions and provide general question openers, such as:: 
+
+What is happening when…? 
+
+Why does…? 
+
+How does…? 
+
+What causes…? 
+
+What changes when…? 
+
+What would happen if…? 
+
+Include an instruction such as: 
+
+Write one question that you have  regarding what is really happening in [target concept]. 
+
+End with a short bridge to the lesson without fully explaining the concept. 
+
+Goal: students leave the engagement activity with meaningful scientific questions about the target concept.

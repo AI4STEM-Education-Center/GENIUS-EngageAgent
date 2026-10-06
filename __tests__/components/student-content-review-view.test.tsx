@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import StudentContentReviewView from "@/app/components/StudentContentReviewView";
+import { conflictActivity } from "../fixtures/material-activities";
 import type { UserContext } from "@/lib/auth";
 
 const student: UserContext = {
@@ -90,4 +91,34 @@ it("shows previously saved ratings as submitted and read-only", async () => {
   await within(card).findByText(/Submitted - thanks for rating/);
   expect(within(card).queryByRole("button", { name: "Submit" })).toBeNull();
   for (const button of ratingButtonsFor(card, "Material B")) expect((button as HTMLButtonElement).disabled).toBe(true);
+});
+
+
+it("keeps prediction before evidence while retaining the platform question-submission flow", async () => {
+  fetchMock.mockImplementation(async (input: string, init?: RequestInit) => {
+    if (input.startsWith("/api/content-publish")) return { ok: true, json: async () => ({ items: [{
+      content_item_id: "inquiry", content_json: JSON.stringify({ title: "A bounce", body: "Do not flatten the full sequence into this body.", strategy: "cognitive conflict", activity: conflictActivity }),
+      media: { image: "https://example.test/result.png" },
+    }] }) };
+    if (input.startsWith("/api/review-questions") && init?.method === "POST") return { ok: true, json: async () => ({ success: true }) };
+    if (input.startsWith("/api/review-questions")) return { ok: true, json: async () => ({ reviewQuestions: [] }) };
+    return { ok: true, json: async () => ({}) };
+  });
+  render(<StudentContentReviewView user={student} />);
+  await screen.findByRole("region", { name: "A quick bounce" });
+  expect(screen.queryByRole("img")).toBeNull();
+  expect(screen.queryByText("Do not flatten the full sequence into this body.")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect((screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "It stays round." } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(screen.getByRole("img").getAttribute("src")).toBe("https://example.test/result.png");
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(screen.queryByLabelText("Your scientific question")).toBeNull();
+  expect(screen.getByText("Record your scientific question in Your questions below.")).toBeTruthy();
+  const question = "Why does the ball return to its original shape?";
+  fireEvent.change(screen.getByPlaceholderText("What are you wondering about this material?"), { target: { value: question } });
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+  await waitFor(() => expect(fetchMock.mock.calls.some(([input, init]) => input === "/api/review-questions" && init?.method === "POST" && String(init.body).includes(question))).toBe(true));
 });

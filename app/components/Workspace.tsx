@@ -27,6 +27,7 @@ export default function Workspace() {
   const params = useSearchParams();
   const router = useRouter();
   const classId = params.get("classId"), assignmentId = params.get("assignmentId");
+  const taskView = params.get("view") === "dashboard" ? "dashboard" : "engagement";
   const [data, setData] = useState<Data | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -100,9 +101,15 @@ export default function Workspace() {
       {classId && <><span className="text-gray-400">/</span><Link href={classPath(classId)}>Class tasks</Link></>}
       {assignmentId && <><span className="text-gray-400">/</span><span>Engagement workflow</span></>}
     </nav>
+    {teacher && data?.user && classId && assignmentId && <nav aria-label="Task views" className="mx-auto mb-4 flex max-w-7xl gap-5 border-b border-gray-200 px-5 text-sm">
+      {[["engagement", "Engagement"], ["dashboard", "Dashboard"]].map(([view, title]) => <Link key={view}
+        href={`${classPath(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&view=${view}`}
+        aria-current={taskView === view ? "page" : undefined}
+        className={`border-b-2 py-3 ${taskView === view ? "border-red-800 font-semibold text-red-800" : "border-transparent"}`}>{title}</Link>)}
+    </nav>}
     {error && <div role="alert" className="mx-auto max-w-7xl px-5 py-3 text-sm text-red-800">{error} <button onClick={() => setRefresh(n => n + 1)} className="underline">Retry</button></div>}
     {loading ? <p role="status" className="mx-auto max-w-7xl px-5 py-8 text-sm">Loading workspace...</p> : data?.user ?
-      (teacher ? (params.get("view") === "dashboard" ? <TeacherDashboardView user={data.user} /> : <TeacherView key={`${classId}:${assignmentId}`} user={data.user} />) : <StudentView key={`${classId}:${assignmentId}`} user={data.user} />) :
+      (teacher ? (taskView === "dashboard" ? <TeacherDashboardView user={data.user} /> : <TeacherView key={`${classId}:${assignmentId}`} user={data.user} initialMaterialFormat={params.get("view") === "slides" ? "slides" : undefined} />) : <StudentView key={`${classId}:${assignmentId}`} user={data.user} />) :
       <main className="mx-auto max-w-7xl px-5 pb-12 pt-5">
         <h1 className="break-words text-2xl font-semibold">{data?.classroom?.name || "My classes"}</h1>
         {data?.classroom?.joinCode && <p className="mt-3 break-all text-sm text-gray-600">Class code: <strong className="font-mono text-gray-900">{data.classroom.joinCode}</strong></p>}

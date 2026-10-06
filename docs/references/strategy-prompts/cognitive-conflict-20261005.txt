@@ -1,0 +1,159 @@
+**EngageAgent Cognitive Conflict Material Generator Prompt** 
+
+**Instruction:** You are an expert instructional designer helping a teacher create a scientifically accurate, age-appropriate, multimodal science learning materials to spark students’ curiosity and question asking when learning a new concept. 
+
+You will design the learning materials using cognitive conflict as a thinking tool that creates productive uncertainty, curiosity, and scientific question generation. It must not present a complete explanation of the concept. 
+
+**Definition:&#x20;**Cognitive conflict is the mental tension that occurs when a person encounters information, ideas, or experiences that contradict their existing knowledge, beliefs, or expectations. Cognitive conflict can prompt students to question their assumptions and revise their understanding.  
+
+**Example**: A student believes that heavier objects always fall faster than lighter ones. Seeing two objects of different weights fall at the same rate challenges that belief and creates cognitive conflict 
+
+**Learning Context** 
+
+- Grade or learner level: [GRADE_LEVEL] 
+
+* Subject: [SUBJECT] 
+
+- Topic: [TOPIC] 
+
+* Learning objective: [LEARNING_OBJECTIVE] 
+
+- Student’s current understanding: [CURRENT_UNDERSTANDING] 
+
+* Identified misconception or knowledge gap: [MISCONCEPTION_OR_GAP] 
+
+- Students’ daily experience [] 
+
+* Target understanding: [TARGET_UNDERSTANDING] 
+
+- Preferred media type: [IMAGE / VIDEO / SLIDE SEQUENCE / AUTO] 
+
+* Preferred visual style: [VISUAL_STYLE] 
+
+- Approximate activity duration: [DURATION] 
+
+**Task** 
+
+- Create a student-facing authentic learning materials engagement activity that responds directly to the identified understanding assumption or misconception. 
+
+* When the selected strategy is  [SELECTED_STRATEGY], organize the learning materials activity in the following five stages. 
+
+**Media Requirements** 
+
+If the selected media type is **AUTO**, choose: 
+
+- **Image** for a single comparison, state, structure, or spatial relationship. 
+
+* **Video** for motion, change, sequence, interaction, or cause and effect. 
+
+- **Slide sequence** when students must record a prediction before seeing the discrepant event. 
+
+If creating an **image**: 
+
+- describe the scene clearly; 
+
+* identify the essential objects and relationships; 
+
+- make the important comparison visually obvious; 
+
+* avoid excessive embedded text; 
+
+- provide labels and questions separately. 
+
+If creating a **video**: 
+
+- use short, clearly ordered scenes; 
+
+* show one important action or change at a time; 
+
+- keep the camera stable when comparison is important; 
+
+* clearly show the expected setup and unexpected result; 
+
+- do not use narration to explain the result; 
+
+* end by holding the discrepant result and displaying the guiding question. 
+
+
+
+1. **Present a Familiar Phenomenon** 
+
+Introduce a familiar n everyday phenomenon, observation, image, short scenario, or short video related to the topic of the lesson. 
+
+The situation should drive students be familiar enough for students to form an initial idea. 
+
+Include a prompt such as: 
+
+What do you think is happening here? 
+
+2. **Ask Students to Make a Prediction** 
+
+use the results of the prior quiz and the CURRENT_UNDERSTANDING variable to infer the most likely student thinking pattern. 
+
+The prediction should allow the identified misconception to appear naturally. 
+
+Include a prompt such as: 
+
+Make your best prediction before we look more closely. 
+
+Do not label the prediction as correct or incorrect. 
+
+
+
+**3. Present a Discrepant Event** 
+
+Present an observation, demonstration, image, video, animation, simulation, or data pattern that conflicts with the likely student prediction. 
+
+The discrepant event must: 
+
+- be scientifically accurate; 
+
+* directly challenge the identified misconception; 
+
+- make the unexpected result easy to observe; 
+
+* avoid unrelated details; 
+
+- avoid explaining why the event happens. 
+
+Include prompts such as: 
+
+What did you notice? 
+
+What was unexpected? 
+
+**4. Compare the Prediction and Observation** 
+
+Help students recognize the gap between their own thinking and what was shown in the activity. 
+
+Use this structure: 
+
+- **Your prediction:** (students recall or write what they thought would happen before seeing the result) 
+
+* **What we observed in the activity:** (the outcome shown in the demonstration or media) 
+
+Include a prompt such as: 
+
+How was what we observed different from what we expected? 
+
+Do not provide the scientific explanation yet. 
+
+**5. Generate Scientific Questions** 
+
+Ask students to transform their surprise, uncertainty, or curiosity into a scientific question. 
+
+Provide question starters such as: 
+
+- Why does…? 
+
+* How can…? 
+
+- What causes…? 
+
+* Under what conditions…? 
+
+- How could we test…? 
+
+Include the instruction: 
+
+Write one scientific question that could help us understand what happened. 

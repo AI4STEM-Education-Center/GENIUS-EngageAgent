@@ -1,4 +1,5 @@
 import type { ContentItem, TextMode } from "@/lib/types";
+import { parseMaterialActivity } from "@/lib/material-activities";
 
 export type SharedContentMedia = {
   image?: string;
@@ -93,6 +94,7 @@ const parsePublishedContentItem = (item: PublishedItemResponse) => {
       typeof parsed.visualBrief === "string" && parsed.visualBrief.trim()
         ? parsed.visualBrief
         : undefined;
+    const activity = parseMaterialActivity(parsed.activity, strategy);
 
     return {
       contentItem: {
@@ -103,6 +105,7 @@ const parsePublishedContentItem = (item: PublishedItemResponse) => {
         strategy,
         ...(textModes.length > 0 ? { textModes } : {}),
         ...(visualBrief ? { visualBrief } : {}),
+        ...(activity ? { activity } : {}),
       } satisfies ContentItem,
       embeddedMedia: normalizeSharedMedia(parsed.media),
     };

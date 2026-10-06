@@ -1,4 +1,6 @@
 import OpenAI, { toFile } from "openai";
+import { buildMaterialImageInstructions } from "@/lib/material-prompts";
+import type { MaterialActivity } from "@/lib/material-activities";
 import { NextResponse } from "next/server";
 
 import {
@@ -15,6 +17,7 @@ type ContentItem = {
   body: string;
   textModes?: string[];
   visualBrief?: string;
+  activity?: MaterialActivity;
 };
 
 const buildPrompt = (item: ContentItem, lessonNumber: number) => {
@@ -24,6 +27,16 @@ const buildPrompt = (item: ContentItem, lessonNumber: number) => {
   }
 
   const strategyContext = getStrategyContext(item.strategy);
+  const sourceInstructions = buildMaterialImageInstructions(item);
+  if (sourceInstructions) {
+    return `Create a scientifically accurate, clear classroom illustration for early high-school learners.
+Lesson objective (context, not text to draw): ${lessonContext.learningObjective}
+${sourceInstructions}
+Render only the specified scene and its named objects. For a sequence, use exactly the described number of clearly separated panels, in the specified left-to-right order. Keep the same objects, color, scale, surface and viewpoint across time panels. These are successive views of ONE event, not extra objects in one scene.
+Fit every scientifically important object FULLY inside its panel and inside the canvas. Keep a generous outer margin and gaps between panels. Zoom out as needed: never crop a ball, comparison object, or contact point at the left/right canvas edge. Use this landscape canvas for the comparison, not a square crop.
+Make the scientifically relevant contact/change/comparison easy to see at classroom thumbnail size. Preserve smooth, plausible outlines: no melting, feet or inflation. A hand/object described as pressing must visibly touch the compressed surface; do not leave a gap. Do not add a hand to a free-bouncing scene.
+Use a clean schematic with simple shapes and restrained color, not decorative character art. No invented data, graphs, force arrows, extra symbols, motion blur, logos, text, numbers, equations, captions or labels. Hard requirement: zero text. Do not add elements merely because they are typical of a physics lesson.`;
+  }
   const gradeLevel = "8th grade";
   const textModes = item.textModes?.length ? item.textModes.join(", ") : item.type;
   const visualBrief = item.visualBrief?.trim();
@@ -49,6 +62,14 @@ Do not render words, letters, numbers, equations, symbols, speech bubbles with t
 };
 
 const MAX_REFINEMENT_PROMPT_LENGTH = 500;
+
+const materialImageQuality = (): "low" | "medium" | "high" => {
+  const quality = process.env.OPENAI_MATERIAL_IMAGE_QUALITY ?? "medium";
+  if (quality !== "low" && quality !== "medium" && quality !== "high") {
+    throw new Error("OPENAI_MATERIAL_IMAGE_QUALITY must be low, medium, or high.");
+  }
+  return quality;
+};
 
 const isSafetyRejection = (error: unknown): boolean => {
   if (!(error instanceof Error)) return false;
@@ -159,7 +180,7 @@ export async function POST(request: Request) {
         model,
         image: imageInput,
         prompt: editPrompt,
-        size: "1024x1024",
+        size: item.activity ? "1536x1024" : "1024x1024",
         quality: "low",
         output_format: "webp",
       });
@@ -168,8 +189,8 @@ export async function POST(request: Request) {
       result = await client.images.generate({
         model,
         prompt,
-        size: "1024x1024",
-        quality: "low",
+        size: item.activity ? "1536x1024" : "1024x1024",
+        quality: item.activity ? materialImageQuality() : "low",
         output_format: "webp",
       });
     }

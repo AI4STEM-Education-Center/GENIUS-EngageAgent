@@ -1,0 +1,21 @@
+Required output
+
+Produce a complete, slide-by-slide engagement package containing the exact student-facing content, the visual composition for each slide, the required media assets or generation briefs, and separate teacher notes. Do not return only an activity description, a lesson outline, or advice about what the teacher could create.
+
+Required slide sequence
+
+Create six core slides:
+
+Slide 1 — Familiar phenomenon: Present an authentic, everyday situation connected to the target concept. Include one observation prompt. This establishes the context; it is not yet the familiar analogue.
+
+Slide 2 — Hard-to-picture target: Direct attention to the hidden, abstract, microscopic, or difficult-to-observe aspect of that situation. Include one question that invites initial thinking without explaining the concept.
+
+Slide 3 — Familiar analogue: Show the analogue on its own. Include one prompt that activates students’ relevant prior knowledge or experience.
+
+Slide 4 — Map the analogue to the target: Show the analogue and target together. Use one chosen mapping depth: entities, configurations, or mechanisms. Provide visual cues and a question that helps students identify correspondences without supplying every answer.
+
+Slide 5 — Explain or predict: Ask students to use the correspondences to propose an explanation or make a prediction about the target and justify their thinking. Do not display the final scientific explanation.
+
+Slide 6 — Generate scientific questions: Ask students to record their own question about the target. Provide general question starters and a brief bridge to the lesson without resolving the inquiry.
+
+Insert one additional “Where does the analogy break down?” slide immediately before the final question-generation slide only when needed to prevent a likely misunderstanding. Renumber the slides consecutively.
