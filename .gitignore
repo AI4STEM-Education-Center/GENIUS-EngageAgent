@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/artifacts/material-evaluation/
 
 # next.js
 /.next/

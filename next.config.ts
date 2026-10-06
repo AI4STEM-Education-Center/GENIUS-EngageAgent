@@ -11,6 +11,10 @@ const cspFrameAncestors =
     : "frame-ancestors 'self'";
 
 const nextConfig: NextConfig = {
+  outputFileTracingIncludes: {
+    "/api/slides": ["./docs/references/strategy-prompts/*.txt"],
+    "/api/slides/check": ["./docs/references/strategy-prompts/*.txt"],
+  },
   async headers() {
     return [
       {

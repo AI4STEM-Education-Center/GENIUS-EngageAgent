@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import MaterialActivityView from "./MaterialActivityView";
 import type { UserContext } from "@/lib/auth";
 import type { ContentItem, TextMode } from "@/lib/types";
 import type { StepProgress } from "@/lib/student-progress";
@@ -367,7 +368,7 @@ export default function StudentContentReviewView({
         return (
           <div key={item.id} className="rounded-2xl border border-slate-200 bg-white p-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-              {(itemMedia?.image || itemMedia?.video) && (
+              {!item.activity && (itemMedia?.image || itemMedia?.video) && (
                 <div className="flex shrink-0 gap-3">
                   {itemMedia.image && (
                     <img
@@ -401,7 +402,9 @@ export default function StudentContentReviewView({
                   ))}
                 </div>
                 <p className="mt-3 text-base font-semibold text-slate-900">{item.title}</p>
-                <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600">{item.body}</p>
+                {item.activity ? (
+                  <MaterialActivityView activity={item.activity} media={itemMedia} questionInput={false} />
+                ) : <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600">{item.body}</p>}
               </div>
             </div>
 

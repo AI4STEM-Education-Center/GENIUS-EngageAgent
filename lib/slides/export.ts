@@ -1,0 +1,78 @@
+import type { SlideAsset, SlideDeck } from "./model";
+import { isSlideAsset } from "./model";
+import { exportErrors, slideElements, wrapElements, type MeasureText } from "./layout";
+import { hasTeacherDecision } from "./quality";
+import { normalizePresentationPackage } from "./package";
+import { PROMPT_LABELS } from "./prompt-versions";
+import { analogyMappingIndex, resolveAnalogyMethod } from "./analogy-methods";
+
+export async function decodeSlideAsset(asset: unknown): Promise<SlideAsset> {
+  if (!isSlideAsset(asset)) throw new Error("Invalid slide image. Retry the image.");
+  const image = new Image();
+  image.src = asset.data;
+  await image.decode();
+  if (!image.naturalWidth || image.naturalWidth > 4096 || image.naturalHeight > 4096) throw new Error("Invalid image dimensions.");
+  return { data: asset.data, width: image.naturalWidth, height: image.naturalHeight,
+    ...(typeof asset.model === "string" && asset.model.length <= 120 ? { model: asset.model } : {}) };
+}
+
+export async function buildPresentation(deck: SlideDeck, measure: MeasureText) {
+  const errors = exportErrors(deck, measure);
+  if (errors.length) throw new Error(errors.join("\n"));
+  const { default: PptxGenJS } = await import("pptxgenjs");
+  const pptx = new PptxGenJS();
+  pptx.layout = "LAYOUT_WIDE";
+  pptx.author = "EngageAgent";
+  pptx.subject = `Lesson ${deck.lessonNumber}: ${deck.strategy}`;
+  pptx.title = deck.draft.title;
+  pptx.theme = { headFontFace: "Arial", bodyFontFace: "Arial" };
+  deck.draft.slides.forEach((content, index) => {
+    const slide = pptx.addSlide();
+    slide.background = { color: "FFFFFF" };
+    for (const element of wrapElements(slideElements(deck, index), measure)) {
+      const { left, top, width, height } = element.frame;
+      const position = { x: left / 96, y: top / 96, w: width / 96, h: height / 96 };
+      if (element.kind === "image") slide.addImage({ ...position, data: element.data!, altText: element.alt });
+      else slide.addText(element.renderedLines!.join("\n"), { ...position, fontFace: "Arial", fontSize: element.fontSize * .75,
+        bold: element.bold, color: element.color, margin: 0, valign: "top", breakLine: false, lang: "en-US",
+        lineSpacing: element.fontSize * .75 * 1.26, paraSpaceAfter: 0, wrap: false,
+      });
+    }
+    slide.addNotes([...content.teacherNotes, ...(deck.draft.analogyPlan && index === analogyMappingIndex(deck.draft.analogyMethod) ? [`Analogy teaching design (private): ${JSON.stringify(deck.draft.analogyPlan)}`] : []), ...(deck.strategy === "analogy" ? [`Analogy story: ${resolveAnalogyMethod(deck.draft.analogyMethod)}. ${deck.draft.analogyMethod === "six-step" ? "The phenomenon and target precede the familiar analogue, which first appears on page 3. The question page comes last; a boundary page is included only when needed." : "Both target and familiar situations appear on the opening page (earlier method)."}`] : []), ...(deck.promptProvenance ? [`Prompt: ${PROMPT_LABELS[deck.promptProvenance.version]}; revision ${deck.promptProvenance.revision}; original reference SHA-256 ${deck.promptProvenance.sourceSha256}.`] : []), ...(hasTeacherDecision(deck) ? [`Teacher quality-review decision: ${deck.teacherDecision!.reason}`] : []), "Visuals: AI-generated illustrations, not experimental measurements.",
+      ...(deck.classroomContext ? [`Classroom context: ${deck.classroomContext}`] : []),
+      `Teaching method: ${deck.strategy}. References: team strategy texts, Teacher PD examples and Jongchan's storyboard.${deck.draft.analogyMethod === "six-step" ? " Latest analogy direction: Samaneh's six core slides, confirmed by Lehong; no analogue on the first two pages." : ""} ${deck.strategy === "experience bridging" ? "Recall and re-examine the experience before naming the scientific concept on page 3. The connection stage is optional; the learner's question comes last." : "The opening names the learning target; analogy boundaries are optional and used only to clarify."} Each method retains its own inquiry sequence.`].join("\n\n"));
+  });
+  return pptx;
+}
+
+export async function buildPresentationBytes(deck: SlideDeck, measure: MeasureText): Promise<ArrayBuffer> {
+  const pptx = await buildPresentation(deck, measure);
+  const bytes = await pptx.write({ outputType: "arraybuffer", compression: true });
+  if (!(bytes instanceof ArrayBuffer)) throw new Error("Unable to create the PowerPoint file.");
+  return normalizePresentationPackage(bytes);
+}
+
+// The caller owns this URL until the prepared file is replaced or its view closes.
+export async function downloadPresentation(deck: SlideDeck, measure: MeasureText): Promise<{ url: string; dataUri: string; fileName: string }> {
+  for (const asset of Object.values(deck.assets)) await decodeSlideAsset(asset);
+  const blob = new Blob([await buildPresentationBytes(deck, measure)], {
+    type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  });
+  // Both download methods carry the very same generated bytes; the data URI also
+  // works in browser hosts that cannot save a blob URL from a visible link.
+  const dataUri = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Unable to prepare the PowerPoint download."));
+    reader.onerror = () => reject(new Error("Unable to prepare the PowerPoint download."));
+    reader.readAsDataURL(blob);
+  });
+  const url = URL.createObjectURL(blob);
+  const fileName = `EngageAgent-Lesson-${deck.lessonNumber}-${deck.strategy.replaceAll(" ", "-")}${deck.promptProvenance ? `-${deck.promptProvenance.version}` : ""}.pptx`;
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  try { document.body.append(link); link.click(); }
+  catch { /* A visible save link in the caller supports browsers blocking automatic downloads. */ }
+  finally { link.remove(); }
+  return { url, dataUri, fileName };
+}

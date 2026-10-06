@@ -3,6 +3,8 @@ frontend:
   phases:
     preBuild:
       commands:
+        - nvm install 22
+        - nvm use 22
         - npm ci
     build:
       commands:
@@ -10,6 +12,9 @@ frontend:
         - echo "GROK_API_KEY=$GROK_API_KEY" >> .env.production
         - echo "SSO_SECRET=$SSO_SECRET" >> .env.production
         - echo "SSO_FALLBACK_SECRET=$SSO_FALLBACK_SECRET" >> .env.production
+        - echo "ALLOWED_ORIGINS=$ALLOWED_ORIGINS" >> .env.production
+        - echo "ENGAGE_APP_URL=${ENGAGE_APP_URL:-https://engageagent.ai4genius.org}" >> .env.production
+        - echo "GENIUS_URL=${GENIUS_URL:-https://learn.ai4genius.org}" >> .env.production
         - echo "DYNAMODB_TABLE=$DYNAMODB_TABLE" >> .env.production
         - echo "ENGAGE_AWS_REGION=$ENGAGE_AWS_REGION" >> .env.production
         - echo "ENGAGE_AWS_ACCESS_KEY_ID=$ENGAGE_AWS_ACCESS_KEY_ID" >> .env.production
@@ -17,6 +22,12 @@ frontend:
         - echo "COHORT_ANALYSIS_QUEUE_URL=$COHORT_ANALYSIS_QUEUE_URL" >> .env.production
         - echo "ENGAGE_S3_BUCKET=$ENGAGE_S3_BUCKET" >> .env.production
         - echo "OPENAI_IMAGE_MODEL=$OPENAI_IMAGE_MODEL" >> .env.production
+        - echo "OPENAI_MODEL=${OPENAI_MODEL:-gpt-5-mini}" >> .env.production
+        - echo "OPENAI_SLIDES_MODEL=$OPENAI_SLIDES_MODEL" >> .env.production
+        - echo "OPENAI_MATERIAL_REVIEW_MODEL=${OPENAI_MATERIAL_REVIEW_MODEL:-gpt-4.1}" >> .env.production
+        - echo "OPENAI_VLM_MODEL=${OPENAI_VLM_MODEL:-gpt-4o}" >> .env.production
+        - echo "OPENAI_MATERIAL_IMAGE_QUALITY=${OPENAI_MATERIAL_IMAGE_QUALITY:-medium}" >> .env.production
+        - if [ -n "$OPENAI_FALLBACK_MODEL" ]; then echo "OPENAI_FALLBACK_MODEL=$OPENAI_FALLBACK_MODEL" >> .env.production; fi
         - npm run build
   artifacts:
     baseDirectory: .next

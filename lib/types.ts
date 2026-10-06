@@ -24,6 +24,7 @@ export type ContentItem = {
   strategy: string;
   textModes?: TextMode[];
   visualBrief?: string;
+  activity?: import("./material-activities").MaterialActivity;
 };
 
 export type ImageVersion = {
