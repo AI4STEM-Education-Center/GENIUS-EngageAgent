@@ -11,6 +11,7 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import crypto from "node:crypto";
 import type { Survey, SurveyResponse } from "@/lib/types";
+import type { SurveyAnalysisRecord } from "@/lib/daily-experience-analysis";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -139,6 +140,7 @@ type Store = {
   cohort_job_students: CohortJobStudentRecord[];
   surveys: SurveyRecord[];
   survey_responses: SurveyResponseRecord[];
+  survey_analyses: SurveyAnalysisRecord[];
 };
 
 type TeacherAnnotation = {
@@ -174,6 +176,7 @@ const emptyStore: Store = {
   cohort_job_students: [],
   surveys: [],
   survey_responses: [],
+  survey_analyses: [],
 };
 const dataDir = path.join(process.cwd(), "data");
 const storePath = path.join(dataDir, "engage-nosql.json");
@@ -303,6 +306,9 @@ const loadStore = async () => {
       }
       if (!Array.isArray(parsed.survey_responses)) {
         parsed.survey_responses = [];
+      }
+      if (!Array.isArray(parsed.survey_analyses)) {
+        parsed.survey_analyses = [];
       }
       storeCache = parsed;
       return parsed;
@@ -2186,4 +2192,102 @@ export const listContentRatings = async (
     if (studentId && r.student_id !== studentId) return false;
     return true;
   });
+};
+
+/* ------------------------------------------------------------------ */
+/*  Daily-experience analysis of survey responses (#114)               */
+/* ------------------------------------------------------------------ */
+
+const surveyAnalysisSortKey = (assignmentId: string, surveyId: string) =>
+  `SURVEY_ANALYSIS#ASSIGN#${assignmentId}#ID#${surveyId}`;
+
+/** One saved analysis per survey; re-running replaces it. */
+export const upsertSurveyAnalysis = async (
+  record: SurveyAnalysisRecord,
+): Promise<SurveyAnalysisRecord> => {
+  if (useDynamoDb) {
+    const client = getDynamoClient();
+    if (client) {
+      await client.send(
+        new PutCommand({
+          TableName: dynamoTableName,
+          Item: {
+            [pkField]: `CLASS#${record.class_id}`,
+            [skField]: surveyAnalysisSortKey(record.assignment_id, record.survey_id),
+            record_type: "survey_analysis",
+            // class_id is the partition key ("CLASS#..."), so it isn't
+            // spread from the record; getSurveyAnalysis restores it.
+            assignment_id: record.assignment_id,
+            survey_id: record.survey_id,
+            daily_experience_topic: record.daily_experience_topic,
+            model: record.model,
+            analyzed_at: record.analyzed_at,
+            summary: record.summary,
+            extractions: record.extractions,
+            grouping: record.grouping,
+            id_map: record.id_map,
+          },
+        }),
+      );
+    }
+    return record;
+  }
+
+  await withWriteLock(async () => {
+    const store = await loadStore();
+    const idx = store.survey_analyses.findIndex(
+      (a) =>
+        a.class_id === record.class_id &&
+        a.assignment_id === record.assignment_id &&
+        a.survey_id === record.survey_id,
+    );
+    if (idx >= 0) store.survey_analyses[idx] = record;
+    else store.survey_analyses.push(record);
+    await persistStore(store);
+  });
+  return record;
+};
+
+export const getSurveyAnalysis = async (
+  classId: string,
+  assignmentId: string,
+  surveyId: string,
+): Promise<SurveyAnalysisRecord | null> => {
+  if (useDynamoDb) {
+    const client = getDynamoClient();
+    if (!client) return null;
+    const result = await client.send(
+      new GetCommand({
+        TableName: dynamoTableName,
+        Key: {
+          [pkField]: `CLASS#${classId}`,
+          [skField]: surveyAnalysisSortKey(assignmentId, surveyId),
+        },
+      }),
+    );
+    const item = result.Item;
+    if (!item) return null;
+    return {
+      class_id: classId,
+      assignment_id: assignmentId,
+      survey_id: surveyId,
+      daily_experience_topic: (item.daily_experience_topic as string) ?? "",
+      model: (item.model as string) ?? "",
+      analyzed_at: (item.analyzed_at as string) ?? "",
+      summary: item.summary as SurveyAnalysisRecord["summary"],
+      extractions: (item.extractions as SurveyAnalysisRecord["extractions"]) ?? [],
+      grouping: (item.grouping as SurveyAnalysisRecord["grouping"]) ?? {},
+      id_map: (item.id_map as SurveyAnalysisRecord["id_map"]) ?? {},
+    };
+  }
+
+  const store = await loadStore();
+  return (
+    store.survey_analyses.find(
+      (a) =>
+        a.class_id === classId &&
+        a.assignment_id === assignmentId &&
+        a.survey_id === surveyId,
+    ) ?? null
+  );
 };
