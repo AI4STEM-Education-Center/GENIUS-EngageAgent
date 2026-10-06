@@ -9,10 +9,11 @@ import { decodeSlideAsset, downloadPresentation } from "@/lib/slides/export";
 import { DEFAULT_MODEL_SELECTION, INITIAL_MODEL_CATALOG, type SlideModelCatalog, type SlideModelSelection } from "@/lib/slides/models";
 import SlidePreview from "./SlidePreview";
 import { hasTeacherDecision, imageCheckKey, imageMatchesPlan, imageReferenceId, imageSourcePrompt, preservedAssets, qualityErrors, reviewFindings, textCheckKey } from "@/lib/slides/quality";
-import { PROMPT_LABELS, PROMPT_VERSIONS, type SlidePromptVersion } from "@/lib/slides/prompt-versions";
+import { PROMPT_LABELS, PROMPT_VERSIONS, type SlidePromptProvenance, type SlidePromptVersion } from "@/lib/slides/prompt-versions";
 import { analogyStudentFields } from "@/lib/slides/analogy";
 import { ANALOGY_METHODS, analogyMappingIndex, resolveAnalogyMethod, type AnalogyMethod } from "@/lib/slides/analogy-methods";
 import { loadSlideDraft, saveSlideDraft, slideDraftKey } from "@/lib/slides/draft-storage";
+import { postSlideRequest } from "@/lib/slides/client-transport";
 
 const input = "w-full min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-2 focus:outline-teal-700 disabled:opacity-50";
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium hover:bg-gray-100 disabled:opacity-50";
@@ -149,16 +150,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   }, [deck, savedDeck, busy]);
 
   async function post(path: string, body: object, controller: AbortController) {
-    controller.signal.throwIfAborted();
-    const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ classId, assignmentId, ...body }), signal: controller.signal });
-    let data;
-    try { data = await response.json(); }
-    catch { throw new Error(`The slide request did not finish (HTTP ${response.status}). Your current draft is retained. Retry the current step.`); }
-    controller.signal.throwIfAborted();
-    if (!response.ok) throw new Error(data?.error || `The slide request failed (HTTP ${response.status}). Your current draft is retained. Retry the current step.`);
-    if (!data || typeof data !== "object") throw new Error("The server returned an incomplete slide response. Your current draft is retained. Retry the current step.");
-    return data;
+    return postSlideRequest<{ draft: unknown; asset: unknown; issues: string[]; model?: string; promptProvenance?: SlidePromptProvenance }>(
+      path, { classId, assignmentId, ...body }, controller.signal);
   }
   async function run(work: (controller: AbortController) => Promise<void>) {
     job.current?.abort();

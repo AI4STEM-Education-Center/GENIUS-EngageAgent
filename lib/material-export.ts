@@ -67,9 +67,12 @@ ${activity ? '<button type="button" id="continue">Continue</button><noscript><p>
 </script>` : ""}</body></html>`;
 }
 
-/** Embed the current image so downloaded material does not depend on a temporary media URL. */
-export async function downloadStudentMaterial(item: ContentItem, imageUrl: string): Promise<void> {
-  const response = await fetch(imageUrl.startsWith("data:") ? imageUrl : `/api/download?url=${encodeURIComponent(imageUrl)}`);
+export type PreparedMaterialFile = { url: string; dataUri: string; fileName: string };
+
+/** The caller retains/revokes the blob URL; both save paths contain the same standalone HTML. */
+export async function downloadStudentMaterial(item: ContentItem, imageUrl: string, signal?: AbortSignal): Promise<PreparedMaterialFile> {
+  signal?.throwIfAborted();
+  const response = await fetch(imageUrl.startsWith("data:") ? imageUrl : `/api/download?url=${encodeURIComponent(imageUrl)}`, { signal });
   if (!response.ok) throw new Error("Unable to download the image. Please try again.");
   const blob = await response.blob();
   if (!/^image\/(png|jpeg|webp|gif)$/.test(blob.type)) throw new Error("The image is not ready to download. Please regenerate it and try again.");
@@ -79,13 +82,23 @@ export async function downloadStudentMaterial(item: ContentItem, imageUrl: strin
     reader.onload = () => resolve(String(reader.result));
     reader.readAsDataURL(blob);
   });
+  signal?.throwIfAborted();
   const html = buildStudentMaterialHtml(item, dataUri);
-  const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+  const file = new Blob([html], { type: "text/html;charset=utf-8" });
+  const fileDataUri = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Unable to prepare the material download."));
+    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Unable to prepare the material download."));
+    reader.readAsDataURL(file);
+  });
+  signal?.throwIfAborted();
+  const url = URL.createObjectURL(file);
+  const fileName = `${item.title.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-|-$/g, "").slice(0, 100) || "engage-agent-material"}.html`;
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${item.title.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-|-$/g, "").slice(0, 100) || "engage-agent-material"}.html`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  link.download = fileName;
+  try { document.body.appendChild(link); link.click(); }
+  catch { /* A persistent visible link supports browsers that block automatic saving. */ }
+  finally { link.remove(); }
+  return { url, dataUri: fileDataUri, fileName };
 }

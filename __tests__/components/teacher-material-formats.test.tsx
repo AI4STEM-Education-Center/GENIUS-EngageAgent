@@ -6,7 +6,7 @@ import type { UserContext } from "@/lib/auth";
 import type { SlideStrategy } from "@/lib/slides/model";
 import type { SlidesWorkspaceHandle } from "@/app/components/SlidesWorkspace";
 
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), generate: vi.fn(), mount: vi.fn(), unmount: vi.fn(), download: vi.fn() }));
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), generate: vi.fn(), mount: vi.fn(), unmount: vi.fn(), download: vi.fn(), revoke: vi.fn() }));
 
 type EmbeddedProps = {
   user: UserContext;
@@ -77,6 +77,8 @@ beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
   vi.stubGlobal("fetch", mocks.fetch);
+  vi.stubGlobal("URL", Object.assign(class extends URL {}, { revokeObjectURL: mocks.revoke }));
+  mocks.download.mockResolvedValue({ url: "blob:material", dataUri: "data:text/html;charset=utf-8;base64,aGVsbG8=", fileName: "Shared-activity.html" });
   mocks.fetch.mockImplementation(async (input: string, init?: RequestInit) => {
     if (input.startsWith("/api/lessons/")) {
       const lesson = Number(input.split("/").pop());
@@ -319,7 +321,55 @@ it("downloads the complete selected student material with its current image", as
   const download = screen.getByRole("button", { name: "Download material (HTML)" });
   await waitFor(() => expect(download).toBeEnabled());
   fireEvent.click(download);
-  await waitFor(() => expect(mocks.download).toHaveBeenCalledWith(expect.objectContaining(item), "https://example.test/current.png"));
+  await waitFor(() => expect(mocks.download).toHaveBeenCalledWith(expect.objectContaining(item), "https://example.test/current.png", expect.any(AbortSignal)));
+  const link = await screen.findByRole("link", { name: "Save material file" });
+  expect(link).toHaveAttribute("href", "data:text/html;charset=utf-8;base64,aGVsbG8=");
+  expect(link).toHaveAttribute("download", "Shared-activity.html");
+  expect(link).not.toHaveAttribute("target");
+  expect(mocks.revoke).not.toHaveBeenCalled();
+});
+
+it("releases prepared material files on replacement and unmount", async () => {
+  const item = { id: "download-activity", type: "phenomenon", title: "Shared activity", body: "Compare the observations.", strategy: "analogy" };
+  seedDraft({ content: [item], images: { [item.id]: { status: "ready", url: "https://example.test/current.png" } } });
+  const view = render(<TeacherView user={user} />); await ready();
+  const download = screen.getByRole("button", { name: "Download material (HTML)" });
+  await waitFor(() => expect(download).toBeEnabled()); fireEvent.click(download);
+  await screen.findByRole("link", { name: "Save material file" });
+  mocks.download.mockResolvedValueOnce({ url: "blob:replacement", dataUri: "data:text/html;base64,bmV3", fileName: "Replacement.html" });
+  fireEvent.click(download);
+  await waitFor(() => expect(screen.getByRole("link", { name: "Save material file" })).toHaveAttribute("download", "Replacement.html"));
+  expect(mocks.revoke).toHaveBeenCalledWith("blob:material");
+  view.unmount(); expect(mocks.revoke).toHaveBeenCalledWith("blob:replacement");
+});
+
+it("invalidates a prepared link when the teacher selects another image version", async () => {
+  const item = { id: "download-versions", type: "phenomenon", title: "Versioned activity", body: "Compare the observations.", strategy: "analogy" };
+  seedDraft({ content: [item], images: { [item.id]: { status: "ready", url: "https://example.test/current.png", historyIndex: 1,
+    history: [{ url: "https://example.test/earlier.png", createdAt: "2026-10-01T00:00:00Z" }, { url: "https://example.test/current.png", createdAt: "2026-10-02T00:00:00Z" }] } } });
+  render(<TeacherView user={user} />); await ready();
+  const download = screen.getByRole("button", { name: "Download material (HTML)" });
+  await waitFor(() => expect(download).toBeEnabled()); fireEvent.click(download);
+  await screen.findByRole("link", { name: "Save material file" });
+  fireEvent.click(screen.getByRole("button", { name: "←" }));
+  expect(screen.queryByRole("link", { name: "Save material file" })).toBeNull();
+  await waitFor(() => expect(mocks.revoke).toHaveBeenCalledWith("blob:material"));
+});
+
+it("aborts preparation when its content is replaced and discards a late file without exposing it", async () => {
+  const item = { id: "download-old", type: "phenomenon", title: "Old activity", body: "Compare the observations.", strategy: "analogy" };
+  seedDraft({ content: [item], images: { [item.id]: { status: "ready", url: "https://example.test/current.png" } } });
+  let finish: (value: unknown) => void = () => {};
+  mocks.download.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  render(<TeacherView user={user} />); await ready();
+  const download = screen.getByRole("button", { name: "Download material (HTML)" });
+  await waitFor(() => expect(download).toBeEnabled()); fireEvent.click(download);
+  const signal = mocks.download.mock.calls[0][2] as AbortSignal;
+  fireEvent.click(screen.getByRole("button", { name: "Generate materials" }));
+  await waitFor(() => expect(signal.aborted).toBe(true));
+  await act(async () => finish({ url: "blob:late", dataUri: "data:text/html;base64,b2xk", fileName: "Old.html" }));
+  expect(screen.queryByRole("link", { name: "Save material file" })).toBeNull();
+  expect(mocks.revoke).toHaveBeenCalledWith("blob:late");
 });
 
 

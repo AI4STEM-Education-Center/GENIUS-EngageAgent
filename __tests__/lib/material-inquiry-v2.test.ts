@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { getLessonGenerationContext, getStrategyContext } from "@/lib/lesson-context";
-import { buildMaterialImageInstructions, buildMaterialPrompt, MATERIAL_REVIEW_INSTRUCTIONS, MATERIAL_STRATEGY_REVISION, materialReviewInstructions } from "@/lib/material-prompts";
+import { buildMaterialImageInstructions, buildMaterialPrompt, MATERIAL_REVIEW_INSTRUCTIONS, MATERIAL_CONTACT_PLAUSIBILITY_CHECKS, MATERIAL_STRATEGY_REVISION, materialReviewInstructions } from "@/lib/material-prompts";
 import { materialOutputFormat } from "@/lib/material-output-schema";
 import { parseGeneratedMaterialActivity } from "@/lib/material-activities";
 import { analogyActivity, bridgingActivity, conflictActivity } from "../fixtures/material-activities";
@@ -23,7 +23,7 @@ describe("CC/EB student inquiry refinement", () => {
 
   it.each(strategies)("keeps %s generation and actual review on the same student-facing contract", strategy => {
     const generation = prompt(strategy);
-    expect(MATERIAL_STRATEGY_REVISION).toBe("cc-eb-20261005-v2");
+    expect(MATERIAL_STRATEGY_REVISION).toBe("cc-eb-20261006-v3");
     expect(generation.system).toContain(MATERIAL_STRATEGY_REVISION);
     for (const instructions of [generation.user, materialReviewInstructions(strategy)]) {
       expect(instructions).toContain("ONE coherent, lesson-aligned episode");
@@ -37,6 +37,7 @@ describe("CC/EB student inquiry refinement", () => {
 
   it("uses a focused reviewer for the selected inquiry method while preserving analogy's reviewer", () => {
     expect(materialReviewInstructions("analogy")).toBe(MATERIAL_REVIEW_INSTRUCTIONS);
+    expect(createHash("sha256").update(MATERIAL_REVIEW_INSTRUCTIONS).digest("hex")).toBe("b7a56366aab6163e184cae26b53453153ac5cd830b43bf666816668a070d2530");
     const cc = materialReviewInstructions("cognitive conflict");
     const eb = materialReviewInstructions("experience bridging");
     expect(cc).toContain("Read the opening and prediction BEFORE reading the result");
@@ -93,6 +94,25 @@ describe("CC/EB student inquiry refinement", () => {
     expect(generation.user).toContain("cart-launcher is an example, not a compulsory learner experience");
     expect(generation.user).toContain("Do not substitute a generic braking/sliding story that omits stored-energy release");
     expect(generation.user).not.toContain("Focus on the FULL cart-launcher system");
+  });
+
+  it.each(strategies)("checks %s contact materials before drawing without substituting a new activity", strategy => {
+    const generation = buildMaterialPrompt(getLessonGenerationContext(8)!, getStrategyContext(strategy));
+    for (const instructions of [generation.system, materialReviewInstructions(strategy)]) {
+      expect(instructions).toContain(MATERIAL_CONTACT_PLAUSIBILITY_CHECKS);
+      expect(instructions).toContain("rounded outline alone does not establish a flexible bumper");
+      expect(instructions).toContain("cart body stays approximately unchanged");
+      expect(instructions).toContain("before a conflict prediction without revealing the outcome");
+      expect(instructions).toContain("without naming bridging's formal concept early");
+      expect(instructions).toContain("setup, predicted feature, observedOutcome");
+      expect(instructions).toContain("cannot justify unsupported dents, permanent damage or invented recovery");
+      expect(instructions).toContain("not instructions to add a cart");
+    }
+    const image = buildMaterialImageInstructions({ strategy, activity: strategy === "cognitive conflict" ? conflictActivity : bridgingActivity });
+    expect(image).toContain("Respect the named materials and the exact deforming component");
+    expect(image).toContain("Do not silently turn a cart body into rubber");
+    expect(image).toContain("Apply these examples only when those objects are already in the plan");
+    expect(image).toContain("Schematic emphasis cannot justify unsupported dents or permanent damage");
   });
 
   it("renders only the selected strategy's planned inquiry scene", () => {

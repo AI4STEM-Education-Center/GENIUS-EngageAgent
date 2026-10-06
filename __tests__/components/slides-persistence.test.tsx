@@ -27,7 +27,7 @@ beforeEach(() => {
     : path.endsWith("/check") ? reply({ issues: [] }) : path.endsWith("/image") ? reply({ asset: deckFixture(context.strategy).assets.evidence })
       : reply({ draft: slideFixture(context.strategy) }));
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it("restores a saved deck with images and checks, requires fresh human confirmation and makes no paid requests", async () => {
   const saved = deckFixture(context.strategy); mocks.load.mockResolvedValue(saved);
@@ -116,4 +116,38 @@ it("retains the visible draft when storage or the deployed gateway fails and off
   await screen.findByText(/HTTP 504/);
   expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe(saved.draft.slides[0].title);
   expect(posts()).toHaveLength(1);
+});
+
+it("continues the native slide pipeline after asynchronous draft polling without submitting twice", async () => {
+  const ref = createRef<SlidesWorkspaceHandle>(); const ready = vi.fn();
+  render(<SlidesWorkspace ref={ref} user={user} embeddedContext={context} onReadyChange={ready} />);
+  await waitFor(() => expect(ready).toHaveBeenLastCalledWith(context.strategy, true));
+  const defaultFetch = mocks.fetch.getMockImplementation()!; let polls = 0;
+  const pending = { ...reply({ job: { id: "job-ui", pollAfterMs: 2000 } }), status: 202 };
+  mocks.fetch.mockImplementation(async (path: string, init?: RequestInit) => path === "/api/slides" ? pending
+    : path === "/api/slides/jobs" ? ++polls === 1 ? pending : { ...reply({ draft: slideFixture(context.strategy) }), status: 200 }
+      : defaultFetch(path, init));
+  vi.useFakeTimers();
+  act(() => ref.current?.generate());
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  expect(screen.getByText("5 slides ready for review.")).toBeTruthy();
+  expect(mocks.fetch.mock.calls.filter(([path]) => path === "/api/slides")).toHaveLength(1);
+  expect(polls).toBe(2);
+});
+
+it("keeps the restored draft when an asynchronous revision fails at the provider", async () => {
+  const saved = deckFixture(context.strategy); mocks.load.mockResolvedValue(saved);
+  const ready = vi.fn();
+  render(<SlidesWorkspace user={user} embeddedContext={context} onReadyChange={ready} />);
+  await waitFor(() => expect(ready).toHaveBeenLastCalledWith(context.strategy, true));
+  mocks.fetch.mockResolvedValueOnce({ ...reply({ job: { id: "job-failed", pollAfterMs: 2000 } }), status: 202 })
+    .mockResolvedValueOnce({ ok: false, status: 502, json: async () => ({ error: "The provider could not finish this revision.", jobFailure: true }) })
+    .mockResolvedValue(reply({ cancelled: true }));
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(screen.getByText("The provider could not finish this revision.")).toBeTruthy();
+  expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe(saved.draft.slides[0].title);
+  expect(posts().filter(body => body.operation === "review")).toHaveLength(1);
+  expect(posts().filter(body => body.jobId === "job-failed" && !body.operation)).toHaveLength(1);
 });

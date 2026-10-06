@@ -87,6 +87,15 @@ describe("source-aligned material APIs", () => {
     expect(generate.mock.calls[0][0].prompt).toContain("zero text");
     expect(generate.mock.calls[0][0].size).toBe("1536x1024");
     expect(generate.mock.calls[0][0].quality).toBe("medium");
+    expect(complete).toHaveBeenCalledTimes(2); // Guidance reuses generation and the existing reviewer.
+    if (strategy === "analogy") {
+      expect(generate.mock.calls[0][0].prompt).not.toContain("CONTACT MATERIALS IN THIS IMAGE");
+      for (const [input] of complete.mock.calls) expect(input.messages[0].content).not.toContain("CONTACT AND MATERIAL PLAUSIBILITY");
+    } else {
+      for (const [input] of complete.mock.calls) expect(input.messages[0].content).toContain("CONTACT AND MATERIAL PLAUSIBILITY");
+      expect(generate.mock.calls[0][0].prompt).toContain("CONTACT MATERIALS IN THIS IMAGE");
+      expect(generate.mock.calls[0][0].prompt).toContain("do not invent a visibly dented cart body");
+    }
   });
   it("retains the legacy fourth strategy and client-driven fallback model", async () => {
     vi.stubEnv("OPENAI_FALLBACK_MODEL", "fallback-test");

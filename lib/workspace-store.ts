@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 type RecordValue = Record<string, unknown>;
-type Stored = { class_id: string; record_id: string; value: RecordValue };
+type Stored = { class_id: string; record_id: string; value: RecordValue; expiresAt?: number };
 const file = () => path.join(process.env.ENGAGE_LOCAL_DATA_DIR || path.join(process.cwd(), "data"), "workspace.json");
 let writes = Promise.resolve();
 let client: DynamoDBDocumentClient | undefined;
@@ -57,12 +57,12 @@ export async function workspaceQuery<T>(partition: string, prefix: string): Prom
   return values;
 }
 
-export async function workspacePut(records: { partition: string; key: string; value: RecordValue; createOnly?: boolean }[]) {
+export async function workspacePut(records: { partition: string; key: string; value: RecordValue; createOnly?: boolean; expiresAt?: number }[]) {
   const db = database();
   if (db) {
     await db.send(new TransactWriteCommand({ TransactItems: records.map(row => ({ Put: {
       TableName: process.env.DYNAMODB_TABLE,
-      Item: { class_id: row.partition, record_id: row.key, value: row.value },
+      Item: { class_id: row.partition, record_id: row.key, value: row.value, ...(row.expiresAt === undefined ? {} : { expiresAt: row.expiresAt }) },
       ...(row.createOnly ? { ConditionExpression: "attribute_not_exists(record_id)" } : {}),
     } })) }));
     return;
@@ -73,7 +73,7 @@ export async function workspacePut(records: { partition: string; key: string; va
       const matches = (item: Stored) => item.class_id === row.partition && item.record_id === row.key;
       if (row.createOnly && stored.some(matches)) throw new Error("Workspace record already exists.");
       stored = stored.filter(item => !matches(item));
-      stored.push({ class_id: row.partition, record_id: row.key, value: row.value });
+      stored.push({ class_id: row.partition, record_id: row.key, value: row.value, ...(row.expiresAt === undefined ? {} : { expiresAt: row.expiresAt }) });
     }
     await fs.mkdir(path.dirname(file()), { recursive: true });
     await fs.writeFile(`${file()}.tmp`, JSON.stringify(stored), { mode: 0o600 });
