@@ -92,6 +92,25 @@ it("rejects excess declared size and stops an oversized stream before storing it
   expect(mocks.send).not.toHaveBeenCalled();
 });
 
+it("accepts exactly 4.4 MB of streamed HTML and rejects one extra byte before storage", async () => {
+  expect(MAX_MATERIAL_FILE_BYTES).toBe(4_400_000);
+  const closing = "</body></html>";
+  const padded = html.slice(0, -closing.length) + " ".repeat(MAX_MATERIAL_FILE_BYTES - Buffer.byteLength(html)) + closing;
+  const bytes = Buffer.from(padded, "utf8");
+  expect(bytes.byteLength).toBe(MAX_MATERIAL_FILE_BYTES);
+  const stream = (value: Uint8Array) => new ReadableStream({ start(controller) {
+    controller.enqueue(value.subarray(0, 2_200_000)); controller.enqueue(value.subarray(2_200_000)); controller.close();
+  } });
+  expect((await POST(request(stream(bytes)))).status).toBe(200);
+  const upload = mocks.send.mock.calls[0][0] as PutObjectCommand;
+  expect(upload.input.ContentLength).toBe(MAX_MATERIAL_FILE_BYTES);
+  expect(Buffer.from(upload.input.Body as Uint8Array).equals(bytes)).toBe(true);
+  const response = await POST(request(stream(Buffer.concat([bytes, Buffer.from(" ")]))));
+  expect(response.status).toBe(413);
+  expect((await response.json()).error).toContain("4.4 MB");
+  expect(mocks.send).toHaveBeenCalledTimes(1);
+});
+
 it("rejects arbitrary destinations, filename header injection and mismatched content types", async () => {
   const invalid: NonNullable<Parameters<typeof request>[1]>[] = [
     { extra: { url: "https://attacker.test/file" } }, { extra: { bucket: "public" } }, { extra: { key: "chosen/path" } },

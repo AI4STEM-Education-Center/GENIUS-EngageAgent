@@ -1,5 +1,5 @@
 export type MaterialFileScope = { classId?: string; assignmentId?: string };
-export const MAX_MATERIAL_FILE_BYTES = 4_000_000;
+export const MAX_MATERIAL_FILE_BYTES = 4_400_000;
 
 /** Upload only already-prepared bytes, once. Unavailable attachment storage must
  * not prevent the existing local download; an explicit caller abort still wins. */

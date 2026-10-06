@@ -1,5 +1,5 @@
 import { isSlideAsset, parseDraft, type SlideCheck, type SlideDeck, type SlideDraft, type SlideStrategy } from "./model";
-import { isSlidePromptVersion } from "./prompt-versions";
+import { isSlidePromptVersion, type SlidePromptProvenance } from "./prompt-versions";
 import { isAnalogyMethod } from "./analogy-methods";
 
 export type SlideDraftScope = { userId: string; classId: string; assignmentId: string; lessonNumber: number; strategy: SlideStrategy };
@@ -83,8 +83,12 @@ export function restoreSlideDraft(value: unknown, scope: SlideDraftScope): Slide
   const provenance = saved.promptProvenance;
   if (record(provenance) && isSlidePromptVersion(provenance.version) && shortText(provenance.revision, 160)
     && typeof provenance.sourceSha256 === "string" && /^[a-f0-9]{64}$/u.test(provenance.sourceSha256)) {
-    deck.promptProvenance = { version: provenance.version, revision: provenance.revision, sourceSha256: provenance.sourceSha256,
-      ...(isAnalogyMethod(provenance.analogyMethod) ? { analogyMethod: provenance.analogyMethod } : {}) };
+    // Review snapshots include JSON field order. A background job's metadata can
+    // arrive in a different order, so retain its validated fields without
+    // rebuilding or accepting a review for changed content.
+    deck.promptProvenance = Object.fromEntries(Object.entries(provenance).filter(([key]) =>
+      key === "version" || key === "revision" || key === "sourceSha256"
+      || (key === "analogyMethod" && isAnalogyMethod(provenance.analogyMethod)))) as SlidePromptProvenance;
   }
   if (record(saved.checks) && record(saved.checks.images)) {
     const images = saved.checks.images;

@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { loadSlideDraft, restoreSlideDraft, saveSlideDraft, slideDraftKey, type SlideDraftScope } from "@/lib/slides/draft-storage";
+import { STRATEGIES } from "@/lib/slides/model";
+import { imageCheckKey, textCheckKey } from "@/lib/slides/quality";
 import { deckFixture } from "../fixtures/slides";
 
 const scope: SlideDraftScope = { userId: "teacher-a", classId: "ea-class-a", assignmentId: "ea-task-a", lessonNumber: 3, strategy: "cognitive conflict" };
@@ -14,6 +16,38 @@ it("round-trips generated images, content and keyed checks without retaining tea
   expect(restored.assets).toEqual(value.deck.assets);
   expect(restored.checks).toEqual(value.deck.checks);
   expect(restored.teacherDecision).toBeUndefined();
+});
+
+it.each(STRATEGIES)("retains valid %s reviews when job provenance arrives in a different field order", strategy => {
+  const deck = deckFixture(strategy);
+  // DynamoDB-backed job metadata need not retain the producer's field order.
+  deck.promptProvenance = { sourceSha256: "a".repeat(64), ...(strategy === "analogy" ? { analogyMethod: "predict-transfer" as const } : {}),
+    revision: "test-revision", version: "optimized" };
+  deck.checks!.text = { key: textCheckKey(deck), issues: [], model: "review-model" };
+  const context = { ...scope, lessonNumber: deck.lessonNumber, strategy };
+  const value = { version: 1, key: slideDraftKey(context), deck };
+  const restored = restoreSlideDraft(structuredClone(value), context)!;
+  expect(Object.keys(restored.promptProvenance!)).toEqual(Object.keys(deck.promptProvenance));
+  expect(restored.checks!.text!.key).toBe(textCheckKey(restored));
+  for (const visual of restored.draft.visuals) {
+    expect(restored.checks!.images[visual.id].key).toBe(imageCheckKey(restored, visual.id));
+  }
+
+  value.deck.draft.slides[0].title = "A new teacher edit";
+  const edited = restoreSlideDraft(structuredClone(value), context)!;
+  expect(edited.checks!.text!.key).toBe(deck.checks!.text!.key);
+  expect(edited.checks!.text!.key).not.toBe(textCheckKey(edited));
+});
+
+it("restores only validated provenance fields without trusting extra properties", () => {
+  const value = stored();
+  const provenance = JSON.parse('{"sourceSha256":"' + "a".repeat(64) + '","__proto__":{"approved":true},"revision":"test","analogyMethod":"unsupported","version":"optimized","approved":true}');
+  value.deck.promptProvenance = provenance;
+  const restored = restoreSlideDraft(value, scope)!;
+  expect(Object.keys(restored.promptProvenance!)).toEqual(["sourceSha256", "revision", "version"]);
+  expect(restored.promptProvenance).toEqual({ sourceSha256: "a".repeat(64), revision: "test", version: "optimized" });
+  provenance.sourceSha256 = "invalid";
+  expect(restoreSlideDraft(value, scope)!.promptProvenance).toBeUndefined();
 });
 
 it.each([
