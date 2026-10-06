@@ -28,13 +28,15 @@ export async function guardWorkspaceRequest(request: Request, context?: { classI
     await workspaceContext(user, classId, assignmentId);
     if (url.pathname === "/api/auto-answer-test-students") return deny("Test answers are not available in live workspace classes.", 403);
     if (user.role === "teacher") {
-      if (write && ["/api/student-answers", "/api/content-rating", "/api/review-questions"].includes(url.pathname)) return deny("Student account required.", 403);
+      if (write && ["/api/student-answers", "/api/content-rating", "/api/review-questions", "/api/survey-responses"].includes(url.pathname)) return deny("Student account required.", 403);
       if (fields.publishedBy && fields.publishedBy !== user.geniusId) return deny("Invalid GENIUS ID.", 403);
       return null;
     }
-    const ownRecords = ["/api/student-answers", "/api/content-rating", "/api/review-questions", "/api/activity-status"].includes(url.pathname);
+    const ownRecords = ["/api/student-answers", "/api/content-rating", "/api/review-questions", "/api/activity-status", "/api/survey-responses"].includes(url.pathname);
     if (ownRecords && fields.studentId !== user.geniusId) return deny("You can only access your own responses.", 403);
-    if (!ownRecords && (write || !["/api/quiz-status", "/api/content-publish"].includes(url.pathname))) return deny("Teacher access required.", 403);
+    // Students may read the published quiz, material and task survey, never write them.
+    if (!ownRecords && (write || !["/api/quiz-status", "/api/content-publish", "/api/surveys"].includes(url.pathname))) return deny("Teacher access required.", 403);
+    if (write && url.pathname === "/api/survey-responses" && fields.studentName !== user.name) return deny("Invalid student identity.", 403);
     if (write && url.pathname === "/api/student-answers") {
       const quiz = await getQuizStatus(classId, assignmentId);
       if (quiz?.status !== "published" || fields.lessonNumber !== quiz.lesson_number) return deny("This quiz is not open for responses.", 409);
