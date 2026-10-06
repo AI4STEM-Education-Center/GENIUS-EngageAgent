@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Download, Expand, ImagePlus, LoaderCircle, RefreshCw, ScanEye, Sparkles, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Expand, ImagePlus, LoaderCircle, RefreshCw, ScanEye, Send, Sparkles, X } from "lucide-react";
 import type { UserContext } from "@/lib/auth";
 import { STRATEGIES, parseDraft, type SlideDeck, type SlideLesson, type SlideStrategy, type SlideVisual, type TeachingSlide } from "@/lib/slides/model";
 import { browserMeasure, layoutErrors } from "@/lib/slides/layout";
@@ -14,6 +14,7 @@ import { analogyStudentFields } from "@/lib/slides/analogy";
 import { ANALOGY_METHODS, analogyMappingIndex, resolveAnalogyMethod, type AnalogyMethod } from "@/lib/slides/analogy-methods";
 import { loadSlideDraft, saveSlideDraft, slideDraftKey } from "@/lib/slides/draft-storage";
 import { postSlideRequest } from "@/lib/slides/client-transport";
+import { publishSlideDeck } from "@/lib/slides/publish-client";
 
 const input = "w-full min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-2 focus:outline-teal-700 disabled:opacity-50";
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium hover:bg-gray-100 disabled:opacity-50";
@@ -37,9 +38,10 @@ type SlidesWorkspaceProps = {
   embeddedContext?: { lessonNumber: number; strategy: SlideStrategy; classroomContext?: string };
   onBusyChange?: (strategy: SlideStrategy, busy: boolean) => void;
   onReadyChange?: (strategy: SlideStrategy, ready: boolean) => void;
+  onPublished?: () => void;
 };
 
-const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceProps>(function SlidesWorkspaceEditor({ user, embeddedContext, onBusyChange, onReadyChange }, ref) {
+const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceProps>(function SlidesWorkspaceEditor({ user, embeddedContext, onBusyChange, onReadyChange, onPublished }, ref) {
   const [lessons, setLessons] = useState<SlideLesson[]>([]);
   const [standaloneLesson, setLessonNumber] = useState(1);
   const [standaloneStrategy, setStrategy] = useState<SlideStrategy>("analogy");
@@ -63,6 +65,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const [preparedDownload, setPreparedDownload] = useState<{ url: string; dataUri?: string; httpUrl?: string; fileName: string; deck: SlideDeck } | null>(null);
   const exportRequest = useRef(0);
   const exportJob = useRef<AbortController | null>(null);
+  const publishJob = useRef<AbortController | null>(null);
+  const [publishedDeck, setPublishedDeck] = useState<SlideDeck | null>(null);
   const [feedback, setFeedback] = useState("");
   const [decisionReason, setDecisionReason] = useState("");
   const [tab, setTab] = useState<"text" | "notes" | "images">("text");
@@ -126,6 +130,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   }, [deck, restoredScope, scope]);
   useEffect(() => () => { job.current?.abort(); }, []);
   useEffect(() => () => { exportRequest.current++; exportJob.current?.abort(); }, [deck]);
+  useEffect(() => () => { publishJob.current?.abort(); }, [deck]);
+  useEffect(() => { if (publishedDeck && publishedDeck !== deck) setPublishedDeck(null); }, [deck, publishedDeck]);
   useEffect(() => () => { if (preparedDownload) URL.revokeObjectURL(preparedDownload.url); }, [preparedDownload]);
   useEffect(() => {
     if (preparedDownload && (preparedDownload.deck !== deck || !reviewed)) setPreparedDownload(null);
@@ -217,7 +223,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         ...(chosenStrategy === "analogy" ? { analogyMethod: chosenMethod } : {}) };
       const result = await post("/api/slides", { ...context, operation: review ? "review" : "generate", ...(review && deck ? { draft: deck.draft, feedback: [feedback, ...issues, ...qualityIssues].join("\n").slice(0, 6000) } : {}) }, controller);
       const draft = parseDraft(result.draft, chosenStrategy, true);
-      let next: SlideDeck = { id: crypto.randomUUID(), lessonNumber: chosenLesson, strategy: chosenStrategy, draft, classroomContext: chosenClassroomContext, assets: preservedAssets(review ? deck : null, draft), checks: review ? deck?.checks : undefined, modelSelection: chosenModels, textModel: result.model, promptProvenance: result.promptProvenance };
+      let next: SlideDeck = { id: review && deck ? deck.id : crypto.randomUUID(), lessonNumber: chosenLesson, strategy: chosenStrategy, draft, classroomContext: chosenClassroomContext, assets: preservedAssets(review ? deck : null, draft), checks: review ? deck?.checks : undefined, modelSelection: chosenModels, textModel: result.model, promptProvenance: result.promptProvenance };
       if (controller.signal.aborted) return;
       // Bounded native repairs; retain drafts on failure and never loop on provider errors.
       setDeck(next); setIndex(0); setReviewed(false); setDownloaded(false);
@@ -315,6 +321,20 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     } catch (err) { if (!controller.signal.aborted) { setError(err instanceof Error ? err.message : "Download failed."); setStatus(""); } }
     finally { if (exportJob.current === controller) { exportJob.current = null; setBusy(false); } }
   }
+  async function publish() {
+    if (!deck || !ready || !reviewed || busy || publishJob.current || publishedDeck === deck || !classId || !assignmentId) return;
+    const controller = new AbortController(); publishJob.current = controller;
+    setBusy(true); setError("");
+    try {
+      await publishSlideDeck(deck, { classId, assignmentId }, controller.signal, setStatus);
+      if (controller.signal.aborted || publishJob.current !== controller) return;
+      setPublishedDeck(deck);
+      setStatus("Slides published. Students can read them in Explore and ask.");
+      onPublished?.();
+    } catch (err) {
+      if (!controller.signal.aborted) { setError(err instanceof Error ? err.message : "Unable to send slides. Your draft is retained; try again."); setStatus(""); }
+    } finally { if (publishJob.current === controller) { publishJob.current = null; setBusy(false); } }
+  }
   const missingImages = deck?.draft.visuals.some(visual => !deck.assets[visual.id]);
   const slide = deck?.draft.slides[index];
   const ready = !!deck && !missingImages && !issues.length && !qualityIssues.length;
@@ -350,6 +370,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       {busy && <LoaderCircle size={17} className="animate-spin" aria-hidden="true" />}
       <p role="status" className="min-w-0 text-sm text-gray-600">{status}</p>
       {busy && job.current && <button className={icon} title="Cancel generation" aria-label="Cancel generation" onClick={() => { job.current?.abort(); job.current = null; setBusy(false); setStatus("Generation cancelled."); }}><X size={17} /></button>}
+      {busy && publishJob.current && <button className={icon} title="Cancel publishing" aria-label="Cancel publishing" onClick={() => { publishJob.current?.abort(); publishJob.current = null; setBusy(false); setStatus("Publishing stopped. Your draft is retained."); }}><X size={17} /></button>}
     </div>
     {error && <div role="alert" className="mb-4 whitespace-pre-line break-words border-l-4 border-red-700 bg-red-50 p-3 text-sm text-red-900">{error}{!lessons.length && <button className={`${button} ml-3`} onClick={() => setReload(n => n + 1)}>Retry</button>}</div>}
     {!deck && <div className="border-y border-gray-200 py-16 text-center text-sm text-gray-500">No slide draft yet.</div>}
@@ -361,6 +382,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           <button className={button} disabled={busy} onClick={() => generate(true)} title="Apply feedback and correct quality findings"><RefreshCw size={16} />Revise with AI</button>
           <button className={icon} disabled={!!issues.length} title="Enlarge preview" aria-label="Enlarge preview" onClick={() => dialog.current?.showModal()}><Expand size={17} /></button>
           <button className={button} disabled={busy || !ready || !reviewed} onClick={download}><Download size={17} />Download PPTX</button>
+          <button className={primaryButton} disabled={busy || !ready || !reviewed || !classId || !assignmentId || publishedDeck === deck} onClick={publish}><Send size={17} />{publishedDeck === deck ? "Published" : "Send to students"}</button>
           {preparedDownload?.deck === deck && !busy && ready && reviewed && <><a className={button} href={preparedDownload.httpUrl || preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>{preparedDownload.httpUrl && <p className="text-xs text-gray-500">Save link expires in 10 minutes. Select Download PPTX again to refresh it.</p>}</>}
         </div>
       </div>

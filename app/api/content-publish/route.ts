@@ -126,6 +126,13 @@ export async function POST(request: Request) {
   const publishedAt = new Date().toISOString();
   const results = [];
 
+  // Slides must use the bounded, asset-verified publication flow. Never accept
+  // arbitrary slide manifests or references through the legacy material writer.
+  if (contentItems.some((item) => item && typeof item === "object"
+    && ("slides" in item || String(item.type).toLowerCase() === "slides" || String(item.id).startsWith("slides-")))) {
+    return NextResponse.json({ error: "Send slides using the Slides publication flow." }, { status: 400 });
+  }
+
   for (const item of contentItems) {
     if (!item || typeof item !== "object" || !("id" in item) || !item.id) continue;
     const sanitizedItem = sanitizePublishedItem(item as Record<string, unknown>);

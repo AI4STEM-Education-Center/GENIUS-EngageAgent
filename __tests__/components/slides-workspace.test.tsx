@@ -5,8 +5,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { UserContext } from "@/lib/auth";
 import { deckFixture, slideFixture } from "../fixtures/slides";
 import { INITIAL_MODEL_CATALOG } from "@/lib/slides/models";
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), download: vi.fn(), decode: vi.fn(), revoke: vi.fn() }));
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), download: vi.fn(), decode: vi.fn(), revoke: vi.fn(), publish: vi.fn() }));
 vi.mock("@/lib/slides/export", () => ({ downloadPresentation: mocks.download, decodeSlideAsset: mocks.decode }));
+vi.mock("@/lib/slides/publish-client", () => ({ publishSlideDeck: mocks.publish }));
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "@/app/components/SlidesWorkspace";
 const user: UserContext = { geniusId: "teacher", userId: "teacher", name: "Teacher", email: null, role: "teacher", classId: "ea-class-a", assignmentId: "ea-task-a" };
 const reply = (data: unknown, ok = true) => ({ ok, json: async () => data });
@@ -18,7 +19,93 @@ beforeEach(() => {
   vi.stubGlobal("URL", Object.assign(class extends URL {}, { revokeObjectURL: mocks.revoke }));
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => ({ font: "", measureText: (text: string) => ({ width: text.length * 16 }) }) as never);
   mocks.decode.mockImplementation(async value => value); mocks.download.mockResolvedValue({ url: "blob:prepared-pptx", dataUri: preparedDataUri, fileName: "EngageAgent.pptx" });
+  mocks.publish.mockResolvedValue({ publicationId: "published", contentItemId: "slides-deck" });
   mocks.fetch.mockImplementation(async (path: string) => path.startsWith("/api/slides?") ? lessons : path.endsWith("/check") ? reply({ issues: [] }) : path.endsWith("/image") ? reply({ asset }) : reply({ draft: slideFixture("analogy") }));
+});
+
+it("publishes only a checked and reviewed deck, then requires another publication after editing", async () => {
+  const onPublished = vi.fn();
+  render(<SlidesWorkspace user={user} onPublished={onPublished} />);
+  await screen.findByRole("option", { name: "8. Energy" });
+  await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
+  await screen.findByText("5 slides ready for review.");
+  expect((screen.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  expect((await screen.findByRole("button", { name: "Published" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(onPublished).toHaveBeenCalledOnce();
+  expect(mocks.publish).toHaveBeenCalledOnce();
+  expect(mocks.publish.mock.calls[0][1]).toEqual({ classId: user.classId, assignmentId: user.assignmentId });
+  expect(mocks.publish.mock.calls[0][2]).toBeInstanceOf(AbortSignal);
+  expect(mocks.download).not.toHaveBeenCalled();
+  expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(false);
+  const sent = mocks.publish.mock.calls[0][0];
+  fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "A revised student title" } });
+  expect(screen.queryByRole("button", { name: "Published" })).toBeNull();
+  expect((screen.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Check slides" }));
+  await screen.findByText("Quality checks complete. Teacher review pending.");
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  await screen.findByRole("button", { name: "Published" });
+  expect(mocks.publish.mock.calls[1][0].id).toBe(sent.id);
+  expect(mocks.publish.mock.calls[1][0].draft.slides[0].title).toBe("A revised student title");
+});
+
+it("retains the reviewed draft and permits a manual retry after publishing fails", async () => {
+  await generate();
+  mocks.publish.mockRejectedValueOnce(new Error("Image storage unavailable."));
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  await screen.findByText("Image storage unavailable.");
+  expect(screen.queryByRole("button", { name: "Published" })).toBeNull();
+  expect((screen.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  await screen.findByRole("button", { name: "Published" });
+  expect(mocks.publish).toHaveBeenCalledTimes(2);
+});
+
+it("keeps the published deck identity through AI revision and creates a new item only for new generation", async () => {
+  await generate();
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  await screen.findByRole("button", { name: "Published" });
+  const originalId = mocks.publish.mock.calls[0][0].id;
+  fireEvent.change(screen.getByLabelText("Revision request"), { target: { value: "Clarify the opening." } });
+  fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
+  await screen.findByText("5 slides ready for review.");
+  expect(screen.queryByRole("button", { name: "Published" })).toBeNull();
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  await screen.findByRole("button", { name: "Published" });
+  expect(mocks.publish.mock.calls[1][0].id).toBe(originalId);
+  expect(`slides-${mocks.publish.mock.calls[1][0].id}`).toBe(`slides-${originalId}`);
+  fireEvent.click(screen.getByRole("button", { name: "Generate new slides" }));
+  await screen.findByText("5 slides ready for review.");
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  await screen.findByRole("button", { name: "Published" });
+  expect(mocks.publish.mock.calls[2][0].id).not.toBe(originalId);
+});
+
+it("aborts a pending publication on task change and ignores its late completion", async () => {
+  const onPublished = vi.fn();
+  const view = render(<SlidesWorkspace user={user} onPublished={onPublished} />);
+  await screen.findByRole("option", { name: "8. Energy" });
+  await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
+  await screen.findByText("5 slides ready for review.");
+  let finish: (value: unknown) => void = () => {};
+  mocks.publish.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  const signal = mocks.publish.mock.calls[0][2] as AbortSignal;
+  view.rerender(<SlidesWorkspace user={{ ...user, assignmentId: "ea-task-b" }} onPublished={onPublished} />);
+  expect(signal.aborted).toBe(true);
+  await act(async () => { finish({ publicationId: "late" }); });
+  expect(onPublished).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Published" })).toBeNull();
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function generate() {

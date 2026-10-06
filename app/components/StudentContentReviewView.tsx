@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import MaterialActivityView from "./MaterialActivityView";
+import PublishedSlidesReader from "./PublishedSlidesReader";
 import type { UserContext } from "@/lib/auth";
 import type { ContentItem, TextMode } from "@/lib/types";
 import type { StepProgress } from "@/lib/student-progress";
@@ -53,6 +54,13 @@ export default function StudentContentReviewView({
   const [draftQuestions, setDraftQuestions] = useState<string[]>([""]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const questionsCard = useRef<HTMLDivElement>(null);
+  const firstQuestion = useRef<HTMLTextAreaElement>(null);
+  const focusQuestions = () => {
+    const target = firstQuestion.current ?? questionsCard.current;
+    target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    target?.focus();
+  };
 
   const [ratings, setRatings] = useState<Record<string, number>>({});
   const [savedRatings, setSavedRatings] = useState<Record<string, number>>({});
@@ -368,7 +376,7 @@ export default function StudentContentReviewView({
         return (
           <div key={item.id} className="rounded-2xl border border-slate-200 bg-white p-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-              {!item.activity && (itemMedia?.image || itemMedia?.video) && (
+              {!item.slides && !item.activity && (itemMedia?.image || itemMedia?.video) && (
                 <div className="flex shrink-0 gap-3">
                   {itemMedia.image && (
                     <img
@@ -402,7 +410,9 @@ export default function StudentContentReviewView({
                   ))}
                 </div>
                 <p className="mt-3 text-base font-semibold text-slate-900">{item.title}</p>
-                {item.activity ? (
+                {item.slides && classId && assignmentId ? (
+                  <PublishedSlidesReader classId={classId} assignmentId={assignmentId} publicationId={item.slides.publicationId} audience="student" onQuestion={focusQuestions} />
+                ) : item.activity ? (
                   <MaterialActivityView activity={item.activity} media={itemMedia} questionInput={false} />
                 ) : <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600">{item.body}</p>}
               </div>
@@ -412,7 +422,7 @@ export default function StudentContentReviewView({
         );
       })}
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-6">
+      <div ref={questionsCard} tabIndex={-1} className="rounded-2xl border border-slate-200 bg-white p-6">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
           Your questions
         </p>
@@ -446,6 +456,7 @@ export default function StudentContentReviewView({
               {draftQuestions.map((q, i) => (
                 <div key={i} className="flex items-start gap-2">
                   <textarea
+                    ref={i === 0 ? firstQuestion : undefined}
                     value={q}
                     onChange={(e) => updateDraftQuestion(i, e.target.value)}
                     placeholder="What are you wondering about this material?"
