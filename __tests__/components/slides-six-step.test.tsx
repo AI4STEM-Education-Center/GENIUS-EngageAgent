@@ -67,7 +67,7 @@ it.each([false, true])("previews all six-step pages with limits=%s and uses a ma
   }
   expect((screen.getByRole("button", { name: "Next slide" }) as HTMLButtonElement).disabled).toBe(true);
   const checkbox = screen.getByRole("checkbox", { name: `I have reviewed all ${count} slides and their images.` });
-  expect((checkbox as HTMLInputElement).disabled).toBe(false);
+  expect((checkbox as HTMLButtonElement).disabled).toBe(false);
   expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(checkbox);
   expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(false);
@@ -105,12 +105,12 @@ it("requires the target to be regenerated after a new phenomenon image and passe
   fireEvent.click(screen.getByRole("button", { name: "Regenerate phenomenon image" }));
   await screen.findByText("Image updated. Quality check needs attention.");
   expect(download.disabled).toBe(true);
-  expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
-  expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(true);
+  expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
+  expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(true);
   expect(bodies("/api/slides/image").map(body => body.visualId)).toEqual(["phenomenon", "analogue", "target", "phenomenon"]);
   fireEvent.click(screen.getByRole("button", { name: "Regenerate target image" }));
   await screen.findByText("Image updated.");
-  await waitFor(() => expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(false));
+  await waitFor(() => expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(false));
   expect(bodies("/api/slides/image").at(-1)).toMatchObject({ visualId: "target", referenceAsset: { data: phenomenonData } });
   expect(bodies("/api/slides/check").at(-1)).toMatchObject({ visualId: "target", phenomenonAsset: { data: phenomenonData }, referenceAsset: { data: tinyJpeg } });
   expect(bodies("/api/slides/image").filter(body => body.visualId === "analogue")).toHaveLength(1);

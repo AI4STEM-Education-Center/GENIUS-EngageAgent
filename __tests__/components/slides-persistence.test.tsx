@@ -34,7 +34,7 @@ it("restores a saved deck with images and checks, requires fresh human confirmat
   render(<SlidesWorkspace user={user} embeddedContext={context} />);
   await screen.findByText(/Saved draft restored/);
   expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe(saved.draft.slides[0].title);
-  expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
   expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
   expect(posts()).toHaveLength(0);
   expect(mocks.load).toHaveBeenCalledWith({ userId: user.geniusId, classId: user.classId, assignmentId: user.assignmentId, lessonNumber: 3, strategy: context.strategy });
