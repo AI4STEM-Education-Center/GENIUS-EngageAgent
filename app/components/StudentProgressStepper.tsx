@@ -7,7 +7,7 @@ type Props<StepId extends string> = {
   activeStep: StepId;
   states: Record<StepId, StepDisplayState>;
   onSelectStep: (step: StepId) => void;
-  /** Real underlying activity counts, which may differ from `steps.length` when a step groups more than one activity. */
+  /** Counts of available view steps; locked cards remain visible but are not counted. */
   completedSteps: number;
   totalSteps: number;
 };
@@ -36,7 +36,9 @@ export default function StudentProgressStepper<StepId extends string>({
     <div className="rounded-2xl border border-slate-200 bg-white p-6">
       <p className="text-base font-semibold text-slate-900">Your progress</p>
       <p className="mt-0.5 text-sm text-slate-500">
-        {completedSteps} of {totalSteps} activities completed
+        {totalSteps > 0
+          ? `${completedSteps} of ${totalSteps} available ${totalSteps === 1 ? "activity" : "activities"} completed`
+          : "No activities are available yet. Your teacher will publish them here."}
       </p>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">

@@ -151,11 +151,20 @@ export default function StudentView({ user }: Props) {
           notifyTaskCompleted(classId, assignmentId, user.geniusId);
         }
 
+        // Open published material when the current activity is unavailable.
+        // A student already working in an available activity keeps that view.
+        const currentIndex = STUDENT_VIEW_STEPS.findIndex((step) => step.id === activeStepRef.current);
+        const currentStep = STUDENT_VIEW_STEPS[currentIndex];
+        if (next[currentStep.activityIds[0]] === "locked") {
+          const availableStep = STUDENT_VIEW_STEPS.find((step) => next[step.activityIds[0]] !== "locked");
+          if (availableStep) setActiveStep(availableStep.id);
+          return;
+        }
+
         // Auto-advance to the next step only on the first load or right as it
         // newly unlocks (or the current step newly completes), so revisiting
         // an already-completed step doesn't bounce the student away on the
         // next poll.
-        const currentIndex = STUDENT_VIEW_STEPS.findIndex((step) => step.id === activeStepRef.current);
         const isDone = (status: Record<StudentStepId, ActivityStatus>) =>
           STUDENT_VIEW_STEPS[currentIndex].activityIds.every((id) => status[id] === "completed");
         if (isDone(next) && currentIndex < STUDENT_VIEW_STEPS.length - 1) {
@@ -199,6 +208,7 @@ export default function StudentView({ user }: Props) {
   }, []);
 
   const displayStates = buildDisplayStates(serverStatus, progress);
+  const availableSteps = STUDENT_VIEW_STEPS.filter((step) => displayStates[step.id].status !== "locked");
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -222,8 +232,8 @@ export default function StudentView({ user }: Props) {
           activeStep={activeStep}
           states={displayStates}
           onSelectStep={setActiveStep}
-          completedSteps={STUDENT_VIEW_STEPS.filter((step) => displayStates[step.id].status === "completed").length}
-          totalSteps={STUDENT_VIEW_STEPS.length}
+          completedSteps={availableSteps.filter((step) => displayStates[step.id].status === "completed").length}
+          totalSteps={availableSteps.length}
         />
 
         {/* The assessment and content-review views stay mounted (hidden when
