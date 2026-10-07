@@ -99,14 +99,14 @@ beforeEach(() => {
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-it("opens a Slides entry using the saved lesson and strategies without generating", async () => {
+it("opens a Slides entry with only the last valid saved strategy without generating", async () => {
   seedDraft({ currentStep: 1, materialFormat: "video", selectedStrategies: supportedStrategies });
   render(<TeacherView user={user} initialMaterialFormat="slides" />);
   await ready();
   expect(screen.getByRole("radio", { name: "Slides" })).toBeChecked();
-  for (const strategy of supportedStrategies) {
-    expect(screen.getByText(`Slide context: lesson 8, ${strategy}`)).toBeVisible();
-  }
+  expect(screen.getByText("Slide context: lesson 8, experience bridging")).toBeVisible();
+  expect(screen.queryByText("Slide context: lesson 8, analogy")).toBeNull();
+  expect(screen.queryByText("Slide context: lesson 8, cognitive conflict")).toBeNull();
   expect(mocks.generate).not.toHaveBeenCalled();
   expect(postCalls()).toHaveLength(0);
 });
@@ -130,32 +130,29 @@ it("keeps legacy drafts on Text + Image and never generates merely by switching 
   expect(postCalls()).toHaveLength(0);
 });
 
-it("generates each selected slide strategy with the inherited context and retains edited drafts across formats and steps", async () => {
-  seedDraft({ selectedStrategies: supportedStrategies });
+it("generates the selected slide strategy with inherited context and retains its edited draft across formats and steps", async () => {
+  const strategy = "experience bridging";
+  seedDraft({ selectedStrategies: [strategy] });
   render(<TeacherView user={user} />);
   await ready();
   fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
   const generate = screen.getByRole("button", { name: "Generate materials" });
   await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
-  expect(mocks.generate.mock.calls.map(([context]) => context)).toEqual(supportedStrategies.map(strategy => ({
+  expect(mocks.generate.mock.calls.map(([context]) => context)).toEqual([{
     lessonNumber: 8, strategy, classroomContext: "", classId: user.classId, assignmentId: user.assignmentId,
-  })));
-  for (const strategy of supportedStrategies) {
-    fireEvent.change(screen.getByRole("textbox", { name: `Draft for ${strategy}` }), { target: { value: `Teacher edit: ${strategy}` } });
-  }
+  }]);
+  fireEvent.change(screen.getByRole("textbox", { name: `Draft for ${strategy}` }), { target: { value: `Teacher edit: ${strategy}` } });
   fireEvent.click(screen.getByRole("radio", { name: "Text + Image" }));
   fireEvent.click(screen.getByRole("radio", { name: "Video" }));
   fireEvent.click(screen.getByRole("button", { name: /Strategy recommendation/ }));
   expect(screen.queryByRole("radio", { name: "Slides" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /Content generation/ }));
   fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
-  for (const strategy of supportedStrategies) {
-    expect(screen.getByRole("textbox", { name: `Draft for ${strategy}` })).toHaveValue(`Teacher edit: ${strategy}`);
-  }
-  expect(mocks.mount).toHaveBeenCalledTimes(3);
+  expect(screen.getByRole("textbox", { name: `Draft for ${strategy}` })).toHaveValue(`Teacher edit: ${strategy}`);
+  expect(mocks.mount).toHaveBeenCalledTimes(1);
   expect(mocks.unmount).not.toHaveBeenCalled();
-  expect(mocks.generate).toHaveBeenCalledTimes(3);
+  expect(mocks.generate).toHaveBeenCalledTimes(1);
   expect(postCalls()).toHaveLength(0);
 });
 
@@ -173,7 +170,85 @@ it("persists the chosen material format for the same class and task", async () =
   expect(postCalls()).toHaveLength(0);
 });
 
-it("blocks the whole Slides batch when an unsupported selected strategy would otherwise be silently dropped", async () => {
+it("switches A to B exclusively, keeps B selected on another click, and restores only B for generation", async () => {
+  seedDraft({ currentStep: 2 });
+  const view = render(<TeacherView user={user} />);
+  const analogy = await screen.findByRole("button", { name: "Analogy · Selected" });
+  expect(analogy).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Cognitive Conflict" }));
+  expect(analogy).toHaveAttribute("aria-pressed", "false");
+  const conflict = screen.getByRole("button", { name: "Cognitive Conflict · Selected" });
+  expect(conflict).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(conflict);
+  expect(conflict).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Continue to material generation" })).toBeEnabled();
+  await waitFor(() => expect(JSON.parse(localStorage.getItem(draftKey)!).selectedStrategies).toEqual(["cognitive conflict"]));
+  expect(postCalls()).toHaveLength(0);
+
+  view.unmount();
+  render(<TeacherView user={user} />);
+  expect(await screen.findByRole("button", { name: "Cognitive Conflict · Selected" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Analogy" })).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
+  const generate = await ready();
+  await waitFor(() => expect(generate).toBeEnabled());
+  fireEvent.click(generate);
+  await waitFor(() => expect(postCalls("/api/engagement-image")).toHaveLength(1));
+  expect(JSON.parse(postCalls("/api/engagement-content")[0][1].body).selectedStrategies).toEqual(["cognitive conflict"]);
+  expect(JSON.parse(postCalls("/api/engagement-image")[0][1].body).item.strategy).toBe("cognitive conflict");
+  fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
+  await waitFor(() => expect(generate).toBeEnabled());
+  fireEvent.click(generate);
+  expect(mocks.generate).toHaveBeenCalledTimes(1);
+  expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ strategy: "cognitive conflict" }));
+});
+
+it("normalizes an old multi-strategy draft to its last valid selection without deleting earlier materials", async () => {
+  const content = [
+    { id: "existing-analogy", type: "phenomenon", title: "Saved analogy", body: "Keep this comparison.", strategy: "analogy" },
+    { id: "existing-experience", type: "phenomenon", title: "Saved experience", body: "Keep this experience.", strategy: "experience bridging" },
+  ];
+  seedDraft({ currentStep: 2, selectedStrategies: ["analogy", "experience bridging", "cognitive conflict", "retired strategy"], content,
+    images: Object.fromEntries(content.map(item => [item.id, { status: "ready", url: `https://example.test/${item.id}.png` }])) });
+  render(<TeacherView user={user} />);
+  expect(await screen.findByRole("button", { name: "Cognitive Conflict · Selected" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Analogy" })).toHaveAttribute("aria-pressed", "false");
+  expect(screen.getByRole("button", { name: "Experience Bridging" })).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
+  await ready();
+  for (const item of content) {
+    expect(screen.getByText(item.body)).toBeVisible();
+    expect(screen.getByRole("img", { name: item.title })).toBeVisible();
+  }
+  await waitFor(() => {
+    const saved = JSON.parse(localStorage.getItem(draftKey)!);
+    expect(saved.selectedStrategies).toEqual(["cognitive conflict"]);
+    expect(saved.content).toEqual(expect.arrayContaining(content.map(item => expect.objectContaining(item))));
+  });
+  expect(mocks.generate).not.toHaveBeenCalled();
+  expect(postCalls()).toHaveLength(0);
+});
+
+it("restores published materials from multiple strategies while selecting only one for future generation", async () => {
+  const content = [
+    { id: "published-a", type: "phenomenon", title: "Published comparison", body: "Keep the published comparison.", strategy: "analogy" },
+    { id: "published-b", type: "phenomenon", title: "Published conflict", body: "Keep the published conflict.", strategy: "cognitive conflict" },
+  ];
+  const originalFetch = mocks.fetch.getMockImplementation()!;
+  mocks.fetch.mockImplementation(async (input: string, init?: RequestInit) => input.startsWith("/api/content-publish")
+    ? reply({ items: content.map(item => ({ content_item_id: item.id, content_json: JSON.stringify(item), media: { image: `https://example.test/${item.id}.png` } })) })
+    : originalFetch(input, init));
+  seedDraft({ selectedStrategies: [] });
+  render(<TeacherView user={user} />);
+  await screen.findByText("Keep the published conflict.");
+  expect(screen.getByText("Keep the published comparison.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: /Strategy recommendation/ }));
+  expect(screen.getByRole("button", { name: "Cognitive Conflict · Selected" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Analogy" })).toHaveAttribute("aria-pressed", "false");
+  expect(postCalls()).toHaveLength(0);
+});
+
+it("blocks Slides when the single restored strategy is unsupported", async () => {
   seedDraft({ selectedStrategies: ["analogy", "engaged critiquing"], materialFormat: "slides" });
   render(<TeacherView user={user} />);
   const generate = await ready();
@@ -187,15 +262,15 @@ it("blocks the whole Slides batch when an unsupported selected strategy would ot
   expect(postCalls()).toHaveLength(0);
 });
 
-it("routes explicit Text + Image generation through the existing material APIs with all selected strategies", async () => {
+it("routes Text + Image generation through the material APIs with only the last restored strategy", async () => {
   seedDraft({ selectedStrategies: ["analogy", "cognitive conflict"] });
   render(<TeacherView user={user} />);
   const generate = await ready();
   fireEvent.click(generate);
-  await waitFor(() => expect(postCalls("/api/engagement-image")).toHaveLength(2));
+  await waitFor(() => expect(postCalls("/api/engagement-image")).toHaveLength(1));
   expect(postCalls("/api/engagement-content")).toHaveLength(1);
   expect(JSON.parse(postCalls("/api/engagement-content")[0][1].body)).toMatchObject({
-    lessonNumber: 8, selectedStrategies: ["analogy", "cognitive conflict"], classId: user.classId, assignmentId: user.assignmentId,
+    lessonNumber: 8, selectedStrategies: ["cognitive conflict"], classId: user.classId, assignmentId: user.assignmentId,
   });
   expect(postCalls("/api/engagement-video")).toHaveLength(0);
   expect(mocks.generate).not.toHaveBeenCalled();
@@ -285,7 +360,7 @@ it("keeps Video publishing disabled until the selected video's explicit generati
 });
 
 
-it("shares the current classroom context with every Slides editor", async () => {
+it("shares the current classroom context with the selected Slides editor", async () => {
   seedDraft({ selectedStrategies: supportedStrategies, classroomContext: "Grade 8; familiar with playground games." });
   render(<TeacherView user={user} />);
   await ready();
@@ -295,7 +370,7 @@ it("shares the current classroom context with every Slides editor", async () => 
   await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
   for (const [context] of mocks.generate.mock.calls) expect(context.classroomContext).toBe("Grade 9; students describe riding bicycles.");
-  expect(mocks.generate).toHaveBeenCalledTimes(3);
+  expect(mocks.generate).toHaveBeenCalledTimes(1);
 });
 
 it("uses new content identities when regenerating a material with the same title", async () => {
