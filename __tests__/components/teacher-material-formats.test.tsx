@@ -74,6 +74,10 @@ async function ready() {
   return screen.getByRole("button", { name: "Generate materials" });
 }
 
+async function openSavedActivities() {
+  fireEvent.click(await screen.findByRole("button", { name: "View saved activities" }));
+}
+
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
@@ -112,21 +116,49 @@ it("opens a Slides entry with only the last valid saved strategy without generat
   expect(postCalls()).toHaveLength(0);
 });
 
-it("keeps legacy drafts on Text + Image and never generates merely by switching formats", async () => {
+it("defaults new material generation to Slides and offers only Slides and Video", async () => {
+  render(<TeacherView user={user} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Energy/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Strategy recommendation/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Analogy" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
+  await ready();
+  expect(screen.getAllByRole("radio").map(input => input.getAttribute("value"))).toEqual(["slides", "video"]);
+  expect(screen.getByRole("radio", { name: "Slides" })).toBeChecked();
+  expect(mocks.generate).not.toHaveBeenCalled();
+  expect(postCalls().filter(([input]) => input.startsWith("/api/engagement-"))).toHaveLength(0);
+});
+
+it.each([undefined, "text-image"])("migrates legacy format %s to Slides while preserving readable material across reload and format switches", async (materialFormat) => {
   seedDraft({
+    materialFormat,
     content: [{ id: "saved-activity", type: "phenomenon", title: "Existing activity", body: "Keep this material.", strategy: "analogy" }],
     images: { "saved-activity": { status: "ready", url: "https://example.test/saved.png" } },
   });
-  render(<TeacherView user={user} />);
+  const view = render(<TeacherView user={user} />);
   await ready();
-  expect(screen.getByRole("radio", { name: "Text + Image" })).toBeChecked();
+  expect(screen.getByRole("radio", { name: "Slides" })).toBeChecked();
+  expect(screen.queryByRole("radio", { name: "Text + Image" })).toBeNull();
+  await openSavedActivities();
   await screen.findByRole("img", { name: "Existing activity" });
-  for (const format of ["Slides", "Video", "Text + Image", "Slides", "Video"]) {
+  for (const format of ["Video", "Slides", "Video", "Slides"]) {
     fireEvent.click(screen.getByRole("radio", { name: format }));
     expect(screen.getByRole("radio", { name: format })).toBeChecked();
   }
-  expect(screen.getByRole("button", { name: /Generate video/ })).toBeVisible();
   expect(screen.getByText("Keep this material.")).toBeVisible();
+  await waitFor(() => {
+    const saved = JSON.parse(localStorage.getItem(draftKey)!);
+    expect(saved.materialFormat).toBe("slides");
+    expect(saved.content[0].body).toBe("Keep this material.");
+    expect(saved.images["saved-activity"].url).toBe("https://example.test/saved.png");
+  });
+  view.unmount();
+  render(<TeacherView user={user} />);
+  await ready();
+  expect(screen.getByRole("radio", { name: "Slides" })).toBeChecked();
+  await openSavedActivities();
+  expect(screen.getByText("Keep this material.")).toBeVisible();
+  expect(screen.getByRole("img", { name: "Existing activity" })).toHaveAttribute("src", "https://example.test/saved.png");
   expect(mocks.generate).not.toHaveBeenCalled();
   expect(postCalls()).toHaveLength(0);
 });
@@ -144,12 +176,11 @@ it("generates the selected slide strategy with inherited context and retains its
     lessonNumber: 8, strategy, classroomContext: "", classId: user.classId, assignmentId: user.assignmentId,
   }]);
   fireEvent.change(screen.getByRole("textbox", { name: `Draft for ${strategy}` }), { target: { value: `Teacher edit: ${strategy}` } });
-  fireEvent.click(screen.getByRole("radio", { name: "Text + Image" }));
   fireEvent.click(screen.getByRole("radio", { name: "Video" }));
   fireEvent.click(screen.getByRole("button", { name: /Strategy recommendation/ }));
   expect(screen.queryByRole("radio", { name: "Slides" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /Content generation/ }));
-  fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
+  await act(async () => { fireEvent.click(screen.getByRole("radio", { name: "Slides" })); });
   expect(screen.getByRole("textbox", { name: `Draft for ${strategy}` })).toHaveValue(`Teacher edit: ${strategy}`);
   expect(mocks.mount).toHaveBeenCalledTimes(1);
   expect(mocks.unmount).not.toHaveBeenCalled();
@@ -192,9 +223,13 @@ it("switches A to B exclusively, keeps B selected on another click, and restores
   expect(screen.getByRole("button", { name: "Analogy" })).toHaveAttribute("aria-pressed", "false");
   fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
   const generate = await ready();
+  fireEvent.click(screen.getByRole("radio", { name: "Video" }));
   await waitFor(() => expect(generate).toBeEnabled());
-  fireEvent.click(generate);
-  await waitFor(() => expect(postCalls("/api/engagement-image")).toHaveLength(1));
+  vi.useFakeTimers();
+  await act(async () => { fireEvent.click(generate); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  vi.useRealTimers();
+  expect(postCalls("/api/engagement-image")).toHaveLength(1);
   expect(JSON.parse(postCalls("/api/engagement-content")[0][1].body).selectedStrategies).toEqual(["cognitive conflict"]);
   expect(JSON.parse(postCalls("/api/engagement-image")[0][1].body).item.strategy).toBe("cognitive conflict");
   fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
@@ -217,6 +252,7 @@ it("normalizes an old multi-strategy draft to its last valid selection without d
   expect(screen.getByRole("button", { name: "Experience Bridging" })).toHaveAttribute("aria-pressed", "false");
   fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
   await ready();
+  await openSavedActivities();
   for (const item of content) {
     expect(screen.getByText(item.body)).toBeVisible();
     expect(screen.getByRole("img", { name: item.title })).toBeVisible();
@@ -241,6 +277,7 @@ it("restores published materials from multiple strategies while selecting only o
     : originalFetch(input, init));
   seedDraft({ selectedStrategies: [] });
   render(<TeacherView user={user} />);
+  await openSavedActivities();
   await screen.findByText("Keep the published conflict.");
   expect(screen.getByText("Keep the published comparison.")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: /Strategy recommendation/ }));
@@ -258,13 +295,14 @@ it("blocks Slides when the single restored strategy is unsupported", async () =>
   fireEvent.click(generate);
   expect(mocks.generate).not.toHaveBeenCalled();
   expect(postCalls()).toHaveLength(0);
-  fireEvent.click(screen.getByRole("radio", { name: "Text + Image" }));
+  expect(screen.getByRole("status")).not.toHaveTextContent("Text + Image");
+  fireEvent.click(screen.getByRole("radio", { name: "Video" }));
   expect(generate).toBeEnabled();
   expect(postCalls()).toHaveLength(0);
 });
 
-it("routes Text + Image generation through the material APIs with only the last restored strategy", async () => {
-  seedDraft({ selectedStrategies: ["analogy", "cognitive conflict"] });
+it("routes Video generation through the material APIs with only the last restored strategy", async () => {
+  seedDraft({ materialFormat: "video", selectedStrategies: ["analogy", "cognitive conflict"] });
   render(<TeacherView user={user} />);
   const generate = await ready();
   fireEvent.click(generate);
@@ -273,11 +311,11 @@ it("routes Text + Image generation through the material APIs with only the last 
   expect(JSON.parse(postCalls("/api/engagement-content")[0][1].body)).toMatchObject({
     lessonNumber: 8, selectedStrategies: ["cognitive conflict"], classId: user.classId, assignmentId: user.assignmentId,
   });
-  expect(postCalls("/api/engagement-video")).toHaveLength(0);
+  await waitFor(() => expect(postCalls("/api/engagement-video")).toHaveLength(1));
   expect(mocks.generate).not.toHaveBeenCalled();
 });
 
-it("preserves teacher-supplied experience context for this task and sends it for text and video generation", async () => {
+it("preserves teacher-supplied experience context for this task and sends it for slides and video generation", async () => {
   seedDraft({ selectedStrategies: ["experience bridging"] });
   const view = render(<TeacherView user={user} />);
   await ready();
@@ -288,16 +326,14 @@ it("preserves teacher-supplied experience context for this task and sends it for
   render(<TeacherView user={user} />);
   await ready();
   expect(screen.getByRole("textbox", { name: "Classroom context (optional)" })).toHaveValue(context);
-  for (const format of ["Text + Image", "Video"]) {
-    fireEvent.click(screen.getByRole("radio", { name: format }));
-    const before = postCalls("/api/engagement-content").length;
-    const generate = screen.getByRole("button", { name: "Generate materials" });
-    await waitFor(() => expect(generate).toBeEnabled());
-    fireEvent.click(generate);
-    await waitFor(() => expect(postCalls("/api/engagement-content")).toHaveLength(before + 1));
-    expect(JSON.parse(postCalls("/api/engagement-content").at(-1)![1].body).classroomContext).toBe(context);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Generate materials" })).toBeEnabled());
-  }
+  const generate = screen.getByRole("button", { name: "Generate materials" });
+  await waitFor(() => expect(generate).toBeEnabled());
+  fireEvent.click(generate);
+  expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ classroomContext: context }));
+  fireEvent.click(screen.getByRole("radio", { name: "Video" }));
+  fireEvent.click(generate);
+  await waitFor(() => expect(postCalls("/api/engagement-content")).toHaveLength(1));
+  expect(JSON.parse(postCalls("/api/engagement-content")[0][1].body).classroomContext).toBe(context);
 });
 
 it("starts video generation only after an explicit shared Generate action and does not restart it on format switches", async () => {
@@ -311,12 +347,12 @@ it("starts video generation only after an explicit shared Generate action and do
   expect(postCalls("/api/engagement-image")).toHaveLength(1);
   const videoRequest = JSON.parse(postCalls("/api/engagement-video")[0][1].body);
   expect(videoRequest).toMatchObject({ classId: user.classId, assignmentId: user.assignmentId, lessonNumber: 8, imageUrl: "https://example.test/activity.png" });
-  for (const format of ["Slides", "Text + Image", "Video"]) fireEvent.click(screen.getByRole("radio", { name: format }));
+  for (const format of ["Slides", "Video"]) fireEvent.click(screen.getByRole("radio", { name: format }));
   expect(postCalls("/api/engagement-video")).toHaveLength(1);
   expect(mocks.generate).not.toHaveBeenCalled();
 });
 
-it("publishes Text + Image without attaching a video retained from another format", async () => {
+it("keeps saved activities publishable without attaching a video retained from another format", async () => {
   seedDraft({
     content: [{ id: "publish-activity", type: "phenomenon", title: "Shared activity", body: "Compare the observations.", strategy: "analogy" }],
     images: { "publish-activity": { status: "ready", url: "https://example.test/publish.png" } },
@@ -325,6 +361,7 @@ it("publishes Text + Image without attaching a video retained from another forma
   });
   render(<TeacherView user={user} />);
   await ready();
+  await openSavedActivities();
   const send = screen.getByRole("button", { name: "Send to students" });
   await waitFor(() => expect(send).toBeEnabled());
   fireEvent.click(send);
@@ -375,14 +412,18 @@ it("shares the current classroom context with the selected Slides editor", async
 });
 
 it("uses new content identities when regenerating a material with the same title", async () => {
-  seedDraft();
+  seedDraft({ materialFormat: "video" });
   render(<TeacherView user={user} />);
   await ready();
-  fireEvent.click(screen.getByRole("button", { name: "Generate materials" }));
-  await waitFor(() => expect(postCalls("/api/engagement-image")).toHaveLength(1));
-  await waitFor(() => expect(screen.getByRole("button", { name: "Generate materials" })).toBeEnabled());
-  fireEvent.click(screen.getByRole("button", { name: "Generate materials" }));
-  await waitFor(() => expect(postCalls("/api/engagement-image")).toHaveLength(2));
+  vi.useFakeTimers();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Generate materials" })); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(postCalls("/api/engagement-image")).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Generate materials" })).toBeEnabled();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Generate materials" })); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(postCalls("/api/engagement-image")).toHaveLength(2);
+  vi.useRealTimers();
   const items = postCalls("/api/engagement-image").map(([, init]) => JSON.parse(init.body).item);
   expect(items[0].title).toBe(items[1].title);
   expect(items[0].id).not.toBe(items[1].id);
@@ -394,6 +435,7 @@ it("downloads the complete selected student material with its current image", as
   seedDraft({ content: [item], images: { [item.id]: { status: "ready", url: "https://example.test/current.png" } } });
   render(<TeacherView user={user} />);
   await ready();
+  await openSavedActivities();
   const download = screen.getByRole("button", { name: "Download material (HTML)" });
   await waitFor(() => expect(download).toBeEnabled());
   fireEvent.click(download);
@@ -410,6 +452,7 @@ it("prefers the HTTP material attachment and keeps the local Blob separate for c
   seedDraft({ content: [item], images: { [item.id]: { status: "ready", url: "https://example.test/current.png" } } });
   mocks.download.mockResolvedValueOnce({ url: "blob:http-material", dataUri: "data:text/html;base64,aGVsbG8=", httpUrl: "https://files.example.test/material.html", fileName: "Material.html" });
   const view = render(<TeacherView user={user} />); await ready();
+  await openSavedActivities();
   const download = screen.getByRole("button", { name: "Download material (HTML)" });
   await waitFor(() => expect(download).toBeEnabled()); fireEvent.click(download);
   expect(await screen.findByRole("link", { name: "Save material file" })).toHaveAttribute("href", "https://files.example.test/material.html");
@@ -422,6 +465,7 @@ it("releases prepared material files on replacement and unmount", async () => {
   const item = { id: "download-activity", type: "phenomenon", title: "Shared activity", body: "Compare the observations.", strategy: "analogy" };
   seedDraft({ content: [item], images: { [item.id]: { status: "ready", url: "https://example.test/current.png" } } });
   const view = render(<TeacherView user={user} />); await ready();
+  await openSavedActivities();
   const download = screen.getByRole("button", { name: "Download material (HTML)" });
   await waitFor(() => expect(download).toBeEnabled()); fireEvent.click(download);
   await screen.findByRole("link", { name: "Save material file" });
@@ -437,6 +481,7 @@ it("invalidates a prepared link when the teacher selects another image version",
   seedDraft({ content: [item], images: { [item.id]: { status: "ready", url: "https://example.test/current.png", historyIndex: 1,
     history: [{ url: "https://example.test/earlier.png", createdAt: "2026-10-01T00:00:00Z" }, { url: "https://example.test/current.png", createdAt: "2026-10-02T00:00:00Z" }] } } });
   render(<TeacherView user={user} />); await ready();
+  await openSavedActivities();
   const download = screen.getByRole("button", { name: "Download material (HTML)" });
   await waitFor(() => expect(download).toBeEnabled()); fireEvent.click(download);
   await screen.findByRole("link", { name: "Save material file" });
@@ -451,9 +496,11 @@ it("aborts preparation when its content is replaced and discards a late file wit
   let finish: (value: unknown) => void = () => {};
   mocks.download.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   render(<TeacherView user={user} />); await ready();
+  await openSavedActivities();
   const download = screen.getByRole("button", { name: "Download material (HTML)" });
   await waitFor(() => expect(download).toBeEnabled()); fireEvent.click(download);
   const signal = mocks.download.mock.calls[0][2] as AbortSignal;
+  fireEvent.click(screen.getByRole("radio", { name: "Video" }));
   fireEvent.click(screen.getByRole("button", { name: "Generate materials" }));
   await waitFor(() => expect(signal.aborted).toBe(true));
   await act(async () => finish({ url: "blob:late", dataUri: "data:text/html;base64,b2xk", fileName: "Old.html" }));
@@ -463,7 +510,7 @@ it("aborts preparation when its content is replaced and discards a late file wit
 
 
 it("lets a teacher manually generate draft materials before any student response without inventing a recommendation", async () => {
-  seedDraft({ currentStep: 2, selectedStrategies: [] });
+  seedDraft({ currentStep: 2, materialFormat: "video", selectedStrategies: [] });
   render(<TeacherView user={user} />);
   await screen.findByRole("button", { name: "Analyze 0 students" });
   expect(screen.getByRole("button", { name: "Analyze 0 students" })).toBeDisabled();

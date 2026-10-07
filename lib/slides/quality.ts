@@ -1,4 +1,4 @@
-import { ANALOGY_OPENING_CONTRACT_VERSION, SIX_STEP_REVIEW_CONTRACT_VERSION, SLIDE_CONTRACT_VERSION, visibleVisualIds, type SlideDeck, type SlideDraft, type SlideStrategy } from "./model";
+import { ANALOGY_OPENING_CONTRACT_VERSION, SIX_STEP_REVIEW_CONTRACT_VERSION, SLIDE_CONTRACT_VERSION, isSlideAsset, visibleVisualIds, type SlideDeck, type SlideDraft, type SlideStrategy } from "./model";
 import { analogyMappingIndex, resolveAnalogyMethod } from "./analogy-methods";
 import { analogyStudentFields } from "./analogy";
 
@@ -198,6 +198,34 @@ export function reviewFindings(deck: SlideDeck): string[] {
     if (asset && imageMatchesPlan(deck, visual.id) && check?.key === imageCheckKey(deck, visual.id) && check.imageData === asset.data) findings.push(...check.issues);
   }
   return [...new Set(findings)];
+}
+
+export type ReviewAssessment = { complete: boolean; findings: string[]; pending: string[] };
+
+/** Assess saved checks against the current text and actual pixels. Completeness
+ * is not a pass: callers must also consider findings, layout and attempt failures. */
+export function reviewAssessment(deck: SlideDeck): ReviewAssessment {
+  const pending: string[] = [];
+  const hasAiModel = (model: string | undefined) => !!model?.trim() && model.trim() !== "output-rules";
+  const text = deck.checks?.text;
+  if (!text) pending.push("Text: AI review has not been completed.");
+  else if (text.key !== textCheckKey(deck)) pending.push("Text: the saved review is out of date after changes to the slides or their context.");
+  else if (!hasAiModel(text.model)) pending.push("Text: a completed AI review is not recorded; automatic rules alone do not complete the review.");
+
+  for (const visual of deck.draft.visuals) {
+    const asset = deck.assets[visual.id];
+    const check = deck.checks?.images[visual.id];
+    if (!isSlideAsset(asset)) pending.push(`Image ${visual.id}: the current image is missing or invalid and has not been reviewed.`);
+    else if (!imageMatchesPlan(deck, visual.id)) pending.push(`Image ${visual.id}: its image plan or reference has changed; the saved review is out of date.`);
+    else if (!check) pending.push(`Image ${visual.id}: AI review has not been completed.`);
+    else if (check.key !== imageCheckKey(deck, visual.id) || check.imageData !== asset.data) pending.push(`Image ${visual.id}: the image or slide text has changed since the saved review.`);
+    else if (!hasAiModel(check.model)) pending.push(`Image ${visual.id}: a completed AI review is not recorded.`);
+  }
+  return {
+    complete: pending.length === 0,
+    findings: [...new Set([...teachingErrors(deck.draft, deck.lessonNumber), ...reviewFindings(deck)])],
+    pending,
+  };
 }
 
 // Review diagnostics only, including deterministic teaching rules and missing
