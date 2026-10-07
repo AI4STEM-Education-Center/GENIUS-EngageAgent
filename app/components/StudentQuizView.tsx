@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState, type KeyboardEvent } from "react";
 import type { UserContext } from "@/lib/auth";
 import { findExistingStudentAnswer } from "@/lib/student-answer-lookup";
 import { findMissingAnswers, getSurveyAvailability } from "@/lib/survey-response";
@@ -19,6 +19,7 @@ type QuizStatusData = {
 };
 
 export default function StudentQuizView({ user, onProgress }: Props) {
+  const questionLabelId = useId();
   const [quizStatus, setQuizStatus] = useState<QuizStatusData | null>(null);
   const [questions, setQuestions] = useState<QuizItem[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -138,6 +139,21 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   const handleSelect = (itemId: string, option: string) => {
     if (submitted) return;
     setAnswers((prev) => ({ ...prev, [itemId]: option }));
+  };
+
+  const handleConfidenceKey = (event: KeyboardEvent<HTMLButtonElement>, item: QuizItem, current: string) => {
+    if (submitted) return;
+    const options = Object.keys(item.options);
+    const index = options.indexOf(current);
+    let next: number;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % options.length;
+    else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index - 1 + options.length) % options.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = options.length - 1;
+    else return; // Native buttons retain Enter and Space activation.
+    event.preventDefault();
+    handleSelect(item.item_id, options[next]);
+    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
   };
 
   const handleSurveyAnswer = (fieldId: string, value: string) => {
@@ -297,8 +313,9 @@ export default function StudentQuizView({ user, onProgress }: Props) {
                   {item.question_number ?? index + 1}
                 </span>
               )}
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <p
+                  id={`${questionLabelId}-${index}`}
                   className={`font-medium ${
                     isConfidence
                       ? "text-sm text-slate-500 italic"
@@ -316,7 +333,16 @@ export default function StudentQuizView({ user, onProgress }: Props) {
                     className="mt-4 h-auto max-h-[28rem] w-full max-w-2xl rounded-xl border border-slate-200 bg-white object-contain"
                   />
                 )}
-                <div className="mt-3 grid gap-2">
+                {isConfidence ? <div role="radiogroup" aria-labelledby={`${questionLabelId}-${index}`} aria-orientation="horizontal" className="mt-3 grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-slate-300">
+                  {Object.entries(item.options).map(([key, value], optionIndex) => (
+                    <button key={key} type="button" role="radio" aria-checked={selected === key}
+                      tabIndex={selected === key || (!selected && optionIndex === 0) ? 0 : -1}
+                      disabled={submitted} onClick={() => handleSelect(item.item_id, key)} onKeyDown={event => handleConfidenceKey(event, item, key)}
+                      className={`min-h-12 min-w-0 break-words border-r border-slate-300 px-1 py-3 text-center text-xs font-medium leading-snug last:border-r-0 focus-visible:relative focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#BA0C2F] disabled:cursor-default sm:px-3 sm:text-sm ${selected === key ? "bg-[#BA0C2F] text-white" : "bg-white text-slate-600 enabled:hover:bg-slate-50"}`}>
+                      {value}
+                    </button>
+                  ))}
+                </div> : <div className="mt-3 grid gap-2">
                   {Object.entries(item.options).map(([key, value]) => {
                     const isSelected = selected === key;
                     return (
@@ -344,7 +370,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
                       </button>
                     );
                   })}
-                </div>
+                </div>}
               </div>
             </div>
           </div>

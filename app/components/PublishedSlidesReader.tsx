@@ -18,7 +18,9 @@ const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-m
 const REFRESH_MS = 8 * 60 * 1000;
 
 function SlideText({ elements }: { elements: SlideElement[] }) {
-  return <section aria-label="Slide text" className="mt-4 space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-base leading-relaxed text-slate-800">
+  // The canvas is the visual reading surface. Keep its text and image
+  // descriptions available to assistive technology without repeating the slide.
+  return <section aria-label="Slide text" className="sr-only">
     {elements.filter(element => element.id !== "step-number" && element.id !== "question-card").map(element => element.kind === "image"
       ? <p key={element.id} className="whitespace-pre-line break-words text-sm text-slate-600"><span className="font-semibold">Image description: </span>{element.alt}</p>
       : element.id === "title" ? <h4 key={element.id} className="break-words text-lg font-semibold">{element.text}</h4>

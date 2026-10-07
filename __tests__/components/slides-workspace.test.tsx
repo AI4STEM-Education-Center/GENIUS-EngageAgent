@@ -5,8 +5,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { UserContext } from "@/lib/auth";
 import { deckFixture, slideFixture } from "../fixtures/slides";
 import { INITIAL_MODEL_CATALOG } from "@/lib/slides/models";
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), download: vi.fn(), decode: vi.fn(), revoke: vi.fn(), publish: vi.fn() }));
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), download: vi.fn(), decode: vi.fn(), revoke: vi.fn(), publish: vi.fn(), load: vi.fn(), save: vi.fn() }));
 vi.mock("@/lib/slides/export", () => ({ downloadPresentation: mocks.download, decodeSlideAsset: mocks.decode }));
+vi.mock("@/lib/slides/draft-storage", async importOriginal => ({ ...await importOriginal<object>(), loadSlideDraft: mocks.load, saveSlideDraft: mocks.save }));
 vi.mock("@/lib/slides/publish-client", () => ({ publishSlideDeck: mocks.publish }));
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "@/app/components/SlidesWorkspace";
 const user: UserContext = { geniusId: "teacher", userId: "teacher", name: "Teacher", email: null, role: "teacher", classId: "ea-class-a", assignmentId: "ea-task-a" };
@@ -15,7 +16,7 @@ const lessons = reply({ lessons: [{ lessonNumber: 8, lessonTitle: "Energy", lear
 const asset = deckFixture("analogy").assets.target;
 const preparedDataUri = "data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,UEsDBA==";
 beforeEach(() => {
-  vi.clearAllMocks(); vi.stubGlobal("fetch", mocks.fetch);
+  vi.clearAllMocks(); mocks.load.mockResolvedValue(null); mocks.save.mockResolvedValue(undefined); vi.stubGlobal("fetch", mocks.fetch);
   vi.stubGlobal("URL", Object.assign(class extends URL {}, { revokeObjectURL: mocks.revoke }));
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => ({ font: "", measureText: (text: string) => ({ width: text.length * 16 }) }) as never);
   mocks.decode.mockImplementation(async value => value); mocks.download.mockResolvedValue({ url: "blob:prepared-pptx", dataUri: preparedDataUri, fileName: "EngageAgent.pptx" });
@@ -107,7 +108,7 @@ it("aborts a pending publication on task change and ignores its late completion"
   expect(onPublished).not.toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "Published" })).toBeNull();
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => {}); cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function generate() {
   render(<SlidesWorkspace user={user} />);
   await screen.findByRole("option", { name: "8. Energy" });
@@ -148,7 +149,7 @@ it("toggles review with the accessible full-row button and also accepts Confirm 
   expect(mocks.publish).not.toHaveBeenCalled();
 });
 
-it("preserves review, prepared download and publication on unchanged Notes blur but invalidates an actual note edit", async () => {
+it("preserves review, prepared download and publication on unchanged student text interaction but invalidates an actual edit", async () => {
   await generate();
   const review = within(screen.getByRole("region", { name: "Review and publish" }));
   fireEvent.click(review.getByRole("button", { name: "Confirm review" }));
@@ -158,11 +159,11 @@ it("preserves review, prepared download and publication on unchanged Notes blur 
   await review.findByRole("button", { name: "Published" });
   const requests = mocks.fetch.mock.calls.length;
 
-  fireEvent.click(screen.getByRole("tab", { name: "Notes" }));
-  for (const name of ["Teacher note 1", "Teacher note 2"]) {
-    const note = screen.getByLabelText(name);
-    fireEvent.focus(note);
-    fireEvent.blur(note);
+  for (const name of ["Slide title", "Slide body", "Slide task"]) {
+    const field = screen.getByLabelText(name) as HTMLTextAreaElement;
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: field.value } });
+    fireEvent.blur(field);
   }
   expect(review.getByRole("checkbox").getAttribute("aria-checked")).toBe("true");
   expect((review.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(false);
@@ -173,8 +174,7 @@ it("preserves review, prepared download and publication on unchanged Notes blur 
   expect(mocks.publish).toHaveBeenCalledOnce();
   expect(mocks.revoke).not.toHaveBeenCalled();
 
-  fireEvent.change(screen.getByLabelText("Teacher note 1"), { target: { value: "Ask students to justify their prediction before showing the next page." } });
-  fireEvent.blur(screen.getByLabelText("Teacher note 1"));
+  fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "Where could the energy go?" } });
   expect(review.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
   expect((review.getByRole("button", { name: "Confirm review" }) as HTMLButtonElement).disabled).toBe(true);
   expect((review.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
@@ -224,7 +224,7 @@ it("removes the prepared save link when review is withdrawn or the deck is edite
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.click(screen.getByRole("button", { name: "Download PPTX" }));
   await screen.findByRole("link", { name: "Save PPTX file" });
-  fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "A changed title" } });
+  await act(async () => { fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "A changed title" } }); });
   expect(screen.queryByRole("link", { name: "Save PPTX file" })).toBeNull();
   expect(mocks.revoke).toHaveBeenCalledWith("blob:edited-pptx");
 });
@@ -295,11 +295,10 @@ it("preserves an embedded draft and settings while hidden without generating or 
   const onReadyChange = vi.fn();
   const view = render(<div hidden={false}><SlidesWorkspace ref={ref} user={user} embeddedContext={{ lessonNumber: 8, strategy: "analogy" }} onReadyChange={onReadyChange} /></div>);
   await waitFor(() => expect(onReadyChange).toHaveBeenLastCalledWith("analogy", true));
-  fireEvent.change(screen.getByLabelText("Text model"), { target: { value: "gpt-4.1" } });
   fireEvent.change(screen.getByLabelText("Classroom context (optional)"), { target: { value: "Grade 10; familiar with board games." } });
   act(() => { ref.current?.generate(); });
   await screen.findByText("5 slides ready for review.");
-  fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "Keep my edited title" } });
+  await act(async () => { fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "Keep my edited title" } }); });
   fireEvent.change(screen.getByLabelText("Revision request"), { target: { value: "Keep the useful comparison." } });
   const calls = mocks.fetch.mock.calls.length;
   view.rerender(<div hidden><SlidesWorkspace ref={ref} user={user} embeddedContext={{ lessonNumber: 8, strategy: "analogy" }} onReadyChange={onReadyChange} /></div>);
@@ -307,7 +306,7 @@ it("preserves an embedded draft and settings while hidden without generating or 
   expect(mocks.fetch).toHaveBeenCalledTimes(calls);
   expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe("Keep my edited title");
   expect((screen.getByLabelText("Revision request") as HTMLTextAreaElement).value).toBe("Keep the useful comparison.");
-  expect((screen.getByLabelText("Text model") as HTMLSelectElement).value).toBe("gpt-4.1");
+  expect(screen.queryByLabelText("Text model")).toBeNull();
   expect((screen.getByLabelText("Classroom context (optional)") as HTMLTextAreaElement).value).toBe("Grade 10; familiar with board games.");
 });
 
@@ -356,21 +355,21 @@ it("generates, previews, edits, requires teacher review and downloads the curren
   expect(screen.getAllByRole("alert").some(alert => alert.textContent?.includes("Slide 2.body"))).toBe(true);
   expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
 });
-it("retains the generated prompt version through dropdown changes, revisions and download", async () => {
-  const provenance = { version: "reference", revision: "test-revision", sourceSha256: "a".repeat(64) };
+it("retains a restored draft's prompt provenance through revisions and download without exposing controls", async () => {
+  const provenance = { version: "reference" as const, revision: "test-revision", sourceSha256: "a".repeat(64) };
+  const saved = deckFixture("analogy"); saved.promptProvenance = provenance;
+  mocks.load.mockResolvedValue(saved);
   mocks.fetch.mockImplementation(async (path: string) => path.startsWith("/api/slides?") ? lessons : path.endsWith("/check") ? reply({ issues: [] }) : path.endsWith("/image") ? reply({ asset }) : reply({ draft: slideFixture("analogy"), promptProvenance: provenance }));
-  render(<SlidesWorkspace user={user} />); await screen.findByRole("option", { name: "8. Energy" });
-  fireEvent.change(screen.getByLabelText("Prompt version"), { target: { value: "reference" } });
-  await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
-  await screen.findByText("5 slides ready for review.");
-  const count = mocks.fetch.mock.calls.length;
-  fireEvent.change(screen.getByLabelText("Prompt version"), { target: { value: "optimized" } });
-  expect(mocks.fetch).toHaveBeenCalledTimes(count);
+  render(<SlidesWorkspace user={user} />);
+  await screen.findByText(/Saved draft restored/);
+  expect(screen.queryByLabelText("Prompt version")).toBeNull();
+  expect(screen.queryByText(/test-revision/)).toBeNull();
+  expect(mocks.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
   await screen.findByText("5 slides ready for review.");
   const requests = mocks.fetch.mock.calls.filter(([path]) => path === "/api/slides").map(([, init]) => JSON.parse(init.body));
-  expect(requests.map(body => body.promptVersion)).toEqual(["reference", "reference"]);
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ operation: "review", promptVersion: "reference", analogyMethod: "predict-transfer", draft: saved.draft });
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.click(screen.getByRole("button", { name: "Download PPTX" }));
   await screen.findByText("PowerPoint ready. If downloading did not start, use Save PPTX file.");
@@ -394,9 +393,9 @@ it("keeps text and successful images when one image fails and permits a focused 
   await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
   await screen.findByText("Slide text ready. Some images need a retry.");
-  expect(screen.getAllByText("Missing")).toHaveLength(2); expect(screen.getByText("Ready")).toBeTruthy();
+  expect(screen.getAllByText(/· Missing/)).toHaveLength(2);
+  expect(screen.queryByRole("button", { name: "Regenerate analogue image" })).toBeNull();
   expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(screen.getByRole("tab", { name: "Notes" }));
   fireEvent.click(screen.getByRole("button", { name: "Check slides" }));
   await screen.findByText("Draft retained. Generate the missing images before teacher review.");
   expect(screen.queryByText("Quality checks complete. Teacher review pending.")).toBeNull();
@@ -405,7 +404,7 @@ it("keeps text and successful images when one image fails and permits a focused 
   expect(checkbox.disabled).toBe(true);
   fireEvent.click(checkbox);
   expect(checkbox.getAttribute("aria-checked")).toBe("false");
-  expect(document.getElementById(checkbox.getAttribute("aria-describedby")!)).toBe(review.getByText("Images are missing. Open Images to generate or retry them."));
+  expect(document.getElementById(checkbox.getAttribute("aria-describedby")!)).toBe(review.getByText("Images are missing. Use Image recovery below to generate or retry them."));
   for (const name of ["Confirm review", "Download PPTX", "Send to students"]) {
     const action = review.getByRole("button", { name }) as HTMLButtonElement;
     expect(action.disabled).toBe(true);
@@ -413,15 +412,15 @@ it("keeps text and successful images when one image fails and permits a focused 
   }
   expect(mocks.download).not.toHaveBeenCalled();
   expect(mocks.publish).not.toHaveBeenCalled();
-  fireEvent.click(review.getByRole("button", { name: "Open images" }));
-  expect(screen.getByRole("tab", { name: "Images" }).getAttribute("aria-selected")).toBe("true");
+  fireEvent.click(review.getByRole("button", { name: "Go to image recovery" }));
+  expect(screen.getByRole("region", { name: "Image recovery" })).toBeTruthy();
   mocks.fetch.mockResolvedValueOnce(reply({ asset }));
   fireEvent.click(screen.getByRole("button", { name: "Regenerate target image" }));
   await screen.findByText("Image updated.");
-  expect(screen.getByText("Missing")).toBeTruthy();
+  expect(screen.getByText(/· Missing/)).toBeTruthy();
   expect(JSON.parse(mocks.fetch.mock.calls.at(-1)![1].body).visualId).toBe("target");
   fireEvent.click(screen.getByRole("button", { name: "Regenerate variation image" }));
-  await waitFor(() => expect(screen.queryByText("Missing")).toBeNull());
+  await waitFor(() => expect(screen.queryByRole("region", { name: "Image recovery" })).toBeNull());
 });
 it("ignores a late response from cancelled generation", async () => {
   let resolve: (value: unknown) => void = () => {};
@@ -435,20 +434,17 @@ it("ignores a late response from cancelled generation", async () => {
   expect(screen.queryByLabelText("Slide title")).toBeNull();
   expect(screen.getByText("No slide draft yet.")).toBeTruthy();
 });
-it("keeps current defaults and sends explicit text/image selections for generation", async () => {
+it("uses server-current text/image defaults and optimized six-step generation without exposing configuration", async () => {
   render(<SlidesWorkspace user={user} />); await screen.findByRole("option", { name: "8. Energy" });
-  expect((screen.getByLabelText("Text model") as HTMLSelectElement).value).toBe("current");
-  expect((screen.getByLabelText("Image model") as HTMLSelectElement).value).toBe("current");
+  for (const label of ["Text model", "Image model", "Prompt version", "Analogy story"]) expect(screen.queryByLabelText(label)).toBeNull();
   expect((screen.getByLabelText("Classroom context (optional)") as HTMLTextAreaElement).value).toBe("");
-  fireEvent.change(screen.getByLabelText("Text model"), { target: { value: "gpt-4.1" } });
-  fireEvent.change(screen.getByLabelText("Image model"), { target: { value: "gpt-image-2" } });
   await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
   await screen.findByText("5 slides ready for review.");
   const bodies = mocks.fetch.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(init.body));
-  expect(bodies[0].textModel).toBe("gpt-4.1");
+  expect(bodies[0]).toMatchObject({ textModel: "current", promptVersion: "optimized", analogyMethod: "six-step" });
   expect(bodies[0].classroomContext).toBe("");
-  expect(bodies.filter(body => body.imageModel).map(body => body.imageModel)).toEqual(["gpt-image-2", "gpt-image-2", "gpt-image-2"]);
+  expect(bodies.filter(body => body.imageModel).map(body => body.imageModel)).toEqual(["current", "current", "current"]);
   expect(bodies.filter(body => body.asset)).toHaveLength(3);
   expect(JSON.stringify(bodies)).not.toContain("apiKey");
 });
@@ -487,33 +483,45 @@ it("keeps the draft classroom context through changed inputs, checks, AI revisio
   const newestGeneration = mocks.fetch.mock.calls.filter(([path]) => path === "/api/slides").at(-1)!;
   expect(JSON.parse(newestGeneration[1].body).classroomContext).toBe(nextContext);
 });
-it("switching a dropdown alone does not regenerate, invalidate, or relabel existing output", async () => {
+it("retains actual model metadata and private teacher notes in downloads without displaying them", async () => {
   mocks.fetch.mockImplementation(async (path: string) => path.startsWith("/api/slides?") ? lessons : path.endsWith("/check") ? reply({ issues: [] }) : path.endsWith("/image") ? reply({ asset: { ...asset, model: "gpt-image-1" } }) : reply({ draft: slideFixture("analogy"), model: "gpt-4.1" }));
   await generate(); fireEvent.click(screen.getByRole("checkbox"));
-  const calls = mocks.fetch.mock.calls.length;
-  fireEvent.change(screen.getByLabelText("Text model"), { target: { value: "gpt-5-mini" } });
-  fireEvent.change(screen.getByLabelText("Image model"), { target: { value: "gpt-image-2" } });
-  expect(mocks.fetch).toHaveBeenCalledTimes(calls);
-  expect(screen.getByText("Text: gpt-4.1")).toBeTruthy();
-  expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("true");
-  fireEvent.click(screen.getByRole("tab", { name: "Images" }));
-  expect(screen.getAllByText("gpt-image-1")).toHaveLength(3);
-  mocks.fetch.mockResolvedValueOnce(reply({ asset: { ...asset, model: "gpt-image-2" } }));
-  fireEvent.click(screen.getByRole("button", { name: "Regenerate target image" }));
-  await screen.findByText("Image updated.");
-  expect(JSON.parse(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image")).at(-1)![1].body).imageModel).toBe("gpt-image-2");
-  expect(screen.getAllByText("gpt-image-1")).toHaveLength(2);
-  expect(screen.getByText("gpt-image-2")).toBeTruthy();
-  expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
+  expect(screen.queryByText("Text: gpt-4.1")).toBeNull();
+  expect(screen.queryByText("gpt-image-1")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Image recovery" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Download PPTX" }));
+  await screen.findByRole("link", { name: "Save PPTX file" });
+  const exported = mocks.download.mock.calls[0][0];
+  expect(exported.textModel).toBe("gpt-4.1");
+  expect(Object.values(exported.assets).map(asset => (asset as { model: string }).model)).toEqual(["gpt-image-1", "gpt-image-1", "gpt-image-1"]);
+  expect(exported.draft.slides.map((slide: { teacherNotes: string[] }) => slide.teacherNotes)).toEqual(slideFixture("analogy").slides.map(slide => slide.teacherNotes));
+  expect(mocks.save.mock.calls.at(-1)![1].draft.slides[0].teacherNotes).toEqual(exported.draft.slides[0].teacherNotes);
 });
-it("uses selected text model and teacher feedback while preserving unchanged images", async () => {
+
+it("puts student-facing editing before revision and omits technical controls and private panels", async () => {
   await generate();
-  fireEvent.change(screen.getByLabelText("Text model"), { target: { value: "gpt-5-mini" } });
+  const preview = screen.getByRole("region", { name: "Slide preview" });
+  const editor = screen.getByRole("complementary", { name: "Slide editor" });
+  const review = screen.getByRole("region", { name: "Review and publish" });
+  const revision = screen.getByRole("region", { name: "Revise slides" });
+  for (const section of [preview, editor, review]) {
+    expect(section.compareDocumentPosition(revision) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  }
+  expect(within(revision).getByLabelText("Revision request")).toBeTruthy();
+  expect(within(revision).getByRole("button", { name: "Revise with AI" })).toBeTruthy();
+  for (const field of ["Slide title", "Slide body", "Slide task"]) expect(within(editor).getByLabelText(field)).toBeTruthy();
+  for (const field of ["Text model", "Image model", "Prompt version", "Analogy story", "Teacher note 1", "Teacher note 2", "target prompt", "target caption", "target alt"]) expect(screen.queryByLabelText(field)).toBeNull();
+  expect(screen.queryByRole("tablist")).toBeNull();
+  expect(screen.queryByText("Teaching design for this comparison")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Image recovery" })).toBeNull();
+});
+it("uses the current text model and teacher feedback while preserving unchanged images", async () => {
+  await generate();
   fireEvent.change(screen.getByLabelText("Revision request"), { target: { value: "Keep the analogue independent." } });
   fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
   await screen.findByText("5 slides ready for review.");
   const reviewCall = mocks.fetch.mock.calls.find(([, init]) => init?.body && JSON.parse(init.body).operation === "review");
-  expect(JSON.parse(reviewCall![1].body)).toMatchObject({ textModel: "gpt-5-mini", strategy: "analogy", lessonNumber: 8, feedback: "Keep the analogue independent." });
+  expect(JSON.parse(reviewCall![1].body)).toMatchObject({ textModel: "current", strategy: "analogy", lessonNumber: 8, feedback: "Keep the analogue independent." });
   expect(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image"))).toHaveLength(3);
 });
 
@@ -658,7 +666,7 @@ it("publishes advisory findings through Confirm review without a note, and real 
   expect(mocks.publish).toHaveBeenCalledOnce();
   expect(mocks.publish.mock.calls[0][0].teacherDecision).toBeUndefined();
   expect(mocks.fetch).toHaveBeenCalledTimes(calls);
-  fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "A new title" } });
+  await act(async () => { fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "A new title" } }); });
   expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
   expect((screen.getByRole("button", { name: "Confirm review" }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
@@ -666,17 +674,22 @@ it("publishes advisory findings through Confirm review without a note, and real 
   expect(screen.queryByRole("button", { name: "Published" })).toBeNull();
 });
 
-it("retains the old picture after editing its plan, regenerates only that picture and requires fresh checks", async () => {
-  await generate(); fireEvent.click(screen.getByRole("checkbox"));
-  fireEvent.click(screen.getByRole("tab", { name: "Images" }));
-  fireEvent.change(screen.getByLabelText("target prompt"), { target: { value: "One cart touching a visibly short compressed spring, no release panel." } });
-  expect(screen.getAllByText("Plan changed")).toHaveLength(2);
+it("recovers a restored draft with an outdated image plan and requires fresh dependent images and checks", async () => {
+  const saved = deckFixture("analogy");
+  saved.draft.visuals[1].prompt = "One cart touching a visibly short compressed spring, no release panel.";
+  mocks.load.mockResolvedValue(saved);
+  render(<SlidesWorkspace user={user} />);
+  await screen.findByText(/Saved draft restored/);
+  expect(screen.getAllByText(/· Needs update/)).toHaveLength(2);
   expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
+  expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByLabelText("target prompt")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Regenerate target image" }));
   await screen.findByText("Image updated. Quality check needs attention.");
   const images = mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image"));
-  expect(images).toHaveLength(4);
-  expect(JSON.parse(images[3][1].body).draft.visuals[1].prompt).toContain("visibly short");
+  expect(images).toHaveLength(1);
+  expect(JSON.parse(images[0][1].body).draft.visuals[1].prompt).toContain("visibly short");
+  expect(JSON.parse(images[0][1].body).imageModel).toBe("current");
   fireEvent.click(screen.getByRole("button", { name: "Check slides" }));
   await waitFor(() => expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(true));
   fireEvent.click(screen.getByRole("button", { name: "Regenerate variation image" }));

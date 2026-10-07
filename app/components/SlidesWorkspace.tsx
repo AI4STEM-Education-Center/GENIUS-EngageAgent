@@ -3,15 +3,15 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Download, Expand, ImagePlus, LoaderCircle, RefreshCw, ScanEye, Send, Sparkles, X } from "lucide-react";
 import type { UserContext } from "@/lib/auth";
-import { STRATEGIES, parseDraft, type SlideDeck, type SlideLesson, type SlideStrategy, type SlideVisual, type TeachingSlide } from "@/lib/slides/model";
+import { STRATEGIES, parseDraft, type SlideDeck, type SlideLesson, type SlideStrategy, type TeachingSlide } from "@/lib/slides/model";
 import { browserMeasure, layoutErrors } from "@/lib/slides/layout";
 import { decodeSlideAsset, downloadPresentation } from "@/lib/slides/export";
-import { DEFAULT_MODEL_SELECTION, INITIAL_MODEL_CATALOG, type SlideModelCatalog, type SlideModelSelection } from "@/lib/slides/models";
+import { DEFAULT_MODEL_SELECTION, INITIAL_MODEL_CATALOG, type SlideModelCatalog } from "@/lib/slides/models";
 import SlidePreview from "./SlidePreview";
 import { imageCheckKey, imageMatchesPlan, imageReferenceId, imageSourcePrompt, preservedAssets, qualityErrors, reviewFindings, textCheckKey } from "@/lib/slides/quality";
-import { PROMPT_LABELS, PROMPT_VERSIONS, type SlidePromptProvenance, type SlidePromptVersion } from "@/lib/slides/prompt-versions";
+import type { SlidePromptProvenance } from "@/lib/slides/prompt-versions";
 import { analogyStudentFields } from "@/lib/slides/analogy";
-import { ANALOGY_METHODS, analogyMappingIndex, resolveAnalogyMethod, type AnalogyMethod } from "@/lib/slides/analogy-methods";
+import { analogyMappingIndex, resolveAnalogyMethod } from "@/lib/slides/analogy-methods";
 import { loadSlideDraft, saveSlideDraft, slideDraftKey } from "@/lib/slides/draft-storage";
 import { postSlideRequest } from "@/lib/slides/client-transport";
 import { publishSlideDeck } from "@/lib/slides/publish-client";
@@ -21,16 +21,6 @@ const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-m
 const primaryButton = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-teal-800 bg-teal-800 px-3 py-2 text-sm font-medium text-white hover:bg-teal-900 disabled:opacity-50";
 const icon = `${button} h-10 w-10 shrink-0 p-0`;
 const label = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
-const storyLabels: Record<AnalogyMethod, string> = {
-  "six-step": "Six-step analogy (recommended)",
-  "reference-story": "Reference five-step story",
-  "predict-transfer": "Compare and predict",
-};
-const storyDescriptions: Record<AnalogyMethod, string> = {
-  "six-step": "Observe a lesson-aligned real-world phenomenon → identify the target difficulty → explore a familiar analogue → compare with teacher guidance → explain or predict → write a question. A boundary page is added only when it helps prevent a likely misunderstanding.",
-  "reference-story": "Introduce both situations → explore the familiar one → map their relationship → clarify when useful → ask a question.",
-  "predict-transfer": "Introduce both situations → map their relationship → predict a changed condition → revisit the reason → ask a question.",
-};
 
 export type SlidesWorkspaceHandle = { generate(): void };
 type SlidesWorkspaceProps = {
@@ -49,10 +39,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const strategy = embeddedContext?.strategy ?? standaloneStrategy;
   const embedded = Boolean(embeddedContext);
   const [catalogLoaded, setCatalogLoaded] = useState(false);
-  const [promptVersion, setPromptVersion] = useState<SlidePromptVersion>("optimized");
-  const [analogyMethod, setAnalogyMethod] = useState<AnalogyMethod>("six-step");
   const [models, setModels] = useState<SlideModelCatalog>(INITIAL_MODEL_CATALOG);
-  const [selection, setSelection] = useState<SlideModelSelection>(DEFAULT_MODEL_SELECTION);
+  const selection = DEFAULT_MODEL_SELECTION;
   const [classroomContext, setClassroomContext] = useState("");
   const sharedClassroomContext = embeddedContext?.classroomContext;
   const [deck, setDeck] = useState<SlideDeck | null>(null);
@@ -68,14 +56,13 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const publishJob = useRef<AbortController | null>(null);
   const [publishedDeck, setPublishedDeck] = useState<SlideDeck | null>(null);
   const [feedback, setFeedback] = useState("");
-  const [tab, setTab] = useState<"text" | "notes" | "images">("text");
   const [reload, setReload] = useState(0);
   const job = useRef<AbortController | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const classroomHelpId = useId();
   const reviewControlId = useId();
   const reviewHelpId = useId();
-  const editor = useRef<HTMLElement>(null);
+  const imageRecovery = useRef<HTMLElement>(null);
   const { classId, assignmentId } = user;
   const scope = useMemo(() => ({ userId: user.geniusId, classId: classId || "", assignmentId: assignmentId || "", lessonNumber, strategy }), [user.geniusId, classId, assignmentId, lessonNumber, strategy]);
   const scopeKey = slideDraftKey(scope);
@@ -103,12 +90,6 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     void loadSlideDraft(scope).then(restored => {
       if (!active || !restored) return;
       setDeck(restored); setSavedDeck(restored); setReviewed(false); setDownloaded(false);
-      if (restored.modelSelection) setSelection({
-        textModel: models.text.some(model => model.id === restored.modelSelection!.textModel) ? restored.modelSelection.textModel : DEFAULT_MODEL_SELECTION.textModel,
-        imageModel: models.image.some(model => model.id === restored.modelSelection!.imageModel) ? restored.modelSelection.imageModel : DEFAULT_MODEL_SELECTION.imageModel,
-      });
-      if (restored.promptProvenance) setPromptVersion(restored.promptProvenance.version);
-      if (restored.strategy === "analogy") setAnalogyMethod(resolveAnalogyMethod(restored.draft.analogyMethod));
       setClassroomContext(restored.classroomContext ?? "");
       setStatus("Saved draft restored. Continue checking or editing; generation does not restart automatically.");
     }).catch(() => {
@@ -216,8 +197,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     void run(async controller => {
       const chosenLesson = review && deck ? deck.lessonNumber : lessonNumber;
       const chosenStrategy = review && deck ? deck.strategy : strategy;
-      const chosenPrompt = review && deck ? deck.promptProvenance?.version ?? "optimized" : promptVersion;
-      const chosenMethod = review && deck ? resolveAnalogyMethod(deck.draft.analogyMethod) : analogyMethod;
+      const chosenPrompt = review && deck ? deck.promptProvenance?.version ?? "optimized" : "optimized";
+      const chosenMethod = review && deck ? resolveAnalogyMethod(deck.draft.analogyMethod) : "six-step";
       const chosenClassroomContext = review && deck ? deck.classroomContext ?? "" : (sharedClassroomContext ?? classroomContext).trim();
       const chosenModels = { ...selection };
       setStatus(review ? "Reviewing slide content..." : chosenStrategy === "analogy" && chosenMethod === "six-step" ? "Generating six-step slides..." : chosenStrategy === "experience bridging" ? "Generating experience-bridging slides..." : "Generating five slides...");
@@ -269,7 +250,6 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       }
       if (controller.signal.aborted) return;
       setError(failures.join("\n")); setStatus(failures.length ? "Slide text ready. Some images need a retry." : layoutErrors(next, browserMeasure()).length ? "Draft retained. Layout corrections needed." : qualityErrors(next).length ? "Draft retained. Quality corrections needed." : `${next.draft.slides.length} slides ready for review.`);
-      if (failures.length) setTab("images");
     });
   }
   function edit(field: keyof Omit<TeachingSlide, "stage">, value: string | string[]) {
@@ -295,10 +275,6 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       const checked = await checkImage(next, visualId, controller);
       if (!controller.signal.aborted) setStatus(qualityErrors(checked).length ? "Image updated. Quality check needs attention." : "Image updated.");
     });
-  }
-  function editVisual(id: string, field: keyof Omit<SlideVisual, "id">, value: string) {
-    setDeck(current => current ? { ...current, draft: { ...current.draft, visuals: current.draft.visuals.map(visual => visual.id === id ? { ...visual, [field]: value } : visual) } } : current);
-    setReviewed(false); setDownloaded(false); setStatus("");
   }
   function checkCurrent() {
     if (!deck) return;
@@ -350,12 +326,18 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     const check = deck.checks?.images[visual.id];
     return deck.assets[visual.id] && (check?.key !== imageCheckKey(deck, visual.id) || check?.imageData !== deck.assets[visual.id].data);
   })), [deck]);
+  const recoveryImages = useMemo(() => deck?.draft.visuals.flatMap(visual => {
+    const missing = !deck.assets[visual.id];
+    if (!missing && imageMatchesPlan(deck, visual.id)) return [];
+    const referenceId = imageReferenceId(deck.draft, visual.id);
+    return [{ id: visual.id, missing, needsReference: referenceId && !imageMatchesPlan(deck, referenceId) ? referenceId : undefined }];
+  }) ?? [], [deck]);
   const reviewBlock = busy ? "busy" : issues.length ? "layout" : missingImages ? "images" : changedImages ? "changedImages"
     : checksPending ? "checks" : qualityIssues.length ? "content" : null;
   const reviewHelp = reviewBlock === "busy" ? "Finish the current operation before confirming your review."
     : reviewBlock === "layout" ? "The slide layout or required content needs correction. Review the details below, then edit the draft or revise it with AI."
-      : reviewBlock === "images" ? "Images are missing. Open Images to generate or retry them."
-        : reviewBlock === "changedImages" ? "An image no longer matches its current plan. Open Images to regenerate it."
+      : reviewBlock === "images" ? "Images are missing. Use Image recovery below to generate or retry them."
+        : reviewBlock === "changedImages" ? "An image needs updating. Use Image recovery below to regenerate it."
           : reviewBlock === "checks" ? "The current text or images need checking after generation or edits. Run Check slides to continue."
             : reviewBlock === "content" ? "Required content checks need attention. Review the details below, then edit the draft or revise it with AI."
               : publishedDeck === deck ? "This version is published. Students can read it in Explore and ask. You can also download the PowerPoint."
@@ -369,25 +351,15 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       <Heading className="text-2xl font-semibold">{embedded ? `${label(strategy)} slides` : "Teaching slides"}</Heading>
       {deck && <span className="text-sm text-gray-500">{deck === savedDeck ? "Saved on this device" : storageError ? "Unsaved draft" : "Saving draft..."}{downloaded ? " · Export prepared" : ""}</span>}
     </div>
-    <div className="grid items-end gap-3 border-b border-gray-200 py-5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+    {(!embedded || sharedClassroomContext === undefined) && <div className="grid items-end gap-3 border-b border-gray-200 py-5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
       {!embedded && <><label className="min-w-0 text-sm font-medium">Lesson<select aria-label="Lesson" className={`${input} mt-2`} value={lessonNumber} disabled={busy || !lessons.length} onChange={e => setLessonNumber(Number(e.target.value))}>{lessons.map(lesson => <option key={lesson.lessonNumber} value={lesson.lessonNumber}>{lesson.lessonNumber}. {lesson.lessonTitle}</option>)}</select></label>
       <label className="min-w-0 text-sm font-medium">Strategy<select aria-label="Strategy" className={`${input} mt-2`} value={strategy} disabled={busy} onChange={e => setStrategy(e.target.value as SlideStrategy)}>{STRATEGIES.map(value => <option key={value} value={value}>{label(value)}</option>)}</select></label></>}
-      <div className="grid min-w-0 gap-3 sm:col-span-3 sm:grid-cols-3">
-        <label className="min-w-0 text-sm font-medium">Prompt version<select aria-label="Prompt version" className={`${input} mt-2`} disabled={busy} value={promptVersion} onChange={e => setPromptVersion(e.target.value as SlidePromptVersion)}>{PROMPT_VERSIONS.map(value => <option key={value} value={value}>{PROMPT_LABELS[value]}</option>)}</select></label>
-        <label className="min-w-0 text-sm font-medium">Text model<select aria-label="Text model" className={`${input} mt-2`} disabled={busy} value={selection.textModel} onChange={e => setSelection(current => ({ ...current, textModel: e.target.value }))}>{models.text.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label>
-        <label className="min-w-0 text-sm font-medium">Image model<select aria-label="Image model" className={`${input} mt-2`} disabled={busy} value={selection.imageModel} onChange={e => setSelection(current => ({ ...current, imageModel: e.target.value }))}>{models.image.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label>
-      </div>
-      {strategy === "analogy" && <label className="min-w-0 text-sm font-medium sm:col-span-3">Analogy story
-        <select aria-label="Analogy story" className={`${input} mt-2`} disabled={busy} value={analogyMethod} onChange={e => setAnalogyMethod(e.target.value as AnalogyMethod)}>{ANALOGY_METHODS.map(value => <option key={value} value={value}>{storyLabels[value]}</option>)}</select>
-        <span className="mt-1 block text-xs font-normal text-gray-600">{storyDescriptions[analogyMethod]} {analogyMethod === "six-step" ? "The first two slides show the target only; the familiar analogue first appears on slide 3." : "Earlier method: target and familiar situation appear together on the first slide."}</span>
-        {deck?.strategy === "analogy" && resolveAnalogyMethod(deck.draft.analogyMethod) !== analogyMethod && <span className="mt-1 block text-xs font-normal text-gray-600">This choice applies to new slides. The current slides and AI revisions keep {storyLabels[resolveAnalogyMethod(deck.draft.analogyMethod)]}.</span>}
-      </label>}
       {sharedClassroomContext === undefined && <label className="min-w-0 text-sm font-medium sm:col-span-3">Classroom context (optional)
         <textarea aria-label="Classroom context (optional)" aria-describedby={classroomHelpId} className={`${input} mt-2`} rows={2} maxLength={1200} disabled={busy} value={classroomContext} onChange={e => setClassroomContext(e.target.value)} placeholder="Grade, prior knowledge, familiar experiences, what students find hard to picture, and classroom constraints" />
         <span id={classroomHelpId} className="mt-1 block text-xs font-normal text-gray-500">Used for new slides. Revisions and checks keep the draft&apos;s original context.</span>
       </label>}
       {!embedded && <button className={`${primaryButton} sm:col-start-3 sm:row-start-1`} disabled={busy || !canGenerate} onClick={() => generate()}><Sparkles size={17} />{deck ? "Generate new slides" : "Generate slides"}</button>}
-    </div>
+    </div>}
     {storageError && <p role="alert" className="mt-3 text-sm text-amber-800">{storageError}</p>}
     <div className="flex min-h-12 flex-wrap items-center gap-3 py-3">
       {busy && <LoaderCircle size={17} className="animate-spin" aria-hidden="true" />}
@@ -399,15 +371,12 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     {!deck && <div className="border-y border-gray-200 py-16 text-center text-sm text-gray-500">No slide draft yet.</div>}
     {deck && slide && <>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0"><h2 className="break-words text-lg font-semibold">{deck.draft.title}</h2><p className="mt-1 text-sm text-gray-500">Lesson {deck.lessonNumber} · {label(deck.strategy)} · {deck.draft.slides.length} slides{deck.strategy === "analogy" ? ` · ${storyLabels[resolveAnalogyMethod(deck.draft.analogyMethod)]}` : ""}</p>{deck.textModel && <p className="mt-1 break-words text-xs text-gray-500">Text: {deck.textModel}</p>}</div>
+        <div className="min-w-0"><h2 className="break-words text-lg font-semibold">{deck.draft.title}</h2><p className="mt-1 text-sm text-gray-500">Lesson {deck.lessonNumber} · {label(deck.strategy)} · {deck.draft.slides.length} slides</p></div>
         <div className="flex flex-wrap gap-2">
           <button className={button} disabled={busy} onClick={checkCurrent}><ScanEye size={16} />Check slides</button>
-          <button className={button} disabled={busy} onClick={() => generate(true)} title="Apply feedback and correct quality findings"><RefreshCw size={16} />Revise with AI</button>
           <button className={icon} disabled={!!issues.length} title="Enlarge preview" aria-label="Enlarge preview" onClick={() => dialog.current?.showModal()}><Expand size={17} /></button>
         </div>
       </div>
-      {deck.promptProvenance && <p className="mb-3 break-words text-xs text-gray-500">{PROMPT_LABELS[deck.promptProvenance.version]} · {deck.promptProvenance.revision}</p>}
-      <label className="mb-5 block text-sm font-medium">Revision request<textarea aria-label="Revision request" className={`${input} mt-2 resize-y`} rows={2} maxLength={3000} disabled={busy} value={feedback} onChange={e => setFeedback(e.target.value)} /></label>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section aria-label="Slide preview" className="min-w-0">
           <SlidePreview deck={deck} index={index} />
@@ -420,7 +389,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           <section aria-label="Review and publish" className="mt-5 rounded-lg border border-teal-200 bg-teal-50/50 p-4">
             <h3 className="text-base font-semibold text-gray-900">Review and publish</h3>
             <p id={reviewHelpId} aria-live="polite" className="mt-2 text-sm leading-6 text-gray-700">{reviewHelp}</p>
-            {!busy && (reviewBlock === "images" || reviewBlock === "changedImages") && <button type="button" className={`${button} mt-3`} onClick={() => { setTab("images"); editor.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); }}><ImagePlus size={16} />Open images</button>}
+            {!busy && (reviewBlock === "images" || reviewBlock === "changedImages") && <button type="button" className={`${button} mt-3`} onClick={() => { imageRecovery.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); imageRecovery.current?.focus({ preventScroll: true }); }}><ImagePlus size={16} />Go to image recovery</button>}
             {!busy && reviewBlock === "checks" && <button type="button" className={`${button} mt-3`} onClick={checkCurrent}><ScanEye size={16} />Check slides to continue</button>}
             {!busy && (reviewBlock === "layout" || reviewBlock === "content") && <button type="button" className={`${button} mt-3`} disabled={!canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Fix slides with AI</button>}
             {!!findings.length && !busy && <section aria-label="AI review suggestions" className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
@@ -443,17 +412,28 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
             {preparedDownload?.deck === deck && !busy && ready && reviewed && preparedDownload.httpUrl && <p className="mt-2 text-xs text-gray-500">Save link expires in 10 minutes. Select Download PPTX again to refresh it.</p>}
           </section>
         </section>
-        <aside ref={editor} aria-label="Slide editor" className="min-w-0 border-t border-gray-200 lg:border-t-0">
-          <div className="mb-4 flex border-b border-gray-200" role="tablist" aria-label="Slide fields">{(["text", "notes", "images"] as const).map(value => <button key={value} role="tab" aria-selected={tab === value} className={`flex-1 border-b-2 px-2 py-3 text-sm ${tab === value ? "border-teal-800 font-semibold text-teal-900" : "border-transparent text-gray-600"}`} onClick={() => setTab(value)}>{label(value)}</button>)}</div>
-          {tab === "text" && <div className="space-y-4">{(["title", "body", "task"] as const).map(field => <label key={field} className="block text-sm font-medium">{field === "task" ? "Thinking task" : label(field)}<textarea aria-label={`Slide ${field}`} className={`${input} mt-2 resize-y`} rows={field === "title" ? 2 : 4} disabled={busy} value={slide[field]} onChange={e => edit(field, e.target.value)} />{field === "body" && deck.strategy !== "analogy" && <span className="mt-1 block text-xs font-normal text-gray-600">{slide.stage === "question" ? "Leave this empty. Put the recap and lesson transition in Notes; students see their question task and writing card." : "Optional when the picture and thinking task provide enough context."}</span>}</label>)}{index === analogyMappingIndex(deck.draft.analogyMethod) && deck.draft.analogyPlan && analogyStudentFields(deck.draft.analogyMethod).map(field => <label key={field} className="block text-sm font-medium">{field === "mappingHint" ? "Visible comparison hint" : "Student response starter"}<textarea className={`${input} mt-2 resize-y`} rows={2} maxLength={field === "mappingHint" ? 140 : 100} disabled={busy} value={deck.draft.analogyPlan![field]} onChange={e => editMapping(field, e.target.value)} /></label>)}</div>}
-          {tab === "notes" && <div className="space-y-4">{deck.strategy !== "analogy" && <p className="text-xs text-gray-600">Private guidance, exported as speaker notes: purpose and reasoning, then possible responses, a follow-up if students are stuck, and the spoken transition. Up to 150 words / 900 characters per note.</p>}{[0, 1].map(n => <label key={n} className="block text-sm font-medium">Teacher note {n + 1}<textarea className={`${input} mt-2 resize-y`} rows={4} disabled={busy} value={slide.teacherNotes[n] || ""} onChange={e => { const notes = [...slide.teacherNotes]; notes[n] = e.target.value; edit("teacherNotes", notes); }} onBlur={() => edit("teacherNotes", slide.teacherNotes.filter(value => value.trim()))} /></label>)}</div>}
-          {tab === "notes" && deck.draft.analogyPlan && <details className="mt-5 border-t border-gray-200 pt-4 text-sm"><summary className="cursor-pointer font-medium">Teaching design for this comparison</summary><dl className="mt-3 space-y-3">{Object.entries(deck.draft.analogyPlan).filter(([key, value]) => value && !analogyStudentFields(deck.draft.analogyMethod).some(field => field === key)).map(([key, value]) => <div key={key}><dt className="font-medium">{label(key.replace(/([A-Z])/g, " $1").toLowerCase())}</dt><dd className="mt-1 text-gray-600">{value}</dd></div>)}</dl></details>}
-          {tab === "images" && <ul className="divide-y divide-gray-200">{deck.draft.visuals.map(visual => <li key={visual.id} className="space-y-3 py-3 first:pt-0"><h3 className="text-sm font-medium">{label(visual.id)}</h3>{(["prompt", "caption", "alt"] as const).map(field => <label key={field} className="block text-sm font-medium">{field === "prompt" ? "Image plan" : field === "alt" ? "Alt text" : "Caption"}<textarea aria-label={`${visual.id} ${field}`} className={`${input} mt-2 resize-y`} rows={field === "prompt" ? 5 : 2} disabled={busy} maxLength={field === "prompt" ? 1800 : field === "caption" ? 85 : 160} value={visual[field]} onChange={e => editVisual(visual.id, field, e.target.value)} /></label>)}{deck.assets[visual.id]?.model && <p className="break-words text-xs text-gray-500">{deck.assets[visual.id].model}</p>}<div className="flex items-center justify-between gap-2 text-sm"><span>{!deck.assets[visual.id] ? "Missing" : !imageMatchesPlan(deck, visual.id) ? "Plan changed" : deck.checks?.images[visual.id]?.key !== imageCheckKey(deck, visual.id) ? "Check pending" : deck.checks?.images[visual.id]?.issues.length ? "AI suggestions" : "Ready"}</span><button className={icon} disabled={busy || !!issues.length} title={`Regenerate ${visual.id} image`} aria-label={`Regenerate ${visual.id} image`} onClick={() => retryImage(visual.id)}><ImagePlus size={18} /></button></div></li>)}</ul>}
+        <aside aria-label="Slide editor" className="min-w-0 border-t border-gray-200 pt-4 lg:border-t-0 lg:pt-0">
+          <h3 className="mb-4 text-base font-semibold">Edit slide text</h3>
+          <div className="space-y-4">{(["title", "body", "task"] as const).map(field => <label key={field} className="block text-sm font-medium">{field === "task" ? "Thinking task" : label(field)}<textarea aria-label={`Slide ${field}`} className={`${input} mt-2 resize-y`} rows={field === "title" ? 2 : 4} disabled={busy} value={slide[field]} onChange={e => edit(field, e.target.value)} />{field === "body" && deck.strategy !== "analogy" && <span className="mt-1 block text-xs font-normal text-gray-600">{slide.stage === "question" ? "Leave this empty; students see their question task and writing card." : "Optional when the picture and thinking task provide enough context."}</span>}</label>)}{index === analogyMappingIndex(deck.draft.analogyMethod) && deck.draft.analogyPlan && analogyStudentFields(deck.draft.analogyMethod).map(field => <label key={field} className="block text-sm font-medium">{field === "mappingHint" ? "Visible comparison hint" : "Student response starter"}<textarea className={`${input} mt-2 resize-y`} rows={2} maxLength={field === "mappingHint" ? 140 : 100} disabled={busy} value={deck.draft.analogyPlan![field]} onChange={e => editMapping(field, e.target.value)} /></label>)}</div>
         </aside>
       </div>
       {!!issues.length && <div role="alert" className="mt-5 border-l-4 border-red-700 bg-red-50 p-4 text-sm text-red-900"><ul className="space-y-2">{issues.map((issue, n) => <li key={n} className="whitespace-pre-line break-words">{issue}</li>)}</ul></div>}
       {!!qualityIssues.length && !busy && <div role="alert" className="mt-5 border-l-4 border-amber-700 bg-amber-50 p-4 text-sm text-amber-950"><ul className="space-y-2">{qualityIssues.map((issue, n) => <li key={n} className="break-words">{issue}</li>)}</ul></div>}
       {!!missingImages && !busy && <p className="mt-3 text-sm text-amber-900">Images pending. Download unavailable.</p>}
+      <section aria-label="Revise slides" className="mt-6 border-t border-gray-200 pt-5">
+        <h3 className="text-base font-semibold">Revise slides</h3>
+        <label className="mt-3 block text-sm font-medium">Revision request<textarea aria-label="Revision request" className={`${input} mt-2 resize-y`} rows={2} maxLength={3000} disabled={busy} value={feedback} onChange={e => setFeedback(e.target.value)} placeholder="Describe what you would like to improve." /></label>
+        <button className={`${button} mt-3`} disabled={busy || !canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Revise with AI</button>
+      </section>
+      {(missingImages || changedImages) && <section ref={imageRecovery} tabIndex={-1} aria-label="Image recovery" className="mt-5 rounded-md border border-gray-200 p-4 focus:outline-2 focus:outline-teal-700">
+        <h3 className="text-sm font-semibold">Image recovery</h3>
+        <p className="mt-1 text-sm text-gray-600">Complete these images before reviewing the slides.</p>
+        <ul className="mt-3 flex flex-wrap gap-3">{recoveryImages.map(visual => <li key={visual.id} className="rounded-md border border-gray-200 bg-white p-3">
+          <p className="mb-2 text-sm">{label(visual.id)} · {visual.missing ? "Missing" : "Needs update"}</p>
+          {visual.needsReference && <p className="mb-2 text-sm text-gray-600">Regenerate {visual.needsReference} first.</p>}
+          <button className={button} disabled={busy || !!issues.length || !!visual.needsReference} onClick={() => retryImage(visual.id)}><ImagePlus size={16} />Regenerate {visual.id} image</button>
+        </li>)}</ul>
+      </section>}
       <dialog ref={dialog} className="fixed inset-0 m-auto w-[96vw] max-w-7xl max-h-[96vh] overflow-auto border border-gray-300 bg-gray-50 p-3 backdrop:bg-black/70">
         <div className="mb-3 flex items-center justify-between gap-2"><button className={icon} aria-label="Previous enlarged slide" disabled={index === 0} onClick={() => setIndex(n => n - 1)}><ChevronLeft size={19} /></button><span className="text-sm">{index + 1} / {deck.draft.slides.length}</span><button className={icon} aria-label="Next enlarged slide" disabled={index === deck.draft.slides.length - 1} onClick={() => setIndex(n => n + 1)}><ChevronRight size={19} /></button><button className={icon} aria-label="Close preview" title="Close preview" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
         <div className="mx-auto w-full" style={{ maxWidth: "calc((96vh - 90px) * 16 / 9)" }}><SlidePreview deck={deck} index={index} /></div>
