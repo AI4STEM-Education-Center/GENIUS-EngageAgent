@@ -517,34 +517,58 @@ it("uses selected text model and teacher feedback while preserving unchanged ima
   expect(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image"))).toHaveLength(3);
 });
 
-it("stops automatic text repair when the model returns an unchanged draft", async () => {
-  mocks.fetch.mockImplementation(async (path: string) => path.startsWith("/api/slides?") ? lessons : path.endsWith("/check") ? reply({ issues: ["Slide 2.body: remove the early energy mapping."] }) : reply({ draft: slideFixture("analogy") }));
+it("stops unchanged automatic text repair but completes images and permits teacher review of remaining suggestions", async () => {
+  mocks.fetch.mockImplementation(async (path: string, init?: RequestInit) => path.startsWith("/api/slides?") ? lessons : path.endsWith("/check")
+    ? reply({ issues: JSON.parse(String(init?.body)).visualId ? [] : ["Slide 2.body: remove the early energy mapping."], model: "test-review-model" })
+    : path.endsWith("/image") ? reply({ asset }) : reply({ draft: slideFixture("analogy") }));
   render(<SlidesWorkspace user={user} />); await screen.findByRole("option", { name: "8. Energy" });
   await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
-  await screen.findByText("Draft retained. Teaching-content corrections needed.");
+  await screen.findByText("5 slides ready for review.");
   expect(mocks.fetch.mock.calls.filter(([path]) => path === "/api/slides")).toHaveLength(2);
-  expect(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/check"))).toHaveLength(2);
-  expect(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image"))).toHaveLength(0);
+  expect(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/check"))).toHaveLength(5);
+  expect(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image"))).toHaveLength(3);
   expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe("Tracking energy transfers");
+  expect(screen.getByText("Slide 2.body: remove the early energy mapping.")).toBeTruthy();
+  expect((screen.getByRole("button", { name: "Confirm review" }) as HTMLButtonElement).disabled).toBe(false);
   expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
 });
 
-it("bounds changing text repairs at two and never generates images for unresolved text", async () => {
+it("bounds changing text repairs at two and still generates all images when only AI suggestions remain", async () => {
   let version = 0;
-  mocks.fetch.mockImplementation(async (path: string) => {
+  mocks.fetch.mockImplementation(async (path: string, init?: RequestInit) => {
     if (path.startsWith("/api/slides?")) return lessons;
-    if (path.endsWith("/check")) return reply({ issues: ["Slide 2.body: the task still repeats the supplied answer."] });
+    if (path.endsWith("/check")) return reply({ issues: JSON.parse(String(init?.body)).visualId ? [] : ["Slide 2.body: the task still repeats the supplied answer."], model: "test-review-model" });
+    if (path.endsWith("/image")) return reply({ asset });
     const draft = slideFixture("analogy"); draft.title = `Draft ${++version}`;
     return reply({ draft });
   });
   render(<SlidesWorkspace user={user} />); await screen.findByRole("option", { name: "8. Energy" });
   await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
-  await screen.findByText("Draft retained. Teaching-content corrections needed.");
+  await screen.findByText("5 slides ready for review.");
   expect(mocks.fetch.mock.calls.filter(([path]) => path === "/api/slides")).toHaveLength(3);
-  expect(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image"))).toHaveLength(0);
+  expect(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image"))).toHaveLength(3);
   expect(screen.getByText("Draft 3")).toBeTruthy();
+  expect(screen.getByText("Slide 2.body: the task still repeats the supplied answer.")).toBeTruthy();
+  expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("keeps explicit output-rule failures blocked after bounded text repair", async () => {
+  const draft = slideFixture("analogy");
+  draft.slides[4].task = "Copy the correct answer.";
+  const issue = "Slide 5.task: ask students to write their own scientific question.";
+  mocks.fetch.mockImplementation(async (path: string) => path.startsWith("/api/slides?") ? lessons : path.endsWith("/check")
+    ? reply({ issues: [issue], model: "output-rules" }) : reply({ draft }));
+  render(<SlidesWorkspace user={user} />); await screen.findByRole("option", { name: "8. Energy" });
+  await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
+  await screen.findByText("Draft retained. Teaching-content corrections needed.");
+  expect(mocks.fetch.mock.calls.filter(([path]) => path === "/api/slides")).toHaveLength(2);
+  expect(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image"))).toHaveLength(0);
+  for (const name of ["Confirm review", "Download PPTX", "Send to students"]) {
+    expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
+  }
 });
 
 it("automatically corrects a rejected baseline before generating its dependent variation", async () => {
@@ -581,50 +605,65 @@ it("repairs layout before spending requests on images and retains an unresolved 
   expect(screen.queryByText("5 slides ready for review.")).toBeNull();
 });
 
-it("explains unresolved image findings beside review and blocks confirmation, export and publication", async () => {
+it("shows image-review suggestions but permits direct checkbox confirmation and download without a written reason", async () => {
   mocks.fetch.mockImplementation(async (path: string, init?: RequestInit) => path.startsWith("/api/slides?") ? lessons : path.endsWith("/check") ? reply({ issues: JSON.parse(String(init?.body)).visualId === "target" ? ["Image target: compressed spring is longer; correct the geometry."] : [] }) : path.endsWith("/image") ? reply({ asset }) : reply({ draft: slideFixture("analogy") }));
   render(<SlidesWorkspace user={user} />); await screen.findByRole("option", { name: "8. Energy" });
   await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
-  await screen.findByText("Draft retained. Quality corrections needed.");
+  await screen.findByText("5 slides ready for review.");
   expect(screen.getByText(/Image target: compressed spring/)).toBeTruthy();
+  const suggestions = within(screen.getByRole("region", { name: "AI review suggestions" }));
+  expect(suggestions.getByText("Refine with AI is recommended. You can also confirm your review and download or send these slides without refining.")).toBeTruthy();
+  expect(suggestions.getByRole("button", { name: "Refine with AI" })).toBeTruthy();
   const review = within(screen.getByRole("region", { name: "Review and publish" }));
   const checkbox = review.getByRole("checkbox") as HTMLButtonElement;
-  const help = review.getByText("AI review found issues. Revise the slides, or review the findings below and record a teacher decision before confirming.");
-  expect(document.getElementById(checkbox.getAttribute("aria-describedby")!)).toBe(help);
-  expect(checkbox.disabled).toBe(true);
-  fireEvent.click(checkbox);
-  expect(review.getByRole("button", { name: "Fix slides with AI" })).toBeTruthy();
-  for (const name of ["Confirm review", "Download PPTX", "Send to students"]) {
-    const action = review.getByRole("button", { name }) as HTMLButtonElement;
-    expect(action.disabled).toBe(true);
-    fireEvent.click(action);
-  }
+  const help = document.getElementById(checkbox.getAttribute("aria-describedby")!);
+  expect(help).toBe(review.getByText(/The slides and images are ready/));
+  expect(checkbox.disabled).toBe(false);
   expect(checkbox.getAttribute("aria-checked")).toBe("false");
-  expect(mocks.download).not.toHaveBeenCalled();
+  expect(screen.queryByLabelText("Teacher decision note")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Accept after teacher review" })).toBeNull();
+  const calls = mocks.fetch.mock.calls.length;
+  fireEvent.click(checkbox);
+  expect((review.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(false);
+  expect((review.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(review.getByRole("button", { name: "Download PPTX" }));
+  await review.findByRole("link", { name: "Save PPTX file" });
+  expect(mocks.download).toHaveBeenCalledOnce();
+  expect(mocks.download.mock.calls[0][0].teacherDecision).toBeUndefined();
+  expect(mocks.fetch).toHaveBeenCalledTimes(calls);
   expect(mocks.publish).not.toHaveBeenCalled();
   const attempts = mocks.fetch.mock.calls.filter(([path, init]) => path.endsWith("/image") && JSON.parse(init.body).visualId === "target");
   expect(attempts).toHaveLength(2);
   expect(JSON.parse(attempts[1][1].body).feedback).toContain("compressed spring is longer");
+  fireEvent.change(screen.getByLabelText("Revision request"), { target: { value: "Keep the student questions concise." } });
+  fireEvent.click(within(screen.getByRole("region", { name: "AI review suggestions" })).getByRole("button", { name: "Refine with AI" }));
+  await screen.findByText("5 slides ready for review.");
+  const revision = JSON.parse(mocks.fetch.mock.calls.filter(([path]) => path === "/api/slides").at(-1)![1].body);
+  expect(revision.operation).toBe("review");
+  expect(revision.feedback).toContain("compressed spring is longer");
+  expect(revision.feedback).toContain("Keep the student questions concise.");
 });
-it("requires a written teacher decision to accept AI findings and invalidates it after edits", async () => {
+it("publishes advisory findings through Confirm review without a note, and real edits require fresh confirmation", async () => {
   mocks.fetch.mockImplementation(async (path: string, init?: RequestInit) => path.startsWith("/api/slides?") ? lessons : path.endsWith("/check") ? reply({ issues: JSON.parse(String(init?.body)).visualId === "target" ? ["Image target: possible contact ambiguity."] : [] }) : path.endsWith("/image") ? reply({ asset }) : reply({ draft: slideFixture("analogy") }));
   render(<SlidesWorkspace user={user} />); await screen.findByRole("option", { name: "8. Energy" });
   await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
-  await screen.findByText("Draft retained. Quality corrections needed.");
-  const accept = screen.getByRole("button", { name: "Accept after teacher review" }) as HTMLButtonElement;
-  expect(accept.disabled).toBe(true);
-  fireEvent.change(screen.getByLabelText("Teacher decision note"), { target: { value: "I inspected the picture; the spring visibly touches the cart." } });
-  fireEvent.click(accept);
-  expect(screen.getByText("Teacher decision recorded for this version.")).toBeTruthy();
-  fireEvent.click(screen.getByRole("checkbox"));
-  fireEvent.click(screen.getByRole("button", { name: "Download PPTX" }));
-  await screen.findByText("PowerPoint ready. If downloading did not start, use Save PPTX file.");
-  expect(mocks.download.mock.calls[0][0].teacherDecision.reason).toContain("spring visibly touches");
+  await screen.findByText("5 slides ready for review.");
+  expect(screen.queryByLabelText("Teacher decision note")).toBeNull();
+  const calls = mocks.fetch.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "Confirm review" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  await screen.findByRole("button", { name: "Published" });
+  expect(mocks.publish).toHaveBeenCalledOnce();
+  expect(mocks.publish.mock.calls[0][0].teacherDecision).toBeUndefined();
+  expect(mocks.fetch).toHaveBeenCalledTimes(calls);
   fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "A new title" } });
+  expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
+  expect((screen.getByRole("button", { name: "Confirm review" }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.queryByText("Teacher decision recorded for this version.")).toBeNull();
+  expect((screen.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole("button", { name: "Published" })).toBeNull();
 });
 
 it("retains the old picture after editing its plan, regenerates only that picture and requires fresh checks", async () => {

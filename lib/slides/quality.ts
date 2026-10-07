@@ -200,7 +200,9 @@ export function reviewFindings(deck: SlideDeck): string[] {
   return [...new Set(findings)];
 }
 
-export function qualityErrors(deck: SlideDeck, includeFindings = true): string[] {
+// Export/publication blockers only. Current AI findings remain advisory through
+// reviewFindings; teachers confirm their review without a separate waiver.
+export function qualityErrors(deck: SlideDeck): string[] {
   const errors = teachingErrors(deck.draft, deck.lessonNumber);
   if (deck.checks?.text?.key !== textCheckKey(deck)) errors.push("Text: quality check pending after generation or edits.");
   else if (deck.checks.text.model === "output-rules") errors.push(...deck.checks.text.issues);
@@ -211,7 +213,6 @@ export function qualityErrors(deck: SlideDeck, includeFindings = true): string[]
     if (!imageMatchesPlan(deck, visual.id)) errors.push(`Image ${visual.id}: regenerate the changed image plan or baseline.`);
     else if (!check || check.key !== imageCheckKey(deck, visual.id) || check.imageData !== asset.data) errors.push(`Image ${visual.id}: visual check pending after generation or edits.`);
   }
-  if (includeFindings && !hasTeacherDecision(deck)) errors.push(...reviewFindings(deck));
   return [...new Set(errors)];
 }
 
