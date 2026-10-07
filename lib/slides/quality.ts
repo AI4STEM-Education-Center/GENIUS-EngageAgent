@@ -200,8 +200,8 @@ export function reviewFindings(deck: SlideDeck): string[] {
   return [...new Set(findings)];
 }
 
-// Export/publication blockers only. Current AI findings remain advisory through
-// reviewFindings; teachers confirm their review without a separate waiver.
+// Review diagnostics only, including deterministic teaching rules and missing
+// or stale checks. These inform optional refinement, never publication/export.
 export function qualityErrors(deck: SlideDeck): string[] {
   const errors = teachingErrors(deck.draft, deck.lessonNumber);
   if (deck.checks?.text?.key !== textCheckKey(deck)) errors.push("Text: quality check pending after generation or edits.");

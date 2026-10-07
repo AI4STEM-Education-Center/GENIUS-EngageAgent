@@ -1,6 +1,5 @@
 import { slideElements, type Frame, type ImageElement, type TextElement } from "./layout";
 import { isSlideStrategy, parseDraft, type SlideDeck, type SlideStrategy } from "./model";
-import { teachingErrors } from "./quality";
 
 export type PublishedSlideReference = { publicationId: string; slideCount: number; lessonNumber: number };
 export type PublicSlideElement = Omit<TextElement, "renderedLines"> | (Omit<ImageElement, "data"> & { assetId: string });
@@ -74,8 +73,8 @@ export function isPublishedSlideResponse(value: unknown): value is PublishedSlid
 export function projectPublishedSlides(deck: SlideDeck): PublishedSlideManifest {
   if (!lesson(deck.lessonNumber) || !isSlideStrategy(deck.strategy)) throw new Error("Select a valid slide lesson and strategy.");
   parseDraft(deck.draft, deck.strategy);
-  const errors = teachingErrors(deck.draft, deck.lessonNumber);
-  if (errors.length) throw new Error(errors.join("\n"));
+  // Pedagogical findings inform optional refinement; they do not prevent a
+  // teacher from sharing a structurally valid, generated material.
   const manifest: PublishedSlideManifest = { version: 1, title: deck.draft.title, lessonNumber: deck.lessonNumber, strategy: deck.strategy,
     pages: deck.draft.slides.map((page, index) => ({ stage: page.stage, title: page.title, elements: slideElements(deck, index).map(element => {
       const frame = { left: element.frame.left, top: element.frame.top, width: element.frame.width, height: element.frame.height };
