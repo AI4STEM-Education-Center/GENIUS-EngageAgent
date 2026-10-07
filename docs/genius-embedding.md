@@ -63,3 +63,38 @@ authentication. If a token expires, reopen the activity from GENIUS.
 
 Independent entry still uses **Sign in with GENIUS → My classes** and its own
 class codes. Standalone and host-managed classes remain separate records.
+
+## Local integration
+
+Run the real GENIUS frontend and Express API with an isolated local MongoDB,
+then run EngageAgent in development mode. For example, use GENIUS on
+`http://localhost:3100`, its API on `http://localhost:4100`, and EngageAgent on
+`http://localhost:3104`. Both servers must share a locally generated `SSO_SECRET`.
+Set GENIUS's `ENGAGE_SSO_REDIRECT_URIS` to
+`http://localhost:3104/api/auth/callback` so it issues audience-bound embedded
+credentials for this origin.
+
+EngageAgent's ignored local environment should contain:
+
+```dotenv
+ENGAGE_APP_URL=http://localhost:3104
+GENIUS_URL=http://localhost:3100
+ALLOWED_ORIGINS=http://localhost:3100
+ENGAGE_LOCAL_DATA_DIR=/absolute/path/to/isolated/engage-data
+ENGAGE_LOCAL_MATERIAL_STORAGE=1
+DYNAMODB_TABLE=
+ENGAGE_S3_BUCKET=
+```
+
+Reuse the project's model API key through the local environment; do not commit
+it or copy production database credentials into the demo. JSON records, slide
+images and hosted exports remain in the isolated data directory. This optional
+storage backend requires development mode, a loopback app origin and no cloud
+storage configuration; it cannot enable local storage in production. Reading
+and publishing still require the same scoped authentication. Local assets use
+short-lived signed URLs, just like the production private storage flow.
+
+Create real local teacher/student accounts and follow the same GENIUS task
+setup above, using `http://localhost:3104/` as the External URL. No mock identity
+or substitute material-generation route is needed. GENIUS remains the course
+and task host; EngageAgent owns the material generation and viewing interface.

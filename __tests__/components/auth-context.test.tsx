@@ -142,3 +142,72 @@ it("verifies the original URL token during React effect replay without reviving 
   expect(window.location.search).toBe("");
   expect(fetchMock.mock.calls.every(([url]) => url === "/api/auth/verify")).toBe(true);
 });
+
+async function verifiedEmbeddedVisit() {
+  window.history.replaceState({ existingFrameworkState: true }, "", "/?sso_token=embedded-launch-token");
+  fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: teacher }) });
+  const view = mount();
+  expect((await settled()).user).toEqual(teacher);
+  view.unmount();
+  fetchMock.mockReset();
+}
+
+it("keeps a verified GENIUS launch scoped on top-level reload despite an unrelated standalone cookie", async () => {
+  await verifiedEmbeddedVisit();
+  const unrelated = { ...teacher, geniusId: "different-native-teacher", classId: undefined, assignmentId: undefined };
+  fetchMock.mockImplementation(async url => ({ ok: true, json: async () => ({ user: url === "/api/auth/me" ? unrelated : teacher }) }));
+  mount();
+  expect((await settled()).user).toEqual(teacher);
+  expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/auth/verify"]);
+  expect(scopedClientAuthHeaders(teacher)).toEqual({ Authorization: "Bearer embedded-launch-token" });
+  expect(window.history.state.existingFrameworkState).toBe(true);
+  expect(JSON.stringify(window.history.state)).not.toContain("embedded-launch-token");
+  expect(window.location.href).not.toContain("embedded-launch-token");
+});
+
+it.each(["/teacher/classes", "/student/classes"])("uses the standalone cookie for an explicit %s visit and clears the embedded marker", async path => {
+  await verifiedEmbeddedVisit();
+  // Keep the prior history metadata to prove the explicit native route wins.
+  window.history.replaceState(window.history.state, "", path);
+  const native = { ...teacher, geniusId: "native-user", classId: undefined, assignmentId: undefined };
+  fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: native }) });
+  mount();
+  expect((await settled()).user).toEqual(native);
+  expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/auth/me"]);
+  expect(window.history.state).toEqual({ existingFrameworkState: true });
+  expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+  expect(scopedClientAuthHeaders(teacher)).toEqual({});
+});
+
+it.each(["expired", "invalid signature", "different task"])("fails closed for a marked launch with an %s credential instead of choosing a cookie identity", async reason => {
+  await verifiedEmbeddedVisit();
+  fetchMock.mockImplementation(async url => url === "/api/auth/me"
+    ? { ok: true, json: async () => ({ user: { ...teacher, classId: undefined, assignmentId: undefined } }) }
+    : reason === "different task"
+      ? { ok: true, json: async () => ({ user: { ...teacher, assignmentId: "other-task" } }) }
+      : { ok: false, json: async () => ({ error: reason }) });
+  mount();
+  expect(await settled()).toEqual({ user: null, loading: false, error: "Reopen this activity from GENIUS to sign in." });
+  expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/auth/verify"]);
+  expect(scopedClientAuthHeaders(teacher)).toEqual({});
+  expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+});
+
+it("requires a fresh GENIUS launch when a marked page loses its stored credential", async () => {
+  await verifiedEmbeddedVisit();
+  window.sessionStorage.clear();
+  mount();
+  expect(await settled()).toEqual({ user: null, loading: false, error: "Reopen this activity from GENIUS to sign in." });
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("does not give a stale token priority during a separate standalone root visit", async () => {
+  await verifiedEmbeddedVisit();
+  window.history.pushState({}, "", "/");
+  const native = { ...teacher, classId: undefined, assignmentId: undefined };
+  fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: native }) });
+  mount();
+  expect((await settled()).user).toEqual(native);
+  expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/auth/me"]);
+  expect(window.history.state).toEqual({});
+});

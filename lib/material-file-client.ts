@@ -1,3 +1,4 @@
+import { isSafeMaterialUrl } from "./material-url";
 import { scopedClientAuthHeaders } from "./client-auth";
 
 export type MaterialFileScope = { classId?: string; assignmentId?: string };
@@ -22,9 +23,8 @@ export async function uploadMaterialFile(blob: Blob, fileName: string, scope?: M
     signal?.throwIfAborted();
     if (!result || typeof result !== "object" || !("url" in result) || typeof result.url !== "string"
       || !("fileName" in result) || typeof result.fileName !== "string" || !result.fileName) return undefined;
-    const url = new URL(result.url);
-    if (url.protocol !== "https:" || url.username || url.password) return undefined;
-    return { url: url.href, fileName: result.fileName };
+    if (!isSafeMaterialUrl(result.url)) return undefined;
+    return { url: result.url.startsWith("/") ? result.url : new URL(result.url).href, fileName: result.fileName };
   } catch {
     signal?.throwIfAborted();
     return undefined;

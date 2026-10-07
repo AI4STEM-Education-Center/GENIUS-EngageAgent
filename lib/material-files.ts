@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import JSZip from "jszip";
+import { localMaterialStorageEnabled, localMaterialUrl, storeLocalMaterial } from "./local-material-storage";
 import { authorizeSlides, SlideRequestError } from "./slides/server";
 
 export const MAX_MATERIAL_FILE_BYTES = 4_400_000;
@@ -77,15 +78,19 @@ export async function hostMaterialFile(request: Request): Promise<{ url: string;
   if (fileName.length <= kind.length + 1) throw new SlideRequestError("Choose a valid material filename.");
   const bytes = await readFileBytes(request);
   await validateFile(bytes, kind);
+  const scope = createHash("sha256").update(JSON.stringify([authorized.classId, authorized.assignmentId])).digest("hex");
+  const key = `material-files/${scope}/${randomUUID()}.${kind}`;
+  const contentType = kind === "html" ? "application/octet-stream" : PPTX_CONTENT_TYPE;
+  if (localMaterialStorageEnabled()) {
+    await storeLocalMaterial(key, bytes);
+    return { url: await localMaterialUrl(key, contentType, fileName), fileName };
+  }
   const bucket = process.env.ENGAGE_S3_BUCKET?.trim();
   if (!bucket) throw new SlideRequestError("File hosting is unavailable. Use the local save link.", 503);
   const client = new S3Client({ region: process.env.ENGAGE_AWS_REGION || process.env.AWS_REGION || "us-east-2", maxAttempts: 1,
     ...(process.env.ENGAGE_AWS_ACCESS_KEY_ID && process.env.ENGAGE_AWS_SECRET_ACCESS_KEY ? { credentials: {
       accessKeyId: process.env.ENGAGE_AWS_ACCESS_KEY_ID, secretAccessKey: process.env.ENGAGE_AWS_SECRET_ACCESS_KEY,
     } } : {}) });
-  const scope = createHash("sha256").update(JSON.stringify([authorized.classId, authorized.assignmentId])).digest("hex");
-  const key = `material-files/${scope}/${randomUUID()}.${kind}`;
-  const contentType = kind === "html" ? "application/octet-stream" : PPTX_CONTENT_TYPE;
   const disposition = `attachment; filename="${fileName}"`;
   try {
     await client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: bytes, ContentLength: bytes.length,

@@ -588,8 +588,15 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
 
   // Load draft from localStorage
   useEffect(() => {
-    const scopedRaw = localStorage.getItem(draftStorageKey);
-    const legacyRaw = scopedRaw ? null : localStorage.getItem(LEGACY_DRAFT_STORAGE_KEY);
+    let scopedRaw: string | null = null;
+    let legacyRaw: string | null = null;
+    try {
+      scopedRaw = localStorage.getItem(draftStorageKey);
+      legacyRaw = scopedRaw ? null : localStorage.getItem(LEGACY_DRAFT_STORAGE_KEY);
+    } catch {
+      // Some embedded browsers deny local storage. Keep the teacher workflow
+      // usable in memory; server publications and current-session edits remain.
+    }
     const raw = scopedRaw ?? legacyRaw;
     let matchedDraft = false;
     let shouldRestorePersistedMedia = false;

@@ -525,3 +525,26 @@ it("uses the existing material selector, slide editor and publication list for a
   expect(mocks.generate).toHaveBeenCalledWith({ lessonNumber: 8, strategy: "analogy", classroomContext: "Grade 8 GENIUS class", classId: host.classId, assignmentId: host.assignmentId });
   expect(screen.getByRole("textbox", { name: "Draft for analogy" })).toHaveValue("Generated analogy draft");
 });
+
+it("hydrates an embedded teacher workflow and generates in memory when browser storage is denied", async () => {
+  const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage denied"); });
+  const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage denied"); });
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    const host = { ...user, classId: "host-class", assignmentId: "host-task" };
+    render(<TeacherView user={host} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Energy/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Strategy recommendation/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Analogy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
+    await ready();
+    fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
+    const generate = screen.getByRole("button", { name: "Generate materials" });
+    await waitFor(() => expect(generate).toBeEnabled());
+    fireEvent.click(generate);
+    expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ classId: host.classId, assignmentId: host.assignmentId, lessonNumber: 8, strategy: "analogy" }));
+    expect(screen.getByRole("textbox", { name: "Draft for analogy" })).toHaveValue("Generated analogy draft");
+  } finally {
+    getItem.mockRestore(); setItem.mockRestore(); warn.mockRestore();
+  }
+});

@@ -175,7 +175,7 @@ const emptyStore: Store = {
   surveys: [],
   survey_responses: [],
 };
-const dataDir = path.join(process.cwd(), "data");
+const dataDir = process.env.ENGAGE_LOCAL_DATA_DIR || path.join(process.cwd(), "data");
 const storePath = path.join(dataDir, "engage-nosql.json");
 
 const DEFAULT_ENGAGE_AWS_REGION = "us-east-2";
