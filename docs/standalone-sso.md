@@ -8,8 +8,10 @@ No GENIUS Gallery item or GENIUS assignment is required for this entry.
 
 1. `/api/auth/start` creates a 10-minute HttpOnly login cookie containing state,
    nonce and a random PKCE verifier. It redirects to GENIUS authorization.
-2. GENIUS uses its existing authenticated session, or its existing login/signup
-   pages, and returns a 60-second, single-use authorization code.
+2. Every explicit sign-in requests `prompt=select_account`. GENIUS shows the
+   signed-in account and lets the user continue with it or use another account.
+   Without a GENIUS session, it shows the existing login/signup pages. The
+   selected identity returns through a 60-second, single-use authorization code.
 3. `/api/auth/callback` verifies state, exchanges the code server-to-server using
    PKCE S256, then verifies the signed identity token's issuer, audience, expiry,
    nonce, role and GENIUS ID.
@@ -17,7 +19,9 @@ No GENIUS Gallery item or GENIUS assignment is required for this entry.
    cookie for eight hours. Its signing key is domain-separated from SSO_SECRET;
    its issuer is EngageAgent, not GENIUS.
 5. Teachers return to `/teacher/classes`; students and guests return to
-   `/student/classes`. Logout clears the EngageAgent session, not GENIUS SSO.
+   `/student/classes`. Logout clears the EngageAgent session, not GENIUS SSO;
+   signing in again still shows the account choice. Choosing another account
+   signs out of GENIUS before displaying its credential form.
 
 Existing `?sso_token=` iframe launches still verify their GENIUS class/assignment
 context and open the original workflow. An iframe's context is not converted

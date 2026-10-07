@@ -33,6 +33,7 @@ describe("standalone SSO", () => {
     const url = new URL(response.headers.get("location")!);
     expect(url.origin).toBe("https://learn.ai4genius.org");
     expect(url.pathname).toBe("/api/sso/engage/authorize");
+    expect(url.searchParams.get("prompt")).toBe("select_account");
     expect(url.searchParams.get("redirect_uri")).toBe(`${origin}/api/auth/callback`);
     expect(url.searchParams.get("code_challenge")).toBe(challengeFor(login.verifier as string));
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
@@ -85,5 +86,14 @@ describe("standalone SSO", () => {
     const response = await logout(new Request(`${origin}/api/auth/logout`, { method: "POST", headers: { origin } }));
     expect(response.cookies.get(SESSION_COOKIE)?.maxAge).toBe(0);
     expect(response.cookies.get(LOGIN_COOKIE)?.maxAge).toBe(0);
+  });
+  it("requests account selection again after signing out instead of silently reusing GENIUS", async () => {
+    const first = await loginRequest();
+    await logout(new Request(`${origin}/api/auth/logout`, { method: "POST", headers: { origin } }));
+    const next = await loginRequest();
+    const destination = new URL(next.response.headers.get("location")!);
+    expect(destination.searchParams.get("prompt")).toBe("select_account");
+    expect(next.login.state).not.toBe(first.login.state);
+    expect(next.login.verifier).not.toBe(first.login.verifier);
   });
 });
