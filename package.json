@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "check:production-config": "node scripts/check-production-config.mjs",
     "start": "next start",
     "lint": "eslint",
     "generate:feedback-tickets": "node scripts/generate_feedback_tickets.mjs",

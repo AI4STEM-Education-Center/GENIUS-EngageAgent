@@ -1,11 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { sessionUser } from "../session";
-import { workspaceContext, isWorkspaceClass } from "../workspace";
+import { localMaterialStorageEnabled, localMaterialUrl, storeLocalMaterial } from "../local-material-storage";
 import { workspaceGet, workspacePut } from "../workspace-store";
 import { listPublishedContent, upsertContentPublish } from "../nosql";
-import { authorizeSlides, requestDraft, slideContext, SlideRequestError } from "./server";
+import { authorizeSlideAccess, authorizeSlides, requestDraft, slideContext, SlideRequestError } from "./server";
 import { isPublishedSlideManifest, isPublishedSlideReference, isSlidePublicationId, projectPublishedSlides,
   type PublishedSlideManifest, type PublishedSlideResponse, type SlideAssetDimensions } from "./publication";
 
@@ -112,9 +111,9 @@ async function startPublication(context: Context, body: Record<string, unknown>,
     assets: Object.fromEntries(Object.entries(dimensions).map(([id, size]) => [id, { ...size, data: "" }])) }); }
   catch (error) { throw new SlideRequestError(error instanceof Error ? error.message : "Check the current slides before publishing.", 422); }
   // Fail before creating a staging ticket if durable image storage is absent.
-  const { client } = storage(); client.destroy();
+  if (!localMaterialStorageEnabled()) { const { client } = storage(); client.destroy(); }
   const id = randomUUID();
-  const publication: Publication = { ...context, id, deckId: body.deckId, ownerId, manifest, dimensions, state: "staging", createdAt: new Date().toISOString(), expiresAt: Math.floor(Date.now() / 1000) + SLIDE_PUBLICATION_STAGE_SECONDS };
+  const publication: Publication = { classId: context.classId, assignmentId: context.assignmentId, id, deckId: body.deckId, ownerId, manifest, dimensions, state: "staging", createdAt: new Date().toISOString(), expiresAt: Math.floor(Date.now() / 1000) + SLIDE_PUBLICATION_STAGE_SECONDS };
   await workspacePut([{ partition: partition(context.classId), key: publicationKey(id), value: publication, createOnly: true, expiresAt: publication.expiresAt }]);
   return { publicationId: id };
 }
@@ -144,17 +143,18 @@ async function storeAsset(request: Request, context: Context, body: Record<strin
   const scope = createHash("sha256").update(JSON.stringify([context.classId, context.assignmentId])).digest("hex");
   const saved: StoredAsset = { publicationId: publication.id, visualId: body.visualId, ownerId, digest, mime: match[1], ...size,
     key: `slide-publications/${scope}/${publication.id}/${body.visualId}-${digest}.${match[1].slice(6)}` };
-  const { client, bucket } = storage();
+  const backend = localMaterialStorageEnabled() ? null : storage();
   try {
-    await client.send(new PutObjectCommand({ Bucket: bucket, Key: saved.key, Body: bytes, ContentType: saved.mime, ContentLength: bytes.length, CacheControl: "private, no-store" }),
+    if (backend) await backend.client.send(new PutObjectCommand({ Bucket: backend.bucket, Key: saved.key, Body: bytes, ContentType: saved.mime, ContentLength: bytes.length, CacheControl: "private, no-store" }),
       { abortSignal: AbortSignal.any([request.signal, AbortSignal.timeout(20_000)]) });
+    else { request.signal.throwIfAborted(); await storeLocalMaterial(saved.key, bytes); }
     try { await workspacePut([{ partition: partition(context.classId), key, value: saved, createOnly: true, expiresAt: publication.expiresAt }]); }
     catch (error) {
       // Simultaneous retries of identical bytes are safe; different uploads cannot overwrite an accepted image.
       const accepted = await workspaceGet<StoredAsset>(partition(context.classId), key);
       if (!accepted || accepted.digest !== digest || accepted.ownerId !== ownerId) throw error;
     }
-  } finally { client.destroy(); }
+  } finally { backend?.client.destroy(); }
   return { publicationId: publication.id, visualId: body.visualId };
 }
 
@@ -188,26 +188,26 @@ async function commitPublication(context: Context, body: Record<string, unknown>
 
 export async function writeSlidePublication(request: Request, body: Record<string, unknown>) {
   const context = await authorizeSlides(request, body);
-  const user = await sessionUser();
-  if (!user || user.role !== "teacher") throw new SlideRequestError("Sign in as a teacher before publishing slides.", 401);
-  if (body.operation === "start") return startPublication(context, body, user.geniusId);
-  if (body.operation === "asset") return storeAsset(request, context, body, user.geniusId);
-  if (body.operation === "commit") return commitPublication(context, body, user.geniusId);
+  if (body.operation === "start") return startPublication(context, body, context.userId);
+  if (body.operation === "asset") return storeAsset(request, context, body, context.userId);
+  if (body.operation === "commit") return commitPublication(context, body, context.userId);
   throw new SlideRequestError("Choose a slide publication operation.");
 }
 
 export async function readSlidePublication(request: Request): Promise<PublishedSlideResponse> {
-  const user = await sessionUser();
-  if (!user) throw new SlideRequestError("Sign in to read these slides.", 401);
-  if (user.role !== "teacher" && user.role !== "student") throw new SlideRequestError("Join this class to read its slides.", 403);
   const query = new URL(request.url).searchParams;
   const classId = query.get("classId"), assignmentId = query.get("assignmentId"), id = query.get("publicationId");
-  if (!classId || classId.length > 160 || !isWorkspaceClass(classId) || !assignmentId || assignmentId.length > 160 || !isSlidePublicationId(id)) throw new SlideRequestError("Open slides from a published class activity.");
-  await workspaceContext(user, classId, assignmentId);
-  const publication = await workspaceGet<Publication>(partition(classId), publicationKey(id));
+  const context = await authorizeSlideAccess(request, { classId, assignmentId }, "read");
+  if (!isSlidePublicationId(id)) throw new SlideRequestError("Open slides from a published class activity.");
+  const publication = await workspaceGet<Publication>(partition(context.classId), publicationKey(id));
   if (!publication || publication.classId !== classId || publication.assignmentId !== assignmentId || !["ready", "published"].includes(publication.state)
     || !isPublishedSlideManifest(publication.manifest) || !await currentlyPublished(publication)) throw new SlideRequestError("These slides are not currently published in this task.", 404);
   const stored = await publicationAssets(publication);
+  if (localMaterialStorageEnabled()) {
+    const assets = Object.fromEntries(await Promise.all(stored.map(async asset => [asset.visualId,
+      { url: await localMaterialUrl(asset.key, asset.mime), width: asset.width, height: asset.height }])));
+    return { publicationId: publication.id, manifest: publication.manifest, assets };
+  }
   const { client, bucket } = storage();
   try {
     const assets = Object.fromEntries(await Promise.all(stored.map(async asset => {

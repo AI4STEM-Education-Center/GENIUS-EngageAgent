@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { decodeJwt } from "jose";
+import { verifySSOToken } from "../auth";
 import { sessionUser, sameOriginRequest } from "../session";
 import { isWorkspaceClass, workspaceContext, WorkspaceError } from "../workspace";
 import { getLessonGenerationContext } from "../lesson-context";
@@ -12,24 +14,64 @@ export class SlideRequestError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
 
-export async function authorizeSlides(request: Request, context: Record<string, unknown>) {
-  const user = await sessionUser();
-  if (!user) throw new SlideRequestError("Sign in to EngageAgent first.", 401);
-  if (user.role !== "teacher") throw new SlideRequestError("Only teachers can create slides.", 403);
+export type AuthorizedSlideContext = { classId: string; assignmentId: string; userId: string };
+
+/** Resolve each request independently so two embedded classes cannot overwrite a global session. */
+export async function authorizeSlideAccess(request: Request, context: Record<string, unknown>, access: "read" | "write"): Promise<AuthorizedSlideContext> {
+  const authorization = request.headers.get("authorization");
+  let user;
+  if (authorization !== null) {
+    // An explicit embedded credential always wins. Never fall back to a possibly
+    // unrelated standalone cookie when the token is invalid or its scope differs.
+    const token = /^Bearer ([^\s]+)$/iu.exec(authorization)?.[1];
+    if (!token || token.length > 16_384) throw new SlideRequestError("Reopen this activity from GENIUS to sign in.", 401);
+    try {
+      user = await verifySSOToken(token);
+      const claims = decodeJwt(token); // Signature, issuer, algorithm and expiry were verified above.
+      // Only GENIUS's membership-checked EngageAgent launch may authorize these
+      // APIs. Generic SSO tokens for other embedded tools are not interchangeable.
+      if (claims.aud !== "engageagent-embed" || typeof claims.exp !== "number" || !Number.isFinite(claims.exp)
+        || typeof claims.iat !== "number" || !Number.isFinite(claims.iat)
+        || claims.exp <= claims.iat || claims.iat > Math.floor(Date.now() / 1000) + 60
+        || typeof user.geniusId !== "string" || !user.geniusId.trim() || user.geniusId.length > 160) throw new Error("Invalid embedded claims");
+    } catch { throw new SlideRequestError("Reopen this activity from GENIUS to sign in.", 401); }
+  } else {
+    user = await sessionUser();
+    if (!user) throw new SlideRequestError("Sign in to EngageAgent first.", 401);
+  }
+  if (access === "write" && user.role !== "teacher") throw new SlideRequestError("Only teachers can create slides.", 403);
   if (request.method !== "GET" && !sameOriginRequest(request)) throw new SlideRequestError("Invalid request origin.", 403);
   const { classId, assignmentId } = context;
-  if (typeof classId !== "string" || classId.length > 160 || !isWorkspaceClass(classId) || typeof assignmentId !== "string" || !assignmentId || assignmentId.length > 160) {
-    throw new SlideRequestError("Open a task in your EngageAgent class first.");
+  if (typeof classId !== "string" || !classId.trim() || classId.length > 160
+    || typeof assignmentId !== "string" || !assignmentId.trim() || assignmentId.length > 160) {
+    throw new SlideRequestError("Open a task in your EngageAgent or GENIUS class first.");
   }
-  await workspaceContext(user, classId, assignmentId);
-  return { classId, assignmentId };
+  if (authorization !== null) {
+    // GENIUS signs host course/task membership. It cannot confer access to
+    // standalone EngageAgent classes, which have their own membership records.
+    if (isWorkspaceClass(classId) || user.classId !== classId || user.assignmentId !== assignmentId) {
+      throw new SlideRequestError("Open this task from its assigned GENIUS class.", 403);
+    }
+  } else {
+    if (!isWorkspaceClass(classId)) throw new SlideRequestError("Open this activity from GENIUS to sign in.", 401);
+    if (user.role !== "teacher" && user.role !== "student") throw new SlideRequestError("Join this class to read its slides.", 403);
+    await workspaceContext(user, classId, assignmentId);
+  }
+  return { classId, assignmentId, userId: user.geniusId };
+}
+
+export async function authorizeSlides(request: Request, context: Record<string, unknown>) {
+  return authorizeSlideAccess(request, context, "write");
 }
 
 // Call only after workspace authorization; provider context contains counts, not identities.
 export async function slideDiagnosticContext(context: { classId: string; assignmentId: string }, lessonNumber: number) {
   const answers = await listStudentAnswers(context.classId, context.assignmentId);
   return summarizeDiagnosticAnswers(lessonNumber, answers
-    .filter(answer => answer.class_id === context.classId && answer.assignment_id === context.assignmentId && answer.lesson_number === lessonNumber)
+    // DynamoDB exposes its physical class partition; local JSON uses the logical ID.
+    // Admit only these two exact representations of the already-authorized scope.
+    .filter(answer => [context.classId, `CLASS#${context.classId}`].includes(answer.class_id)
+      && answer.assignment_id === context.assignmentId && answer.lesson_number === lessonNumber)
     .map(answer => answer.answers));
 }
 

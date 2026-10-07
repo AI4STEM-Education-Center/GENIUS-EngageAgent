@@ -7,8 +7,10 @@ answer quiz questions and rate the content they receive.
 
 The Engage Agent is designed to be embedded inside the
 [GENIUS Learning Platform](https://github.com/AI4STEM-Education-Center/GENIUS_Learning_Platform)
-via an iframe with SSO authentication, but can also run standalone for
-development.
+via an iframe with SSO authentication, and also runs as an independent teacher
+and student platform. Both modes support slide generation, publication, browser
+reading and PPTX downloads. See [GENIUS embedding](docs/genius-embedding.md) for
+the production setup and [standalone sign-in](docs/standalone-sso.md).
 
 ## Features
 

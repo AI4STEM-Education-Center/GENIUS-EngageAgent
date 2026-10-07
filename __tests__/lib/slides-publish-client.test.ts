@@ -1,3 +1,5 @@
+import { clearVerifiedClientAuth, setVerifiedClientAuth } from "@/lib/client-auth";
+import type { UserContext as EmbeddedUserContext } from "@/lib/auth";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { publishSlideDeck } from "@/lib/slides/publish-client";
 import { deckFixture } from "../fixtures/slides";
@@ -117,4 +119,21 @@ it("bounds an unresponsive publishing request without retrying", async () => {
   const rejected = expect(pending).rejects.toThrow("Publishing timed out");
   await vi.advanceTimersByTimeAsync(25_000); await rejected;
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+afterEach(clearVerifiedClientAuth);
+
+it("authorizes every publication stage with the initial exact GENIUS scope", async () => {
+  const host = { classId: "host-class", assignmentId: "host-task" };
+  setVerifiedClientAuth("publish-token", host as EmbeddedUserContext);
+  await publishSlideDeck(deck(), host, new AbortController().signal, () => {
+    setVerifiedClientAuth("changed-token", { ...host, assignmentId: "different-task" } as EmbeddedUserContext);
+  });
+  expect(fetchMock.mock.calls).toHaveLength(5);
+  for (const [url, init] of fetchMock.mock.calls) {
+    expect(url).toBe("/api/slides/publication");
+    expect(init.headers.Authorization).toBe("Bearer publish-token");
+    expect(JSON.parse(init.body)).toMatchObject(host);
+    expect(init.body).not.toContain("publish-token");
+  }
 });

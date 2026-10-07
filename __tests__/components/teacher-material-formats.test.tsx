@@ -2,6 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { clearVerifiedClientAuth, setVerifiedClientAuth } from "@/lib/client-auth";
 import type { UserContext } from "@/lib/auth";
 import type { SlideStrategy } from "@/lib/slides/model";
 import type { SlidesWorkspaceHandle } from "@/app/components/SlidesWorkspace";
@@ -97,7 +98,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { clearVerifiedClientAuth(); cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 it("opens a Slides entry with only the last valid saved strategy without generating", async () => {
   seedDraft({ currentStep: 1, materialFormat: "video", selectedStrategies: supportedStrategies });
@@ -499,4 +500,51 @@ it("carries the actual class rule-based recommendation into the shared material 
   fireEvent.click(generate);
   expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ lessonNumber: 8, strategy: "cognitive conflict" }));
   expect(mocks.fetch.mock.calls.some(([input]) => String(input).includes("cohort-analysis"))).toBe(false);
+});
+
+it("uses the existing material selector, slide editor and publication list for a GENIUS class task", async () => {
+  const host: UserContext = { ...user, classId: "genius-class", assignmentId: "genius-task" };
+  setVerifiedClientAuth("host-class-token", host);
+  seedDraft({ classId: host.classId, assignmentId: host.assignmentId, materialFormat: "slides", classroomContext: "Grade 8 GENIUS class" });
+  localStorage.setItem(`engage-agent:draft:v3:${host.classId}:${host.assignmentId}`, localStorage.getItem(draftKey)!);
+  const originalFetch = mocks.fetch.getMockImplementation()!;
+  mocks.fetch.mockImplementation(async (input: string, init?: RequestInit) => input.startsWith("/api/content-publish") ? reply({ items: [{
+    content_item_id: "host-slides", content_json: JSON.stringify({ id: "host-slides", type: "Slides", title: "GENIUS published slides", body: "", strategy: "analogy", slides: {
+      publicationId: "4e96360b-17a4-4a54-84da-df0c5d2ef012", lessonNumber: 8, slideCount: 6,
+    } }),
+  }] }) : originalFetch(input, init));
+  render(<TeacherView user={host} />);
+  await ready();
+  expect(screen.getByRole("radio", { name: "Slides" })).toBeChecked();
+  expect(screen.getByText("Slide context: lesson 8, analogy")).toBeVisible();
+  expect(await screen.findByRole("button", { name: "Read slides" })).toBeEnabled();
+  expect(mocks.fetch.mock.calls.some(([url, init]) => url.startsWith("/api/content-publish") && init?.headers?.Authorization === "Bearer host-class-token")).toBe(true);
+  const generate = screen.getByRole("button", { name: "Generate materials" });
+  await waitFor(() => expect(generate).toBeEnabled());
+  fireEvent.click(generate);
+  expect(mocks.generate).toHaveBeenCalledWith({ lessonNumber: 8, strategy: "analogy", classroomContext: "Grade 8 GENIUS class", classId: host.classId, assignmentId: host.assignmentId });
+  expect(screen.getByRole("textbox", { name: "Draft for analogy" })).toHaveValue("Generated analogy draft");
+});
+
+it("hydrates an embedded teacher workflow and generates in memory when browser storage is denied", async () => {
+  const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage denied"); });
+  const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage denied"); });
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    const host = { ...user, classId: "host-class", assignmentId: "host-task" };
+    render(<TeacherView user={host} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Energy/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Strategy recommendation/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Analogy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
+    await ready();
+    fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
+    const generate = screen.getByRole("button", { name: "Generate materials" });
+    await waitFor(() => expect(generate).toBeEnabled());
+    fireEvent.click(generate);
+    expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ classId: host.classId, assignmentId: host.assignmentId, lessonNumber: 8, strategy: "analogy" }));
+    expect(screen.getByRole("textbox", { name: "Draft for analogy" })).toHaveValue("Generated analogy draft");
+  } finally {
+    getItem.mockRestore(); setItem.mockRestore(); warn.mockRestore();
+  }
 });

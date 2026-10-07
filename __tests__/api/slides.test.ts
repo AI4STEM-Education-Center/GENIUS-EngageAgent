@@ -160,10 +160,11 @@ describe("authorized slide APIs", () => {
     for (const invalid of [null, [], {}, "x".repeat(4001)]) expect((await image(req({ ...data, feedback: invalid }))).status).toBe(400);
     expect(mocks.generate).toHaveBeenCalledTimes(1);
   });
-  it("uses only authorized lesson-specific aggregate diagnostics without learner identities or answer keys", async () => {
-    const answer = { class_id: base.classId, assignment_id: base.assignmentId, lesson_number: 1, student_id: "private-genius-id", student_name: "Private Learner", answers: { L1_Q1: "D" }, submitted_at: "" };
+  it.each(["local JSON", "DynamoDB"])("uses only authorized lesson-specific %s diagnostics without learner identities or answer keys", async storage => {
+    const answer = { class_id: storage === "DynamoDB" ? `CLASS#${base.classId}` : base.classId, assignment_id: base.assignmentId, lesson_number: 1, student_id: "private-genius-id", student_name: "Private Learner", answers: { L1_Q1: "D" }, submitted_at: "" };
     mocks.answers.mockResolvedValue([answer, { ...answer, student_id: "private-id-two" },
-      { ...answer, lesson_number: 2 }, { ...answer, class_id: "ea-class-other" }, { ...answer, assignment_id: "ea-task-other" }]);
+      { ...answer, lesson_number: 2 }, { ...answer, class_id: "ea-class-other" }, { ...answer, class_id: "CLASS#ea-class-other" },
+      { ...answer, class_id: `CLASS#CLASS#${base.classId}` }, { ...answer, assignment_id: "ea-task-other" }]);
     const data = { ...base, lessonNumber: 1, studentEvidence: { responses: 99999 } };
     expect((await POST(req(data))).status).toBe(200);
     expect(mocks.answers).toHaveBeenCalledWith(base.classId, base.assignmentId);
@@ -263,9 +264,9 @@ describe("authorized slide APIs", () => {
     expect((await check(req({ ...base, draft: slideFixture("cognitive conflict") }))).status).toBe(session ? 403 : 401);
     expect(mocks.complete).not.toHaveBeenCalled(); expect(mocks.generate).not.toHaveBeenCalled();
   });
-  it("rejects foreign origins, legacy contexts and another teacher's task", async () => {
+  it("rejects foreign origins, unsigned host contexts and another teacher's task", async () => {
     expect((await POST(req(base, "https://evil.test"))).status).toBe(403);
-    expect((await POST(req({ ...base, classId: "legacy-class" }))).status).toBe(400);
+    expect((await POST(req({ ...base, classId: "legacy-class" }))).status).toBe(401);
     mocks.context.mockRejectedValue(new WorkspaceError("Forbidden", 403));
     expect((await POST(req())).status).toBe(403);
     expect(mocks.complete).not.toHaveBeenCalled();
@@ -435,7 +436,7 @@ describe("slide quality checks", () => {
   it("rejects URL images, oversized payloads, bad contexts and unsupported models", async () => {
     const data = body();
     expect((await check(req(data, "https://evil.test"))).status).toBe(403);
-    expect((await check(req({ ...data, classId: "legacy" }))).status).toBe(400);
+    expect((await check(req({ ...data, classId: "legacy" }))).status).toBe(401);
     expect((await check(req({ ...data, textModel: "unknown" }))).status).toBe(400);
     expect((await check(req({ ...data, visualId: "unknown" }))).status).toBe(400);
     expect((await check(req({ ...data, visualId: "evidence", asset: { data: "https://example.com/image.jpg", width: 1, height: 1 } }))).status).toBe(422);

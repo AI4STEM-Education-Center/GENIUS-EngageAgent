@@ -1,3 +1,5 @@
+import { scopedClientAuthHeaders } from "../client-auth";
+
 const REQUEST_TIMEOUT_MS = 15_000;
 const SUBMIT_TIMEOUT_MS = 25_000;
 const JOB_TIMEOUT_MS = 8 * 60_000;
@@ -19,7 +21,7 @@ function waitForPoll(milliseconds: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-async function requestJson(path: string, body: object, signal: AbortSignal, timeoutMs: number, onResponse?: (status: number, data: Record<string, unknown>) => void) {
+async function requestJson(path: string, body: object, signal: AbortSignal, timeoutMs: number, headers: Record<string, string>, onResponse?: (status: number, data: Record<string, unknown>) => void) {
   signal.throwIfAborted();
   const request = new AbortController();
   const abort = () => request.abort(signal.reason);
@@ -27,7 +29,7 @@ async function requestJson(path: string, body: object, signal: AbortSignal, time
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; request.abort(); }, timeoutMs);
   try {
-    const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
+    const response = await fetch(path, { method: "POST", headers,
       body: JSON.stringify(body), signal: request.signal, cache: "no-store" });
     let data: unknown;
     try { data = await response.json(); }
@@ -58,6 +60,8 @@ function pendingJob(data: Record<string, unknown>) {
 /** Submit once, then poll that same operation. A transient poll never starts another model request. */
 export async function postSlideRequest<T>(path: string, body: { classId?: string; assignmentId?: string } & object, signal: AbortSignal): Promise<T> {
   signal.throwIfAborted();
+  if (!/^\/api\/slides(?:\/(?:check|image|revise))?$/u.test(path)) throw new Error("Invalid slide operation.");
+  const headers = { "Content-Type": "application/json", ...scopedClientAuthHeaders(body) };
   const deadline = Date.now() + JOB_TIMEOUT_MS;
   let jobId: string | undefined;
   let cancelled = false;
@@ -68,13 +72,13 @@ export async function postSlideRequest<T>(path: string, body: { classId?: string
     const timer = setTimeout(() => controller.abort(), 5000);
     // Best effort on Cancel, context change, unmount, or exhausted polling. This
     // small request has its own signal so cancelling generation does not cancel it.
-    void fetch("/api/slides/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", keepalive: true,
+    void fetch("/api/slides/jobs", { method: "POST", headers, cache: "no-store", keepalive: true,
       body: JSON.stringify({ classId: body.classId, assignmentId: body.assignmentId, jobId, operation: "cancel" }), signal: controller.signal })
       .catch(() => {}).finally(() => clearTimeout(timer));
   };
   signal.addEventListener("abort", cancel, { once: true });
   try {
-    let response = await requestJson(path, body, signal, SUBMIT_TIMEOUT_MS, (status, data) => {
+    let response = await requestJson(path, body, signal, SUBMIT_TIMEOUT_MS, headers, (status, data) => {
       if (status === 202) {
         jobId = pendingJob(data).id;
         // A response may arrive just as the view is cancelled. Capture its ticket
@@ -93,7 +97,7 @@ export async function postSlideRequest<T>(path: string, body: { classId?: string
       if (Date.now() >= deadline) throw new SlideTransportError("This slide step took too long. Your current draft is retained. Retry the current step.");
       try {
         response = await requestJson("/api/slides/jobs", { classId: body.classId, assignmentId: body.assignmentId, jobId }, signal,
-          Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now()));
+          Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now()), headers);
       } catch (error) {
         if (!(error instanceof SlideTransportError) || !error.retryable || ++transientFailures > MAX_POLL_RETRIES) throw error;
         pending = { ...pending, pollAfterMs: Math.min(5000, 1000 * 2 ** transientFailures) };

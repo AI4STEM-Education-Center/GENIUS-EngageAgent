@@ -1,3 +1,4 @@
+import { isSafeMaterialUrl } from "../material-url";
 import { slideElements, type Frame, type ImageElement, type TextElement } from "./layout";
 import { isSlideStrategy, parseDraft, type SlideDeck, type SlideStrategy } from "./model";
 
@@ -64,7 +65,7 @@ export function isPublishedSlideResponse(value: unknown): value is PublishedSlid
   if (Object.keys(value.assets).length !== required.size) return false;
   return Object.entries(value.assets).every(([id, asset]) => {
     if (!required.has(id) || !record(asset) || !keys(asset, ["url", "width", "height"]) || !dimension(asset.width) || !dimension(asset.height) || !string(asset.url, 16_384)) return false;
-    try { const url = new URL(asset.url as string); return url.protocol === "https:" && !url.username && !url.password; } catch { return false; }
+    return isSafeMaterialUrl(asset.url as string);
   });
 }
 

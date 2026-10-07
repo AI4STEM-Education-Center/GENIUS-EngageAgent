@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { clearVerifiedClientAuth, setVerifiedClientAuth } from "@/lib/client-auth";
+import type { UserContext as EmbeddedUserContext } from "@/lib/auth";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import PublishedSlidesReader from "@/app/components/PublishedSlidesReader";
@@ -207,4 +209,52 @@ it("keeps the existing teacher preview's SVG geometry and private notes outside 
   expect(image.getAttribute("x")).toBe(String(planned.frame.left));
   expect(image.getAttribute("height")).toBe(String(planned.frame.height));
   expect(container.textContent).not.toContain("PRIVATE TEACHER PLAN");
+});
+
+afterEach(clearVerifiedClientAuth);
+
+it("reads a GENIUS task with its verified bearer without exposing it in the slide media", async () => {
+  const host = { ...props, classId: "host-class", assignmentId: "host-task" };
+  setVerifiedClientAuth("reader-token", host as unknown as EmbeddedUserContext);
+  const view = render(<PublishedSlidesReader {...host} />);
+  await screen.findByText("Slide 1 of 5");
+  expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer reader-token");
+  expect(fetchMock.mock.calls[0][0]).not.toContain("reader-token");
+  expect(view.container.innerHTML).not.toContain("reader-token");
+  view.rerender(<PublishedSlidesReader {...host} assignmentId="other-task" />);
+  await screen.findByText("Slide 1 of 5");
+  expect(fetchMock.mock.calls.at(-1)![1].headers).not.toHaveProperty("Authorization");
+});
+
+it.each([false, true])("directs an expired verified GENIUS reader to reopen its task (existing slides: %s)", async alreadyLoaded => {
+  const host = { ...props, classId: "host-class", assignmentId: "host-task" };
+  setVerifiedClientAuth("expired-reader-token", host as unknown as EmbeddedUserContext);
+  if (alreadyLoaded) fetchMock.mockResolvedValueOnce(reply(response(deckFixture("experience bridging"))));
+  fetchMock.mockResolvedValue(reply({}, 401));
+  const view = render(<PublishedSlidesReader {...host} />);
+  if (alreadyLoaded) {
+    await screen.findByText("Slide 1 of 5");
+    fireEvent.error(view.container.querySelector("image")!);
+  }
+  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Your GENIUS session is no longer valid. Reopen this task in GENIUS to continue reading the slides.");
+  if (alreadyLoaded) expect(screen.getByText("Slide 1 of 5")).toBeTruthy();
+  expect(fetchMock.mock.calls.at(-1)![1].headers.Authorization).toBe("Bearer expired-reader-token");
+});
+
+it("keeps native sign-in guidance when an unrelated verified GENIUS identity exists", async () => {
+  setVerifiedClientAuth("other-task-token", { classId: "host-class", assignmentId: "host-task" } as EmbeddedUserContext);
+  fetchMock.mockResolvedValue(reply({}, 401));
+  render(<PublishedSlidesReader {...props} />);
+  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Sign in to this class to read these slides.");
+  expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("Authorization");
+});
+
+it("does not treat unverified URL context as a verified GENIUS session", async () => {
+  window.history.replaceState({}, "", "/?classId=host-class&assignmentId=host-task&sso_token=unverified-token");
+  try {
+    fetchMock.mockResolvedValue(reply({}, 401));
+    render(<PublishedSlidesReader {...props} classId="host-class" assignmentId="host-task" />);
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Sign in to this class to read these slides.");
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("Authorization");
+  } finally { window.history.replaceState({}, "", "/"); }
 });
