@@ -4,10 +4,12 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import type { UserContext } from "@/lib/auth";
+import { clearVerifiedClientAuth, setVerifiedClientAuth } from "@/lib/client-auth";
 import {
   getMockUser,
   MOCK_USER_QUERY_PARAM,
@@ -48,7 +50,7 @@ function storeSSOToken(token: string) {
   try {
     window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
   } catch {
-    // Ignore storage failures and fall back to query-param auth only.
+    // The verified identity remains available in memory for this embedded visit.
   }
 }
 
@@ -133,6 +135,7 @@ function parseMockUserFromUrl(): UserContext | null {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const initialUrlToken = useRef<string | null>(null);
   const [state, setState] = useState<AuthState>({
     user: null,
     loading: true,
@@ -140,6 +143,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
+    let active = true;
+    clearVerifiedClientAuth();
     const run = async () => {
       const authenticateToken = async (token: string) => {
         try {
@@ -155,10 +160,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             );
           }
           const data = await res.json();
+          if (!active) return;
           storeSSOToken(token);
+          setVerifiedClientAuth(token, data.user as UserContext);
           clearStoredMockUser();
           setState({ user: data.user as UserContext, loading: false, error: null });
         } catch (err) {
+          if (!active) return;
+          clearVerifiedClientAuth();
           clearStoredSSOToken();
           setState({
             user: null,
@@ -168,7 +177,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       };
 
-      const urlToken = parseSSOFromUrl();
+      // Retain the removed URL credential across React's development effect
+      // replay until verification finishes, without putting it back in the URL.
+      const urlToken = initialUrlToken.current || parseSSOFromUrl();
+      initialUrlToken.current = urlToken;
       if (urlToken) {
         await authenticateToken(urlToken);
         return;
@@ -183,8 +195,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Standalone navigation uses the application's HttpOnly session, not an iframe token.
       try {
         const response = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!active) return;
         if (response.ok) {
           const data = await response.json();
+          if (!active) return;
           if (data.user?.geniusId) {
             clearStoredSSOToken();
             clearStoredMockUser();
@@ -227,6 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState({ user: null, loading: false, error: new URL(window.location.href).searchParams.has("signInError") ? "GENIUS sign-in could not be completed. Please try again." : null });
     };
     run();
+    return () => { active = false; clearVerifiedClientAuth(); };
   }, []);
 
   return <AuthCtx.Provider value={state}>{children}</AuthCtx.Provider>;

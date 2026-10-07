@@ -1604,14 +1604,14 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
   const selectedLessonData =
     lessons.find((lesson) => lesson.lesson_number === selectedLesson) ?? null;
 
-  const nativeSlidesAvailable = classId.startsWith("ea-class-") && Boolean(assignmentId);
+  const slidesAvailable = Boolean(classId && assignmentId);
   const slideStrategies = selectedStrategies.filter((strategy): strategy is SlideStrategy => SLIDE_STRATEGIES.includes(strategy as SlideStrategy));
   const unsupportedSlideStrategies = selectedStrategies.filter((strategy) => !SLIDE_STRATEGIES.includes(strategy as SlideStrategy));
   const generationBusy = loadingContent || Object.values(slideBusy).some(Boolean)
     || Object.values(images).some((state) => state.status === "loading")
     || Object.values(videos).some((state) => state.status === "loading" || state.status === "polling");
   const canGenerateMaterials = isHydrated && !isRestoringStep3State && !generationBusy && Boolean(selectedLesson) && selectedStrategies.length === 1
-    && (materialFormat !== "slides" || (nativeSlidesAvailable && !unsupportedSlideStrategies.length && slideStrategies.every((strategy) => slideReady[strategy])));
+    && (materialFormat !== "slides" || (slidesAvailable && !unsupportedSlideStrategies.length && slideStrategies.every((strategy) => slideReady[strategy])));
   const canPublishSelectedContent = materialFormat !== "slides" && selectedForPublish.size > 0
     && Array.from(selectedForPublish).every((id) => content.some((item) => item.id === id)
       && (materialFormat === "video" ? videos[id]?.status === "ready" && Boolean(getEmbeddablePublishedMediaUrl(videos[id]?.url))
@@ -2081,7 +2081,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                   {generationBusy ? "Generating materials..." : "Generate materials"}
                 </button>
               </div>
-              {materialFormat === "slides" && !nativeSlidesAvailable && <p role="status" className="text-sm text-amber-800">Slides are available in the teacher workspace. Open a class and task from My classes to generate slides.</p>}
+              {materialFormat === "slides" && !slidesAvailable && <p role="status" className="text-sm text-amber-800">Open a class task in GENIUS or My classes to generate slides.</p>}
               {materialFormat === "slides" && unsupportedSlideStrategies.length > 0 && <p role="status" className="text-sm text-amber-800">Slides do not yet support {unsupportedSlideStrategies.map(getStrategyLabel).join(", ")}. Change the strategy in Step 2, or choose Text + Image or Video.</p>}
               {(!selectedLesson || !selectedStrategies.length) && <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
                 <span>Complete your material settings:</span>
@@ -2090,9 +2090,9 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
               </div>}
 
               <div hidden={materialFormat !== "slides"} className={materialFormat === "slides" ? "grid gap-6" : "hidden"}>
-                {nativeSlidesAvailable && materialFormat === "slides" && <PublishedSlidesList
+                {slidesAvailable && materialFormat === "slides" && <PublishedSlidesList
                   key={`${classId}:${assignmentId}`} classId={classId} assignmentId={assignmentId} refreshVersion={slidesPublicationVersion} />}
-                {isHydrated && nativeSlidesAvailable && selectedLesson && slideStrategies.map((strategy) => (
+                {isHydrated && slidesAvailable && selectedLesson && slideStrategies.map((strategy) => (
                   <SlidesWorkspace key={`${classId}:${assignmentId}:${selectedLesson}:${strategy}`} user={user}
                     ref={(editor) => { slideEditorsRef.current[strategy] = editor; }}
                     embeddedContext={{ lessonNumber: selectedLesson, strategy, classroomContext }}

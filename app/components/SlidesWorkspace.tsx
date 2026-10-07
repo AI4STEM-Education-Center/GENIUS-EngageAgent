@@ -15,6 +15,7 @@ import { analogyMappingIndex, resolveAnalogyMethod } from "@/lib/slides/analogy-
 import { loadSlideDraft, saveSlideDraft, slideDraftKey } from "@/lib/slides/draft-storage";
 import { postSlideRequest } from "@/lib/slides/client-transport";
 import { publishSlideDeck } from "@/lib/slides/publish-client";
+import { scopedClientAuthHeaders } from "@/lib/client-auth";
 
 const input = "w-full min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-2 focus:outline-teal-700 disabled:opacity-50";
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium hover:bg-gray-100 disabled:opacity-50";
@@ -54,7 +55,9 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const [preparedDownload, setPreparedDownload] = useState<{ url: string; dataUri?: string; httpUrl?: string; fileName: string; deck: SlideDeck } | null>(null);
   const exportRequest = useRef(0);
   const exportJob = useRef<AbortController | null>(null);
+  const exportDeck = useRef<SlideDeck | null>(null);
   const publishJob = useRef<AbortController | null>(null);
+  const publishingDeck = useRef<SlideDeck | null>(null);
   const [publishedDeck, setPublishedDeck] = useState<SlideDeck | null>(null);
   const [feedback, setFeedback] = useState("");
   const [reload, setReload] = useState(0);
@@ -76,7 +79,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   useEffect(() => {
     const controller = new AbortController();
     setCatalogLoaded(false);
-    fetch(`/api/slides?${new URLSearchParams({ classId: classId || "", assignmentId: assignmentId || "" })}`, { signal: controller.signal, cache: "no-store" })
+    fetch(`/api/slides?${new URLSearchParams({ classId: classId || "", assignmentId: assignmentId || "" })}`, { headers: scopedClientAuthHeaders({ classId, assignmentId }), signal: controller.signal, cache: "no-store" })
       .then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error || "Unable to load lessons."); return data as { lessons: SlideLesson[]; models?: SlideModelCatalog }; })
       .then(value => { if (!controller.signal.aborted) { setLessons(value.lessons); setModels(value.models || INITIAL_MODEL_CATALOG); if (!embedded) setLessonNumber(value.lessons[0]?.lessonNumber ?? 1); setCatalogLoaded(true); setError(""); } })
       .catch(err => { if (!controller.signal.aborted) setError(err.message); });
@@ -113,8 +116,10 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     return () => { active = false; };
   }, [deck, restoredScope, scope]);
   useEffect(() => () => { job.current?.abort(); }, []);
-  useEffect(() => () => { exportRequest.current++; exportJob.current?.abort(); }, [deck]);
-  useEffect(() => () => { publishJob.current?.abort(); }, [deck]);
+  // Passive cleanup for the previous deck can run after the restored deck is
+  // already interactive. Cancel only an operation owned by that previous deck.
+  useEffect(() => () => { if (exportDeck.current === deck) { exportRequest.current++; exportJob.current?.abort(); } }, [deck]);
+  useEffect(() => () => { if (publishingDeck.current === deck) publishJob.current?.abort(); }, [deck]);
   useEffect(() => { if (publishedDeck && publishedDeck !== deck) setPublishedDeck(null); }, [deck, publishedDeck]);
   useEffect(() => () => { if (preparedDownload) URL.revokeObjectURL(preparedDownload.url); }, [preparedDownload]);
   useEffect(() => {
@@ -318,7 +323,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   async function download() {
     if (!deck || !ready || busy || exportJob.current) return;
     const request = ++exportRequest.current;
-    const controller = new AbortController(); exportJob.current = controller;
+    const controller = new AbortController(); exportJob.current = controller; exportDeck.current = deck;
     setPreparedDownload(null);
     setBusy(true); setError(""); setStatus("Preparing PowerPoint...");
     try {
@@ -327,11 +332,11 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       setPreparedDownload({ ...file, deck });
       setDownloaded(true); setStatus("PowerPoint ready. If downloading did not start, use Save PPTX file.");
     } catch (err) { if (!controller.signal.aborted) { setError(err instanceof Error ? err.message : "Download failed."); setStatus(""); } }
-    finally { if (exportJob.current === controller) { exportJob.current = null; setBusy(false); } }
+    finally { if (exportJob.current === controller) { exportJob.current = null; exportDeck.current = null; setBusy(false); } }
   }
   async function publish() {
     if (!deck || !ready || busy || publishJob.current || publishedDeck === deck || !classId || !assignmentId) return;
-    const controller = new AbortController(); publishJob.current = controller;
+    const controller = new AbortController(); publishJob.current = controller; publishingDeck.current = deck;
     setBusy(true); setError("");
     try {
       await publishSlideDeck(deck, { classId, assignmentId }, controller.signal, setStatus);
@@ -341,7 +346,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       onPublished?.();
     } catch (err) {
       if (!controller.signal.aborted) { setError(err instanceof Error ? err.message : "Unable to send slides. Your draft is retained; try again."); setStatus(""); }
-    } finally { if (publishJob.current === controller) { publishJob.current = null; setBusy(false); } }
+    } finally { if (publishJob.current === controller) { publishJob.current = null; publishingDeck.current = null; setBusy(false); } }
   }
   const missingImages = deck?.draft.visuals.some(visual => !isSlideAsset(deck.assets[visual.id]));
   const slide = deck?.draft.slides[index];

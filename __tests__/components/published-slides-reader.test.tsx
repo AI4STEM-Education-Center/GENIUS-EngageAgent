@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { clearVerifiedClientAuth, setVerifiedClientAuth } from "@/lib/client-auth";
+import type { UserContext as EmbeddedUserContext } from "@/lib/auth";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import PublishedSlidesReader from "@/app/components/PublishedSlidesReader";
@@ -207,4 +209,19 @@ it("keeps the existing teacher preview's SVG geometry and private notes outside 
   expect(image.getAttribute("x")).toBe(String(planned.frame.left));
   expect(image.getAttribute("height")).toBe(String(planned.frame.height));
   expect(container.textContent).not.toContain("PRIVATE TEACHER PLAN");
+});
+
+afterEach(clearVerifiedClientAuth);
+
+it("reads a GENIUS task with its verified bearer without exposing it in the slide media", async () => {
+  const host = { ...props, classId: "host-class", assignmentId: "host-task" };
+  setVerifiedClientAuth("reader-token", host as unknown as EmbeddedUserContext);
+  const view = render(<PublishedSlidesReader {...host} />);
+  await screen.findByText("Slide 1 of 5");
+  expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer reader-token");
+  expect(fetchMock.mock.calls[0][0]).not.toContain("reader-token");
+  expect(view.container.innerHTML).not.toContain("reader-token");
+  view.rerender(<PublishedSlidesReader {...host} assignmentId="other-task" />);
+  await screen.findByText("Slide 1 of 5");
+  expect(fetchMock.mock.calls.at(-1)![1].headers).not.toHaveProperty("Authorization");
 });

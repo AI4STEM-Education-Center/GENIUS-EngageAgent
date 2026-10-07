@@ -1,4 +1,5 @@
 import type { SlideDeck } from "./model";
+import { scopedClientAuthHeaders } from "../client-auth";
 import { isPublishedSlideReference, isSlidePublicationId, type PublishedSlideReference } from "./publication";
 
 const REQUEST_TIMEOUT_MS = 25_000;
@@ -10,7 +11,7 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 
 export type SlidePublicationResult = { publicationId: string; contentItemId: string; slides: PublishedSlideReference };
 
-async function post(body: object, signal: AbortSignal): Promise<Record<string, unknown>> {
+async function post(body: object, signal: AbortSignal, headers: Record<string, string>): Promise<Record<string, unknown>> {
   signal.throwIfAborted();
   const controller = new AbortController();
   const abort = () => controller.abort(signal.reason);
@@ -18,7 +19,7 @@ async function post(body: object, signal: AbortSignal): Promise<Record<string, u
   let timedOut = false;
   const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" },
+    const response = await fetch(endpoint, { method: "POST", headers,
       body: JSON.stringify(body), signal: controller.signal, cache: "no-store" });
     let data: unknown;
     try { data = await response.json(); }
@@ -41,6 +42,7 @@ export async function publishSlideDeck(deck: SlideDeck, scope: { classId: string
   onProgress?: (message: string) => void): Promise<SlidePublicationResult> {
   signal.throwIfAborted();
   if (!scope.classId || !scope.assignmentId) throw new Error("Open a class task before sending slides.");
+  const headers = { "Content-Type": "application/json", ...scopedClientAuthHeaders(scope) };
   const visuals = deck.draft.visuals;
   if (!visuals.length || visuals.some(visual => !deck.assets[visual.id]?.data)) {
     throw new Error("Finish generating every slide image before sending slides.");
@@ -59,20 +61,20 @@ export async function publishSlideDeck(deck: SlideDeck, scope: { classId: string
   }));
   onProgress?.("Preparing slides for students...");
   const started = await post({ ...scope, operation: "start", deckId: deck.id, lessonNumber: deck.lessonNumber,
-    strategy: deck.strategy, draft: deck.draft, assets }, signal);
+    strategy: deck.strategy, draft: deck.draft, assets }, signal, headers);
   if (!isSlidePublicationId(started.publicationId)) throw new Error("The server did not prepare a slide publication. Please try again.");
   const id = started.publicationId;
   for (const [index, visual] of visuals.entries()) {
     onProgress?.(`Uploading slide image ${index + 1} of ${visuals.length}...`);
     const { data, width, height } = deck.assets[visual.id];
     const uploaded = await post({ ...scope, operation: "asset", publicationId: id, visualId: visual.id,
-      asset: { data, width, height } }, signal);
+      asset: { data, width, height } }, signal, headers);
     if (uploaded.publicationId !== id || uploaded.visualId !== visual.id) {
       throw new Error("A slide image could not be confirmed. Your draft is retained; try sending it again.");
     }
   }
   onProgress?.("Making the slides available to students...");
-  const result = await post({ ...scope, operation: "commit", publicationId: id }, signal);
+  const result = await post({ ...scope, operation: "commit", publicationId: id }, signal, headers);
   if (result.publicationId !== id || result.contentItemId !== `slides-${deck.id}` || !isPublishedSlideReference(result.slides)
     || result.slides.publicationId !== id || result.slides.lessonNumber !== deck.lessonNumber || result.slides.slideCount !== deck.draft.slides.length) {
     throw new Error("The server did not confirm the published slides. Your draft is retained; try sending it again.");

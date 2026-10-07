@@ -263,9 +263,9 @@ describe("authorized slide APIs", () => {
     expect((await check(req({ ...base, draft: slideFixture("cognitive conflict") }))).status).toBe(session ? 403 : 401);
     expect(mocks.complete).not.toHaveBeenCalled(); expect(mocks.generate).not.toHaveBeenCalled();
   });
-  it("rejects foreign origins, legacy contexts and another teacher's task", async () => {
+  it("rejects foreign origins, unsigned host contexts and another teacher's task", async () => {
     expect((await POST(req(base, "https://evil.test"))).status).toBe(403);
-    expect((await POST(req({ ...base, classId: "legacy-class" }))).status).toBe(400);
+    expect((await POST(req({ ...base, classId: "legacy-class" }))).status).toBe(401);
     mocks.context.mockRejectedValue(new WorkspaceError("Forbidden", 403));
     expect((await POST(req())).status).toBe(403);
     expect(mocks.complete).not.toHaveBeenCalled();
@@ -435,7 +435,7 @@ describe("slide quality checks", () => {
   it("rejects URL images, oversized payloads, bad contexts and unsupported models", async () => {
     const data = body();
     expect((await check(req(data, "https://evil.test"))).status).toBe(403);
-    expect((await check(req({ ...data, classId: "legacy" }))).status).toBe(400);
+    expect((await check(req({ ...data, classId: "legacy" }))).status).toBe(401);
     expect((await check(req({ ...data, textModel: "unknown" }))).status).toBe(400);
     expect((await check(req({ ...data, visualId: "unknown" }))).status).toBe(400);
     expect((await check(req({ ...data, visualId: "evidence", asset: { data: "https://example.com/image.jpg", width: 1, height: 1 } }))).status).toBe(422);

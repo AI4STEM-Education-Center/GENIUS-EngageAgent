@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
-import { sessionUser } from "../session";
 import { workspaceGet, workspacePut } from "../workspace-store";
 import type { SlideDraft, SlideStrategy } from "./model";
 import type { AnalogyMethod } from "./analogy-methods";
@@ -8,7 +7,7 @@ import type { SlidePromptProvenance } from "./prompt-versions";
 import { SIX_STEP_CONTEXT_FIELDS } from "./analogy";
 import { existingGenerationKey } from "./model-config";
 import { parseTextFindings } from "./review";
-import { authorizeSlides, requestDraft, slideJson, SlideRequestError } from "./server";
+import { authorizeSlides, requestDraft, slideJson, SlideRequestError, type AuthorizedSlideContext } from "./server";
 
 export type SlideJobSpec =
   | { kind: "draft"; model: string; strategy: SlideStrategy; analogyMethod?: AnalogyMethod; promptProvenance: SlidePromptProvenance }
@@ -48,20 +47,17 @@ function boundedSpec(spec: SlideJobSpec): SlideJobSpec {
   return JSON.parse(serialized) as SlideJobSpec;
 }
 
-export async function beginSlideJob(request: Request, authorized: Context,
+export async function beginSlideJob(request: Request, authorized: AuthorizedSlideContext,
   params: OpenAI.Responses.ResponseCreateParamsNonStreaming, spec: SlideJobSpec) {
-  const user = await sessionUser();
-  if (!user) throw new SlideRequestError("Sign in to EngageAgent first.", 401);
-  if (user.role !== "teacher") throw new SlideRequestError("Only teachers can create slides.", 403);
   const metadata = boundedSpec(spec);
   const expiresAt = Math.floor(Date.now() / 1000) + SLIDE_JOB_TTL_SECONDS;
   const provider = client();
   const response = await provider.responses.create({ ...params, background: true, store: false, stream: false }, { signal: request.signal });
   if (typeof response.id !== "string" || !response.id || response.id.length > 256) throw new SlideRequestError("The model did not start slide generation. Please try again.", 502);
   const id = randomUUID();
-  const record: SlideJob = { ...authorized, ownerId: user.geniusId, providerResponseId: response.id, expiresAt, spec: metadata };
+  const record: SlideJob = { classId: authorized.classId, assignmentId: authorized.assignmentId, ownerId: authorized.userId, providerResponseId: response.id, expiresAt, spec: metadata };
   try {
-    await workspacePut([{ partition: partition(user.geniusId), key: jobKey(id), value: record, createOnly: true, expiresAt }]);
+    await workspacePut([{ partition: partition(authorized.userId), key: jobKey(id), value: record, createOnly: true, expiresAt }]);
   } catch (error) {
     // A ticket that could not be persisted must not leave unnecessary work running.
     try { await provider.responses.cancel(response.id, { timeout: 2000 }); } catch { /* best effort */ }
@@ -109,14 +105,12 @@ export async function pollSlideJob(request: Request, body: Record<string, unknow
   const context = await authorizeSlides(request, body);
   if (typeof body.jobId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(body.jobId)) throw new SlideRequestError("Choose a valid slide generation job.");
   if (body.operation !== undefined && body.operation !== "cancel") throw new SlideRequestError("Unsupported slide job operation.");
-  const user = await sessionUser();
-  if (!user) throw new SlideRequestError("Sign in to EngageAgent first.", 401);
-  const stored = await workspaceGet<SlideJob>(partition(user.geniusId), jobKey(body.jobId));
-  if (!stored || stored.ownerId !== user.geniusId || stored.classId !== context.classId || stored.assignmentId !== context.assignmentId) throw new SlideRequestError("Slide generation job not found.", 404);
+  const stored = await workspaceGet<SlideJob>(partition(context.userId), jobKey(body.jobId));
+  if (!stored || stored.ownerId !== context.userId || stored.classId !== context.classId || stored.assignmentId !== context.assignmentId) throw new SlideRequestError("Slide generation job not found.", 404);
   if (!Number.isFinite(stored.expiresAt) || stored.expiresAt <= Math.floor(Date.now() / 1000)) return terminal("This slide generation job expired. Your current draft is unchanged. Please try again.", 410);
   if (body.operation === "cancel") {
     if (!stored.cancelled) {
-      await workspacePut([{ partition: partition(user.geniusId), key: jobKey(body.jobId), value: { ...stored, cancelled: true }, expiresAt: stored.expiresAt }]);
+      await workspacePut([{ partition: partition(context.userId), key: jobKey(body.jobId), value: { ...stored, cancelled: true }, expiresAt: stored.expiresAt }]);
       try { await client().responses.cancel(stored.providerResponseId, { timeout: 10_000 }); } catch { /* Cancellation is best effort; never expose provider errors. */ }
     }
     return slideJson({ cancelled: true });

@@ -28,6 +28,10 @@ context and open the original workflow. An iframe's context is not converted
 into permission to edit independent classes. Development mock identities cannot
 access the independent workspace API and are disabled in the production client.
 
+The same teacher/student slide workflow is also available inside assigned
+GENIUS tasks. See [GENIUS embedding](genius-embedding.md) for the URL setup,
+scoped bearer authentication and provider rollout requirements.
+
 ## Class and task storage
 
 Independent classes and enrollments use the existing DynamoDB table under

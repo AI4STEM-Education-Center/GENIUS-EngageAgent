@@ -1,3 +1,5 @@
+import { clearVerifiedClientAuth, setVerifiedClientAuth } from "@/lib/client-auth";
+import type { UserContext as EmbeddedUserContext } from "@/lib/auth";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { postSlideRequest } from "@/lib/slides/client-transport";
 
@@ -100,5 +102,34 @@ it("applies a short HTTP deadline to creation without restarting the provider re
   fetchMock.mockImplementation((_path, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason))));
   const failure = expect(postSlideRequest("/api/slides", body, new AbortController().signal)).rejects.toThrow("connection timed out");
   await vi.advanceTimersByTimeAsync(25_000); await failure;
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+afterEach(clearVerifiedClientAuth);
+
+it("retains the original scoped bearer for polling and cancellation when the active task changes", async () => {
+  const host = { ...body, classId: "host-class", assignmentId: "host-task" };
+  setVerifiedClientAuth("original-token", host as unknown as EmbeddedUserContext);
+  fetchMock.mockResolvedValueOnce(pending()).mockResolvedValueOnce(pending()).mockResolvedValue(reply({ cancelled: true }));
+  const controller = new AbortController();
+  const failure = expect(postSlideRequest("/api/slides", host, controller.signal)).rejects.toThrow();
+  await vi.advanceTimersByTimeAsync(0);
+  setVerifiedClientAuth("other-task-token", { ...host, assignmentId: "other-task" } as unknown as EmbeddedUserContext);
+  await vi.advanceTimersByTimeAsync(2000);
+  controller.abort(); await failure;
+  expect(fetchMock.mock.calls).toHaveLength(3);
+  for (const [, init] of fetchMock.mock.calls) {
+    expect(init.headers.Authorization).toBe("Bearer original-token");
+    expect(JSON.parse(init.body)).toMatchObject({ classId: host.classId, assignmentId: host.assignmentId });
+  }
+  expect(calls().at(-1)?.body.operation).toBe("cancel");
+});
+
+it("never forwards an embedded bearer to native tasks or a remote operation URL", async () => {
+  setVerifiedClientAuth("embedded-secret", { classId: "host-class", assignmentId: "host-task" } as unknown as EmbeddedUserContext);
+  fetchMock.mockResolvedValue(reply({ issues: [] }));
+  await postSlideRequest("/api/slides/check", body, new AbortController().signal);
+  expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("Authorization");
+  await expect(postSlideRequest("https://other.example/api/slides", body, new AbortController().signal)).rejects.toThrow("Invalid slide operation");
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });

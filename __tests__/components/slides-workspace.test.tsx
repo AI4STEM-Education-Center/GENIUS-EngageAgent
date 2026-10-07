@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { clearVerifiedClientAuth, setVerifiedClientAuth } from "@/lib/client-auth";
+import type { UserContext as EmbeddedUserContext } from "@/lib/auth";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -783,4 +785,24 @@ it("retains the first image and permits sending when optional automatic image re
   await screen.findByRole("button", { name: "Published" });
   expect(mocks.publish.mock.calls[0][0].assets.target.data).toBe(asset.data);
   expect(mocks.publish.mock.calls[0][0].assets.variation.referenceData).toBe(asset.data);
+});
+
+afterEach(clearVerifiedClientAuth);
+
+it("loads and generates GENIUS slides using verified class/task authorization and keeps text editing", async () => {
+  const host: EmbeddedUserContext = { ...user, classId: "host-class", assignmentId: "host-task" };
+  setVerifiedClientAuth("workspace-token", host);
+  render(<SlidesWorkspace user={host} />);
+  await screen.findByRole("option", { name: "8. Energy" });
+  await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
+  await screen.findByText("5 slides ready to send.");
+  expect(mocks.fetch.mock.calls.length).toBeGreaterThan(3);
+  for (const [url, init] of mocks.fetch.mock.calls) {
+    expect(init.headers.Authorization).toBe("Bearer workspace-token");
+    expect(url).not.toContain("workspace-token");
+  }
+  await act(async () => { fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "Embedded teacher edit" } }); });
+  expect((screen.getByLabelText("Slide title") as HTMLInputElement).value).toBe("Embedded teacher edit");
+  expect((screen.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(false);
 });

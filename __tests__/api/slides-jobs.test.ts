@@ -10,6 +10,7 @@ vi.mock("@/lib/workspace", async original => ({ ...await original<object>(), wor
 vi.mock("@/lib/workspace-store", () => ({ workspaceGet: mocks.get, workspacePut: mocks.put }));
 import { POST } from "@/app/api/slides/jobs/route";
 import { beginSlideJob, finishSlideJob, SLIDE_JOB_TTL_SECONDS, type SlideJobSpec } from "@/lib/slides/jobs";
+import { authorizeSlides } from "@/lib/slides/server";
 import { WorkspaceError } from "@/lib/workspace";
 import { slideFixture } from "../fixtures/slides";
 import { sixStepDraft } from "../fixtures/analogy-six-step";
@@ -21,7 +22,7 @@ const draftSpec: SlideJobSpec = { kind: "draft", model: "gpt-6.1-sol", strategy:
 const records = new Map<string, Record<string, unknown>>();
 const request = (data: unknown, origin = "http://localhost") => new Request("http://localhost/api/slides/jobs", { method: "POST", headers: { "Content-Type": "application/json", origin }, body: JSON.stringify(data) });
 const completed = (value: unknown, extra = {}) => ({ id: "resp_private_provider_id", status: "completed", output_text: JSON.stringify(value), output: [], error: null, incomplete_details: null, ...extra }) as unknown as OpenAI.Responses.Response;
-const start = (spec: SlideJobSpec = draftSpec) => beginSlideJob(request(context), context, { model: "gpt-6.1-sol", input: "Private request data", background: false, store: true }, spec);
+const start = async (spec: SlideJobSpec = draftSpec) => beginSlideJob(request(context), await authorizeSlides(request(context), context), { model: "gpt-6.1-sol", input: "Private request data", background: false, store: true }, spec);
 const ticket = async (spec: SlideJobSpec = draftSpec) => (await (await start(spec)).json()).job.id as string;
 const poll = (jobId: string, more = {}, origin?: string) => POST(request({ ...context, jobId, ...more }, origin));
 
@@ -63,7 +64,7 @@ describe("durable owner-bound slide jobs", () => {
     const draft = slideFixture("cognitive conflict"); mocks.retrieve.mockResolvedValue(completed(draft));
     const response = await poll(id);
     expect(response.status).toBe(200); expect(await response.json()).toEqual({ draft, model: draftSpec.model, promptProvenance: provenance });
-    expect(mocks.context).toHaveBeenCalledTimes(3);
+    expect(mocks.context).toHaveBeenCalledTimes(4);
     expect(mocks.retrieve).toHaveBeenLastCalledWith("resp_private_provider_id", { stream: false }, { timeout: 10_000, signal: expect.any(AbortSignal) });
     expect(mocks.put).toHaveBeenCalledTimes(1); // No result images or response bodies persisted.
   });

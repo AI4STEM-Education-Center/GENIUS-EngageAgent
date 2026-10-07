@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
+import { StrictMode } from "react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import { AuthProvider, useAuth } from "@/app/components/AuthContext";
 
 const fetchMock = vi.fn();
@@ -58,6 +60,7 @@ describe("AuthProvider", () => {
       body: JSON.stringify({ token: "fresh-token" }),
     });
     expect(window.sessionStorage.getItem(storageKey)).toBe("fresh-token");
+    expect(scopedClientAuthHeaders(teacher)).toEqual({ Authorization: "Bearer fresh-token" });
     expect(window.location.search).toBe("?lesson=2");
     expect(window.location.hash).toBe("#quiz");
   });
@@ -104,6 +107,7 @@ describe("AuthProvider", () => {
     expect((await settled()).user).toEqual(identity);
     expect(window.sessionStorage.getItem(storageKey)).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(scopedClientAuthHeaders(teacher)).toEqual({});
   });
 
   it("does not use legacy credentials to enter a standalone workspace", async () => {
@@ -113,4 +117,28 @@ describe("AuthProvider", () => {
     expect((await settled()).user).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+});
+
+it("keeps verified embedded API auth working in memory when third-party storage is disabled", async () => {
+  window.history.replaceState({}, "", "/?sso_token=memory-only-token");
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage denied"); });
+  vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage denied"); });
+  fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: teacher }) });
+  const view = mount();
+  expect((await settled()).user).toEqual(teacher);
+  expect(scopedClientAuthHeaders(teacher)).toEqual({ Authorization: "Bearer memory-only-token" });
+  expect(window.location.search).toBe("");
+  view.unmount();
+  expect(scopedClientAuthHeaders(teacher)).toEqual({});
+});
+
+
+it("verifies the original URL token during React effect replay without reviving an inactive request", async () => {
+  window.history.replaceState({}, "", "/?sso_token=replay-token");
+  fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: teacher }) });
+  render(<StrictMode><AuthProvider><AuthProbe /></AuthProvider></StrictMode>);
+  expect((await settled()).user).toEqual(teacher);
+  expect(scopedClientAuthHeaders(teacher)).toEqual({ Authorization: "Bearer replay-token" });
+  expect(window.location.search).toBe("");
+  expect(fetchMock.mock.calls.every(([url]) => url === "/api/auth/verify")).toBe(true);
 });

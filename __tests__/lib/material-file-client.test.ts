@@ -1,3 +1,5 @@
+import { clearVerifiedClientAuth, setVerifiedClientAuth } from "@/lib/client-auth";
+import type { UserContext as EmbeddedUserContext } from "@/lib/auth";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MAX_MATERIAL_FILE_BYTES, uploadMaterialFile } from "@/lib/material-file-client";
 
@@ -68,4 +70,16 @@ it("propagates explicit cancellation instead of turning it into a stale local do
   finish({ ok: true, json: async () => ({ url: "https://files.example.test/stale", fileName: "Material.html" }) });
   await failure;
   expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+});
+
+afterEach(clearVerifiedClientAuth);
+
+it("authorizes scoped GENIUS uploads without placing the bearer in the downloadable URL", async () => {
+  const host = { classId: "host-class", assignmentId: "host-task" };
+  setVerifiedClientAuth("file-token", host as EmbeddedUserContext);
+  fetchMock.mockResolvedValue({ ok: true, json: async () => ({ url: "https://files.example.test/material.html", fileName: "Material.html" }) });
+  const result = await uploadMaterialFile(new Blob(["file"], { type: "text/html" }), "Material.html", host);
+  expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer file-token");
+  expect(fetchMock.mock.calls[0][0]).not.toContain("file-token");
+  expect(result?.url).not.toContain("file-token");
 });

@@ -1,3 +1,5 @@
+import { scopedClientAuthHeaders } from "./client-auth";
+
 export type MaterialFileScope = { classId?: string; assignmentId?: string };
 export const MAX_MATERIAL_FILE_BYTES = 4_400_000;
 
@@ -12,7 +14,7 @@ export async function uploadMaterialFile(blob: Blob, fileName: string, scope?: M
   const timeout = setTimeout(() => controller.abort(), 25_000);
   try {
     const query = new URLSearchParams({ classId: scope.classId, assignmentId: scope.assignmentId, fileName });
-    const response = await fetch(`/api/material-files?${query}`, { method: "POST", headers: { "Content-Type": blob.type },
+    const response = await fetch(`/api/material-files?${query}`, { method: "POST", headers: { "Content-Type": blob.type, ...scopedClientAuthHeaders(scope) },
       body: blob, signal: controller.signal, cache: "no-store" });
     signal?.throwIfAborted();
     if (!response.ok) return undefined;

@@ -5,6 +5,7 @@ import { buildPublishedContentState, type PublishedItemResponse } from "@/lib/pu
 import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
 import type { ContentItem } from "@/lib/types";
 import PublishedSlidesReader from "./PublishedSlidesReader";
+import { scopedClientAuthHeaders } from "@/lib/client-auth";
 
 export default function PublishedSlidesList({ classId, assignmentId, refreshVersion }: {
   classId: string; assignmentId: string; refreshVersion: number;
@@ -18,7 +19,7 @@ export default function PublishedSlidesList({ classId, assignmentId, refreshVers
     async function load() {
       try {
         const query = new URLSearchParams({ classId, assignmentId });
-        const response = await fetch(`/api/content-publish?${query}`, { cache: "no-store", signal: controller.signal });
+        const response = await fetch(`/api/content-publish?${query}`, { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store", signal: controller.signal });
         if (!response.ok) throw new Error("Published slides could not be loaded.");
         const data = await response.json() as { items?: PublishedItemResponse[] };
         if (controller.signal.aborted) return;

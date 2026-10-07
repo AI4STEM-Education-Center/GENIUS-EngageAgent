@@ -35,7 +35,7 @@ it.each(["gpt-4.1", "gpt-5-mini", "gpt-6-astra", "gpt-6.1-sol"])("submits %s dra
   expect(await response.json()).toEqual(pending);
   const [passedRequest, context, parameters, spec] = mocks.begin.mock.calls[0];
   expect(passedRequest).toBe(req);
-  expect(context).toEqual({ classId: base.classId, assignmentId: base.assignmentId });
+  expect(context).toEqual({ classId: base.classId, assignmentId: base.assignmentId, userId: "teacher-test" });
   const source = await loadSlideSource("cognitive conflict");
   const expected = slidePrompt(getLessonGenerationContext(3)!, "cognitive conflict", undefined, undefined,
     { responses: 0, selections: [] }, { version: "optimized", referenceText: source.text, classroomContext: "" });
