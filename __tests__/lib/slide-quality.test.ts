@@ -1,7 +1,10 @@
 import { expect, it } from "vitest";
-import { hasTeacherDecision, imageCheckKey, preservedAssets, qualityErrors, teachingErrors, textCheckKey } from "@/lib/slides/quality";
+import JSZip from "jszip";
+import { hasTeacherDecision, imageCheckKey, preservedAssets, qualityErrors, reviewFindings, teachingErrors, textCheckKey } from "@/lib/slides/quality";
 import { slideImagePrompt, slideCheckPrompt } from "@/lib/slides/prompts";
 import { exportErrors } from "@/lib/slides/layout";
+import { buildPresentationBytes } from "@/lib/slides/export";
+import { projectPublishedSlides } from "@/lib/slides/publication";
 import { SLIDE_CONTRACT_VERSION } from "@/lib/slides/model";
 import { deckFixture, slideFixture } from "../fixtures/slides";
 
@@ -55,14 +58,43 @@ it("invalidates checks after prose, image plan or actual image changes", () => {
   swapped.assets.target.data = swapped.assets.target.data.replace("png", "jpeg");
   expect(qualityErrors(swapped).join()).toContain("visual check pending");
 });
-it("blocks direct exports with missing, failed or stale reviews, not only the UI button", () => {
+it("blocks direct exports with missing or stale checks, missing images and hard output-rule failures", () => {
   const deck = deckFixture("analogy");
   const measure = (text: string) => text.length;
   deck.checks = undefined;
   expect(exportErrors(deck, measure).join()).toContain("quality check pending");
+  const stale = deckFixture("analogy");
+  stale.checks!.images.target.key = "earlier-version";
+  expect(exportErrors(stale, measure)).toContain("Image target: visual check pending after generation or edits.");
+  const missing = deckFixture("analogy");
+  delete missing.assets.target;
+  expect(exportErrors(missing, measure).join()).toContain("Image target: generate an image before downloading.");
   const failed = deckFixture("analogy");
-  failed.checks!.images.target.issues = ["Image target: incorrect spring geometry."];
-  expect(exportErrors(failed, measure)).toContain("Image target: incorrect spring geometry.");
+  failed.checks!.text!.model = "output-rules";
+  failed.checks!.text!.issues = ["Required output field is invalid."];
+  expect(exportErrors(failed, measure)).toContain("Required output field is invalid.");
+  expect(reviewFindings(failed)).toEqual([]);
+});
+it.each(["analogy", "cognitive conflict", "experience bridging"] as const)("exports and projects %s with advisory text/image findings and no written teacher decision", async strategy => {
+  const deck = deckFixture(strategy);
+  const visualId = deck.draft.visuals[0].id;
+  const findings = ["PRIVATE_REVIEW_TEXT: consider a simpler question.", "PRIVATE_REVIEW_IMAGE: inspect the contact geometry."];
+  deck.checks!.text!.issues = [findings[0]];
+  deck.checks!.text!.model = "test-review-model";
+  deck.checks!.images[visualId].issues = [findings[1]];
+  deck.checks!.images[visualId].model = "test-review-model";
+  expect(deck.teacherDecision).toBeUndefined();
+  expect(reviewFindings(deck)).toEqual(findings);
+  expect(qualityErrors(deck)).toEqual([]);
+  const measure = (text: string) => text.length;
+  expect(exportErrors(deck, measure)).toEqual([]);
+  const zip = await JSZip.loadAsync(await buildPresentationBytes(deck, measure));
+  const pages = Object.keys(zip.files).filter(path => /^ppt\/slides\/slide\d+\.xml$/u.test(path));
+  expect(pages).toHaveLength(deck.draft.slides.length);
+  for (const path of pages) expect(await zip.file(path)!.async("string")).not.toContain("PRIVATE_REVIEW_");
+  const published = projectPublishedSlides(deck);
+  expect(published.pages).toHaveLength(deck.draft.slides.length);
+  expect(JSON.stringify(published)).not.toContain("PRIVATE_REVIEW_");
 });
 it("permits a documented teacher decision on AI findings, never on hard rules or stale checks", () => {
   const deck = deckFixture("analogy");

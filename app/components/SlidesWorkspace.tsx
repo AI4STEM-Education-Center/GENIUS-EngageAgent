@@ -8,7 +8,7 @@ import { browserMeasure, layoutErrors } from "@/lib/slides/layout";
 import { decodeSlideAsset, downloadPresentation } from "@/lib/slides/export";
 import { DEFAULT_MODEL_SELECTION, INITIAL_MODEL_CATALOG, type SlideModelCatalog, type SlideModelSelection } from "@/lib/slides/models";
 import SlidePreview from "./SlidePreview";
-import { hasTeacherDecision, imageCheckKey, imageMatchesPlan, imageReferenceId, imageSourcePrompt, preservedAssets, qualityErrors, reviewFindings, textCheckKey } from "@/lib/slides/quality";
+import { imageCheckKey, imageMatchesPlan, imageReferenceId, imageSourcePrompt, preservedAssets, qualityErrors, reviewFindings, textCheckKey } from "@/lib/slides/quality";
 import { PROMPT_LABELS, PROMPT_VERSIONS, type SlidePromptProvenance, type SlidePromptVersion } from "@/lib/slides/prompt-versions";
 import { analogyStudentFields } from "@/lib/slides/analogy";
 import { ANALOGY_METHODS, analogyMappingIndex, resolveAnalogyMethod, type AnalogyMethod } from "@/lib/slides/analogy-methods";
@@ -68,7 +68,6 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const publishJob = useRef<AbortController | null>(null);
   const [publishedDeck, setPublishedDeck] = useState<SlideDeck | null>(null);
   const [feedback, setFeedback] = useState("");
-  const [decisionReason, setDecisionReason] = useState("");
   const [tab, setTab] = useState<"text" | "notes" | "images">("text");
   const [reload, setReload] = useState(0);
   const job = useRef<AbortController | null>(null);
@@ -224,7 +223,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       setStatus(review ? "Reviewing slide content..." : chosenStrategy === "analogy" && chosenMethod === "six-step" ? "Generating six-step slides..." : chosenStrategy === "experience bridging" ? "Generating experience-bridging slides..." : "Generating five slides...");
       const context = { lessonNumber: chosenLesson, strategy: chosenStrategy, textModel: chosenModels.textModel, promptVersion: chosenPrompt, classroomContext: chosenClassroomContext,
         ...(chosenStrategy === "analogy" ? { analogyMethod: chosenMethod } : {}) };
-      const result = await post("/api/slides", { ...context, operation: review ? "review" : "generate", ...(review && deck ? { draft: deck.draft, feedback: [feedback, ...issues, ...qualityIssues].join("\n").slice(0, 6000) } : {}) }, controller);
+      const result = await post("/api/slides", { ...context, operation: review ? "review" : "generate", ...(review && deck ? { draft: deck.draft, feedback: [feedback, ...issues, ...qualityIssues, ...findings].join("\n").slice(0, 6000) } : {}) }, controller);
       const draft = parseDraft(result.draft, chosenStrategy, true);
       let next: SlideDeck = { id: review && deck ? deck.id : crypto.randomUUID(), lessonNumber: chosenLesson, strategy: chosenStrategy, draft, classroomContext: chosenClassroomContext, assets: preservedAssets(review ? deck : null, draft), checks: review ? deck?.checks : undefined, modelSelection: chosenModels, textModel: result.model, promptProvenance: result.promptProvenance };
       if (controller.signal.aborted) return;
@@ -243,7 +242,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         if (unchanged) break;
       }
       if (controller.signal.aborted) return;
-      if (next.checks?.text?.issues.length) { setStatus("Draft retained. Teaching-content corrections needed."); return; }
+      if (next.checks?.text?.model === "output-rules" && next.checks.text.issues.length) { setStatus("Draft retained. Teaching-content corrections needed."); return; }
       if (layoutErrors(next, browserMeasure()).length) { setStatus("Draft retained. Layout corrections needed."); return; }
       const failures: string[] = [];
       // Generate both reference pictures before checking their shared target image.
@@ -351,19 +350,17 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     const check = deck.checks?.images[visual.id];
     return deck.assets[visual.id] && (check?.key !== imageCheckKey(deck, visual.id) || check?.imageData !== deck.assets[visual.id].data);
   })), [deck]);
-  const hardQualityIssues = useMemo(() => deck ? qualityErrors(deck, false) : [], [deck]);
   const reviewBlock = busy ? "busy" : issues.length ? "layout" : missingImages ? "images" : changedImages ? "changedImages"
-    : checksPending ? "checks" : hardQualityIssues.length ? "content" : !ready ? "findings" : null;
+    : checksPending ? "checks" : qualityIssues.length ? "content" : null;
   const reviewHelp = reviewBlock === "busy" ? "Finish the current operation before confirming your review."
     : reviewBlock === "layout" ? "The slide layout or required content needs correction. Review the details below, then edit the draft or revise it with AI."
       : reviewBlock === "images" ? "Images are missing. Open Images to generate or retry them."
         : reviewBlock === "changedImages" ? "An image no longer matches its current plan. Open Images to regenerate it."
           : reviewBlock === "checks" ? "The current text or images need checking after generation or edits. Run Check slides to continue."
             : reviewBlock === "content" ? "Required content checks need attention. Review the details below, then edit the draft or revise it with AI."
-              : reviewBlock === "findings" ? "AI review found issues. Revise the slides, or review the findings below and record a teacher decision before confirming."
-                : publishedDeck === deck ? "This version is published. Students can read it in Explore and ask. You can also download the PowerPoint."
-                  : reviewed ? "Review confirmed for this version. Download the PowerPoint or send the slides to students."
-                    : "The slides and images are ready. Review every page, then confirm below to download or send them to students.";
+              : publishedDeck === deck ? "This version is published. Students can read it in Explore and ask. You can also download the PowerPoint."
+                : reviewed ? "Review confirmed for this version. Download the PowerPoint or send the slides to students."
+                  : "The slides and images are ready. Review every page, then confirm below to download or send them to students.";
 
   const Container = embedded ? "section" : "main";
   const Heading = embedded ? "h3" : "h1";
@@ -425,7 +422,13 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
             <p id={reviewHelpId} aria-live="polite" className="mt-2 text-sm leading-6 text-gray-700">{reviewHelp}</p>
             {!busy && (reviewBlock === "images" || reviewBlock === "changedImages") && <button type="button" className={`${button} mt-3`} onClick={() => { setTab("images"); editor.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); }}><ImagePlus size={16} />Open images</button>}
             {!busy && reviewBlock === "checks" && <button type="button" className={`${button} mt-3`} onClick={checkCurrent}><ScanEye size={16} />Check slides to continue</button>}
-            {!busy && (reviewBlock === "layout" || reviewBlock === "content" || reviewBlock === "findings") && <button type="button" className={`${button} mt-3`} disabled={!canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Fix slides with AI</button>}
+            {!busy && (reviewBlock === "layout" || reviewBlock === "content") && <button type="button" className={`${button} mt-3`} disabled={!canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Fix slides with AI</button>}
+            {!!findings.length && !busy && <section aria-label="AI review suggestions" className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+              <h4 className="font-semibold">AI review suggestions (optional)</h4>
+              <p className="mt-2 leading-6">Refine with AI is recommended. You can also confirm your review and download or send these slides without refining.</p>
+              <button type="button" className={`${button} mt-3`} disabled={!canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Refine with AI</button>
+              <details className="mt-3"><summary className="cursor-pointer font-medium">View {findings.length} {findings.length === 1 ? "suggestion" : "suggestions"}</summary><ul className="mt-3 space-y-2">{findings.map((finding, n) => <li key={n} className="break-words">{finding}</li>)}</ul></details>
+            </section>}
             <button id={reviewControlId} type="button" role="checkbox" aria-checked={reviewed} aria-describedby={reviewHelpId} disabled={!ready || busy}
               onClick={() => setReviewed(current => !current)} className={`mt-4 flex min-h-12 w-full items-start gap-3 rounded-md border bg-white px-3 py-3 text-left text-sm leading-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-800 ${ready && !busy ? "cursor-pointer border-teal-600 hover:bg-teal-50" : "border-gray-300 text-gray-500"}`}>
               <span aria-hidden="true" className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${reviewed ? "border-teal-800 bg-teal-800 text-white" : "border-gray-400 bg-white"}`}>{reviewed && <Check size={16} />}</span>
@@ -445,18 +448,11 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           {tab === "text" && <div className="space-y-4">{(["title", "body", "task"] as const).map(field => <label key={field} className="block text-sm font-medium">{field === "task" ? "Thinking task" : label(field)}<textarea aria-label={`Slide ${field}`} className={`${input} mt-2 resize-y`} rows={field === "title" ? 2 : 4} disabled={busy} value={slide[field]} onChange={e => edit(field, e.target.value)} />{field === "body" && deck.strategy !== "analogy" && <span className="mt-1 block text-xs font-normal text-gray-600">{slide.stage === "question" ? "Leave this empty. Put the recap and lesson transition in Notes; students see their question task and writing card." : "Optional when the picture and thinking task provide enough context."}</span>}</label>)}{index === analogyMappingIndex(deck.draft.analogyMethod) && deck.draft.analogyPlan && analogyStudentFields(deck.draft.analogyMethod).map(field => <label key={field} className="block text-sm font-medium">{field === "mappingHint" ? "Visible comparison hint" : "Student response starter"}<textarea className={`${input} mt-2 resize-y`} rows={2} maxLength={field === "mappingHint" ? 140 : 100} disabled={busy} value={deck.draft.analogyPlan![field]} onChange={e => editMapping(field, e.target.value)} /></label>)}</div>}
           {tab === "notes" && <div className="space-y-4">{deck.strategy !== "analogy" && <p className="text-xs text-gray-600">Private guidance, exported as speaker notes: purpose and reasoning, then possible responses, a follow-up if students are stuck, and the spoken transition. Up to 150 words / 900 characters per note.</p>}{[0, 1].map(n => <label key={n} className="block text-sm font-medium">Teacher note {n + 1}<textarea className={`${input} mt-2 resize-y`} rows={4} disabled={busy} value={slide.teacherNotes[n] || ""} onChange={e => { const notes = [...slide.teacherNotes]; notes[n] = e.target.value; edit("teacherNotes", notes); }} onBlur={() => edit("teacherNotes", slide.teacherNotes.filter(value => value.trim()))} /></label>)}</div>}
           {tab === "notes" && deck.draft.analogyPlan && <details className="mt-5 border-t border-gray-200 pt-4 text-sm"><summary className="cursor-pointer font-medium">Teaching design for this comparison</summary><dl className="mt-3 space-y-3">{Object.entries(deck.draft.analogyPlan).filter(([key, value]) => value && !analogyStudentFields(deck.draft.analogyMethod).some(field => field === key)).map(([key, value]) => <div key={key}><dt className="font-medium">{label(key.replace(/([A-Z])/g, " $1").toLowerCase())}</dt><dd className="mt-1 text-gray-600">{value}</dd></div>)}</dl></details>}
-          {tab === "images" && <ul className="divide-y divide-gray-200">{deck.draft.visuals.map(visual => <li key={visual.id} className="space-y-3 py-3 first:pt-0"><h3 className="text-sm font-medium">{label(visual.id)}</h3>{(["prompt", "caption", "alt"] as const).map(field => <label key={field} className="block text-sm font-medium">{field === "prompt" ? "Image plan" : field === "alt" ? "Alt text" : "Caption"}<textarea aria-label={`${visual.id} ${field}`} className={`${input} mt-2 resize-y`} rows={field === "prompt" ? 5 : 2} disabled={busy} maxLength={field === "prompt" ? 1800 : field === "caption" ? 85 : 160} value={visual[field]} onChange={e => editVisual(visual.id, field, e.target.value)} /></label>)}{deck.assets[visual.id]?.model && <p className="break-words text-xs text-gray-500">{deck.assets[visual.id].model}</p>}<div className="flex items-center justify-between gap-2 text-sm"><span>{!deck.assets[visual.id] ? "Missing" : !imageMatchesPlan(deck, visual.id) ? "Plan changed" : deck.checks?.images[visual.id]?.key !== imageCheckKey(deck, visual.id) ? "Check pending" : deck.checks?.images[visual.id]?.issues.length ? "Needs correction" : "Ready"}</span><button className={icon} disabled={busy || !!issues.length} title={`Regenerate ${visual.id} image`} aria-label={`Regenerate ${visual.id} image`} onClick={() => retryImage(visual.id)}><ImagePlus size={18} /></button></div></li>)}</ul>}
+          {tab === "images" && <ul className="divide-y divide-gray-200">{deck.draft.visuals.map(visual => <li key={visual.id} className="space-y-3 py-3 first:pt-0"><h3 className="text-sm font-medium">{label(visual.id)}</h3>{(["prompt", "caption", "alt"] as const).map(field => <label key={field} className="block text-sm font-medium">{field === "prompt" ? "Image plan" : field === "alt" ? "Alt text" : "Caption"}<textarea aria-label={`${visual.id} ${field}`} className={`${input} mt-2 resize-y`} rows={field === "prompt" ? 5 : 2} disabled={busy} maxLength={field === "prompt" ? 1800 : field === "caption" ? 85 : 160} value={visual[field]} onChange={e => editVisual(visual.id, field, e.target.value)} /></label>)}{deck.assets[visual.id]?.model && <p className="break-words text-xs text-gray-500">{deck.assets[visual.id].model}</p>}<div className="flex items-center justify-between gap-2 text-sm"><span>{!deck.assets[visual.id] ? "Missing" : !imageMatchesPlan(deck, visual.id) ? "Plan changed" : deck.checks?.images[visual.id]?.key !== imageCheckKey(deck, visual.id) ? "Check pending" : deck.checks?.images[visual.id]?.issues.length ? "AI suggestions" : "Ready"}</span><button className={icon} disabled={busy || !!issues.length} title={`Regenerate ${visual.id} image`} aria-label={`Regenerate ${visual.id} image`} onClick={() => retryImage(visual.id)}><ImagePlus size={18} /></button></div></li>)}</ul>}
         </aside>
       </div>
       {!!issues.length && <div role="alert" className="mt-5 border-l-4 border-red-700 bg-red-50 p-4 text-sm text-red-900"><ul className="space-y-2">{issues.map((issue, n) => <li key={n} className="whitespace-pre-line break-words">{issue}</li>)}</ul></div>}
-      {!!qualityIssues.filter(issue => !findings.includes(issue)).length && !busy && <div role="alert" className="mt-5 border-l-4 border-amber-700 bg-amber-50 p-4 text-sm text-amber-950"><ul className="space-y-2">{qualityIssues.filter(issue => !findings.includes(issue)).map((issue, n) => <li key={n} className="break-words">{issue}</li>)}</ul></div>}
-      {!!findings.length && !busy && <section aria-label="Teacher quality decision" className="mt-5 border-l-4 border-amber-700 bg-amber-50 p-4 text-sm text-amber-950">
-        <h3 className="font-semibold">AI review findings</h3>
-        <ul className="my-3 space-y-2" role="alert">{findings.map((finding, n) => <li key={n} className="break-words">{finding}</li>)}</ul>
-        <label className="block font-medium">Teacher decision note<textarea aria-label="Teacher decision note" className={`${input} mt-2`} rows={3} maxLength={1000} value={decisionReason} onChange={e => { setDecisionReason(e.target.value); setDeck(current => current ? { ...current, teacherDecision: undefined } : current); setReviewed(false); setDownloaded(false); }} /></label>
-        <button className={`${button} mt-3`} disabled={decisionReason.trim().length < 10 || !!issues.length || !!missingImages || !!hardQualityIssues.length || hasTeacherDecision(deck)} onClick={() => { setDeck({ ...deck, teacherDecision: { reason: decisionReason.trim(), draftKey: textCheckKey(deck), checks: deck.checks!, assets: deck.assets } }); setReviewed(false); setDownloaded(false); }}><ScanEye size={16} />Accept after teacher review</button>
-        {hasTeacherDecision(deck) && <p className="mt-2 font-medium">Teacher decision recorded for this version.</p>}
-      </section>}
+      {!!qualityIssues.length && !busy && <div role="alert" className="mt-5 border-l-4 border-amber-700 bg-amber-50 p-4 text-sm text-amber-950"><ul className="space-y-2">{qualityIssues.map((issue, n) => <li key={n} className="break-words">{issue}</li>)}</ul></div>}
       {!!missingImages && !busy && <p className="mt-3 text-sm text-amber-900">Images pending. Download unavailable.</p>}
       <dialog ref={dialog} className="fixed inset-0 m-auto w-[96vw] max-w-7xl max-h-[96vh] overflow-auto border border-gray-300 bg-gray-50 p-3 backdrop:bg-black/70">
         <div className="mb-3 flex items-center justify-between gap-2"><button className={icon} aria-label="Previous enlarged slide" disabled={index === 0} onClick={() => setIndex(n => n - 1)}><ChevronLeft size={19} /></button><span className="text-sm">{index + 1} / {deck.draft.slides.length}</span><button className={icon} aria-label="Next enlarged slide" disabled={index === deck.draft.slides.length - 1} onClick={() => setIndex(n => n + 1)}><ChevronRight size={19} /></button><button className={icon} aria-label="Close preview" title="Close preview" onClick={() => dialog.current?.close()}><X size={18} /></button></div>

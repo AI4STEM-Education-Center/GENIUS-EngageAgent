@@ -18,9 +18,12 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-it("uploads each planned image before commit and keeps private deck metadata out of transport", async () => {
+it("publishes a deck with advisory findings without a teacher note and keeps review metadata out of transport", async () => {
   const value = deck(); value.classroomContext = "Private class context";
   value.assets.target.referenceData = "Private reference";
+  value.checks!.text!.issues = ["PRIVATE_REVIEW_TEXT: consider shortening this question."];
+  value.checks!.images.target.issues = ["PRIVATE_REVIEW_IMAGE: inspect the contact geometry."];
+  expect(value.teacherDecision).toBeUndefined();
   const progress = vi.fn();
   expect(await publishSlideDeck(value, scope, new AbortController().signal, progress)).toEqual(finished());
   const bodies = fetchMock.mock.calls.map(([path, init]) => {
@@ -36,6 +39,7 @@ it("uploads each planned image before commit and keeps private deck metadata out
   expect(bodies[4]).toEqual({ ...scope, operation: "commit", publicationId: id });
   expect(JSON.stringify(bodies)).not.toContain("Private class context");
   expect(JSON.stringify(bodies)).not.toContain("Private reference");
+  expect(JSON.stringify(bodies)).not.toContain("PRIVATE_REVIEW_");
   expect(progress).toHaveBeenLastCalledWith("Making the slides available to students...");
 });
 
