@@ -1,6 +1,6 @@
 # Strategy material generation
 
-The teacher workflow remains **My classes → task → Assessment → Strategy recommendation → Content generation**. The lesson and selected strategies carry forward into a single material-type selector. Existing quizzes, surveys, class-level recommendations and student review questions are retained.
+The teacher workflow remains **My classes → task → Assessment → Strategy recommendation → Content generation**. Step 2 selects one strategy at a time: choosing another replaces the current choice, and clicking the current choice keeps it selected. The lesson and selected strategy carry forward into the material-type selector. Older drafts with several selected strategies retain their last valid choice; existing generated and published materials remain available. Existing quizzes, surveys, class-level recommendations and student review questions are retained.
 
 Teachers can prepare materials before student submissions by selecting strategies manually in Step 2. When real quiz responses exist, the class recommendation is selected automatically. Generation reads only diagnostic aggregates from the authorized class, task and lesson. Optional classroom context is shared across material formats; survey experiences are not invented or automatically inferred.
 
