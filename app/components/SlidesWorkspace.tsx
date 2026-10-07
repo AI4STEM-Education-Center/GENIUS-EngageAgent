@@ -74,6 +74,9 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const job = useRef<AbortController | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const classroomHelpId = useId();
+  const reviewInputId = useId();
+  const reviewHelpId = useId();
+  const editor = useRef<HTMLElement>(null);
   const { classId, assignmentId } = user;
   const scope = useMemo(() => ({ userId: user.geniusId, classId: classId || "", assignmentId: assignmentId || "", lessonNumber, strategy }), [user.geniusId, classId, assignmentId, lessonNumber, strategy]);
   const scopeKey = slideDraftKey(scope);
@@ -266,11 +269,14 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         catch (err) { if (!controller.signal.aborted) failures.push(`${label(visual.id)}: ${err instanceof Error ? err.message : "Image generation failed."}`); }
       }
       if (controller.signal.aborted) return;
-      setError(failures.join("\n")); setStatus(failures.length ? "Slide text ready. Some images need a retry." : layoutErrors(next, browserMeasure()).length ? "Draft retained. Layout corrections needed." : qualityErrors(next).length ? "Draft retained. Image corrections needed." : `${next.draft.slides.length} slides ready for review.`);
+      setError(failures.join("\n")); setStatus(failures.length ? "Slide text ready. Some images need a retry." : layoutErrors(next, browserMeasure()).length ? "Draft retained. Layout corrections needed." : qualityErrors(next).length ? "Draft retained. Quality corrections needed." : `${next.draft.slides.length} slides ready for review.`);
       if (failures.length) setTab("images");
     });
   }
   function edit(field: keyof Omit<TeachingSlide, "stage">, value: string | string[]) {
+    const previous = deck?.draft.slides[index]?.[field];
+    if (previous === value || (Array.isArray(previous) && Array.isArray(value)
+      && previous.length === value.length && previous.every((item, n) => item === value[n]))) return;
     setDeck(current => current ? { ...current, draft: { ...current.draft, slides: current.draft.slides.map((slide, n) => n === index ? { ...slide, [field]: value } : slide) } } : current);
     setReviewed(false); setDownloaded(false); setStatus("");
   }
@@ -304,7 +310,9 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         if (controller.signal.aborted) return;
         next = await checkImage(next, visual.id, controller, true);
       }
-      if (!controller.signal.aborted) setStatus(qualityErrors(next).length || layoutErrors(next, browserMeasure()).length ? "Draft retained. Corrections needed." : "Quality checks complete. Teacher review pending.");
+      if (!controller.signal.aborted) setStatus(layoutErrors(next, browserMeasure()).length ? "Draft retained. Layout corrections needed."
+        : next.draft.visuals.some(visual => !next.assets[visual.id]) ? "Draft retained. Generate the missing images before teacher review."
+          : qualityErrors(next).length ? "Draft retained. Quality corrections needed." : "Quality checks complete. Teacher review pending.");
     });
   }
   async function download() {
@@ -338,6 +346,24 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const missingImages = deck?.draft.visuals.some(visual => !deck.assets[visual.id]);
   const slide = deck?.draft.slides[index];
   const ready = !!deck && !missingImages && !issues.length && !qualityIssues.length;
+  const changedImages = useMemo(() => deck?.draft.visuals.some(visual => deck.assets[visual.id] && !imageMatchesPlan(deck, visual.id)), [deck]);
+  const checksPending = useMemo(() => deck && (deck.checks?.text?.key !== textCheckKey(deck) || deck.draft.visuals.some(visual => {
+    const check = deck.checks?.images[visual.id];
+    return deck.assets[visual.id] && (check?.key !== imageCheckKey(deck, visual.id) || check?.imageData !== deck.assets[visual.id].data);
+  })), [deck]);
+  const hardQualityIssues = useMemo(() => deck ? qualityErrors(deck, false) : [], [deck]);
+  const reviewBlock = busy ? "busy" : issues.length ? "layout" : missingImages ? "images" : changedImages ? "changedImages"
+    : checksPending ? "checks" : hardQualityIssues.length ? "content" : !ready ? "findings" : null;
+  const reviewHelp = reviewBlock === "busy" ? "Finish the current operation before confirming your review."
+    : reviewBlock === "layout" ? "The slide layout or required content needs correction. Review the details below, then edit the draft or revise it with AI."
+      : reviewBlock === "images" ? "Images are missing. Open Images to generate or retry them."
+        : reviewBlock === "changedImages" ? "An image no longer matches its current plan. Open Images to regenerate it."
+          : reviewBlock === "checks" ? "The current text or images need checking after generation or edits. Run Check slides to continue."
+            : reviewBlock === "content" ? "Required content checks need attention. Review the details below, then edit the draft or revise it with AI."
+              : reviewBlock === "findings" ? "AI review found issues. Revise the slides, or review the findings below and record a teacher decision before confirming."
+                : publishedDeck === deck ? "This version is published. Students can read it in Explore and ask. You can also download the PowerPoint."
+                  : reviewed ? "Review confirmed for this version. Download the PowerPoint or send the slides to students."
+                    : "The slides and images are ready. Review every page, then confirm below to download or send them to students.";
 
   const Container = embedded ? "section" : "main";
   const Heading = embedded ? "h3" : "h1";
@@ -381,9 +407,6 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           <button className={button} disabled={busy} onClick={checkCurrent}><ScanEye size={16} />Check slides</button>
           <button className={button} disabled={busy} onClick={() => generate(true)} title="Apply feedback and correct quality findings"><RefreshCw size={16} />Revise with AI</button>
           <button className={icon} disabled={!!issues.length} title="Enlarge preview" aria-label="Enlarge preview" onClick={() => dialog.current?.showModal()}><Expand size={17} /></button>
-          <button className={button} disabled={busy || !ready || !reviewed} onClick={download}><Download size={17} />Download PPTX</button>
-          <button className={primaryButton} disabled={busy || !ready || !reviewed || !classId || !assignmentId || publishedDeck === deck} onClick={publish}><Send size={17} />{publishedDeck === deck ? "Published" : "Send to students"}</button>
-          {preparedDownload?.deck === deck && !busy && ready && reviewed && <><a className={button} href={preparedDownload.httpUrl || preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>{preparedDownload.httpUrl && <p className="text-xs text-gray-500">Save link expires in 10 minutes. Select Download PPTX again to refresh it.</p>}</>}
         </div>
       </div>
       {deck.promptProvenance && <p className="mb-3 break-words text-xs text-gray-500">{PROMPT_LABELS[deck.promptProvenance.version]} · {deck.promptProvenance.revision}</p>}
@@ -397,9 +420,26 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
             <button className={icon} title="Next slide" aria-label="Next slide" disabled={index === deck.draft.slides.length - 1} onClick={() => setIndex(n => n + 1)}><ChevronRight size={19} /></button>
           </div>
           <ol className="divide-y divide-gray-200 border-y border-gray-200">{deck.draft.slides.map((item, n) => <li key={item.stage}><button className={`flex min-h-11 w-full items-start gap-3 px-3 py-3 text-left text-sm ${index === n ? "bg-teal-50 text-teal-900" : "hover:bg-gray-100"}`} aria-current={index === n ? "step" : undefined} onClick={() => setIndex(n)}><span className="font-mono">{n + 1}</span><span className="min-w-0 break-words">{item.title}</span></button></li>)}</ol>
-          <label className="mt-5 flex items-start gap-3 text-sm"><input type="checkbox" checked={reviewed} disabled={!ready || busy} onChange={e => setReviewed(e.target.checked)} className="mt-1 accent-teal-800" />I have reviewed all {deck.draft.slides.length} slides and their images.</label>
+          <section aria-label="Review and publish" className="mt-5 rounded-lg border border-teal-200 bg-teal-50/50 p-4">
+            <h3 className="text-base font-semibold text-gray-900">Review and publish</h3>
+            <p id={reviewHelpId} aria-live="polite" className="mt-2 text-sm leading-6 text-gray-700">{reviewHelp}</p>
+            {!busy && (reviewBlock === "images" || reviewBlock === "changedImages") && <button type="button" className={`${button} mt-3`} onClick={() => { setTab("images"); editor.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); }}><ImagePlus size={16} />Open images</button>}
+            {!busy && reviewBlock === "checks" && <button type="button" className={`${button} mt-3`} onClick={checkCurrent}><ScanEye size={16} />Check slides to continue</button>}
+            {!busy && (reviewBlock === "layout" || reviewBlock === "content" || reviewBlock === "findings") && <button type="button" className={`${button} mt-3`} disabled={!canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Fix slides with AI</button>}
+            <label htmlFor={reviewInputId} className={`mt-4 flex min-h-12 items-start gap-3 rounded-md border bg-white px-3 py-3 text-sm leading-6 ${ready && !busy ? "cursor-pointer border-teal-600 hover:bg-teal-50" : "border-gray-300 text-gray-500"}`}>
+              <input id={reviewInputId} type="checkbox" aria-describedby={reviewHelpId} checked={reviewed} disabled={!ready || busy} onChange={e => setReviewed(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-800" />
+              <span>I have reviewed all {deck.draft.slides.length} slides and their images.</span>
+            </label>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" className={button} disabled={!ready || busy || reviewed} onClick={() => setReviewed(true)}><ScanEye size={16} />{reviewed ? "Review confirmed" : "Confirm review"}</button>
+              <button type="button" className={button} disabled={busy || !ready || !reviewed} onClick={download}><Download size={17} />Download PPTX</button>
+              <button type="button" className={primaryButton} disabled={busy || !ready || !reviewed || !classId || !assignmentId || publishedDeck === deck} onClick={publish}><Send size={17} />{publishedDeck === deck ? "Published" : "Send to students"}</button>
+              {preparedDownload?.deck === deck && !busy && ready && reviewed && <a className={button} href={preparedDownload.httpUrl || preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>}
+            </div>
+            {preparedDownload?.deck === deck && !busy && ready && reviewed && preparedDownload.httpUrl && <p className="mt-2 text-xs text-gray-500">Save link expires in 10 minutes. Select Download PPTX again to refresh it.</p>}
+          </section>
         </section>
-        <aside aria-label="Slide editor" className="min-w-0 border-t border-gray-200 lg:border-t-0">
+        <aside ref={editor} aria-label="Slide editor" className="min-w-0 border-t border-gray-200 lg:border-t-0">
           <div className="mb-4 flex border-b border-gray-200" role="tablist" aria-label="Slide fields">{(["text", "notes", "images"] as const).map(value => <button key={value} role="tab" aria-selected={tab === value} className={`flex-1 border-b-2 px-2 py-3 text-sm ${tab === value ? "border-teal-800 font-semibold text-teal-900" : "border-transparent text-gray-600"}`} onClick={() => setTab(value)}>{label(value)}</button>)}</div>
           {tab === "text" && <div className="space-y-4">{(["title", "body", "task"] as const).map(field => <label key={field} className="block text-sm font-medium">{field === "task" ? "Thinking task" : label(field)}<textarea aria-label={`Slide ${field}`} className={`${input} mt-2 resize-y`} rows={field === "title" ? 2 : 4} disabled={busy} value={slide[field]} onChange={e => edit(field, e.target.value)} />{field === "body" && deck.strategy !== "analogy" && <span className="mt-1 block text-xs font-normal text-gray-600">{slide.stage === "question" ? "Leave this empty. Put the recap and lesson transition in Notes; students see their question task and writing card." : "Optional when the picture and thinking task provide enough context."}</span>}</label>)}{index === analogyMappingIndex(deck.draft.analogyMethod) && deck.draft.analogyPlan && analogyStudentFields(deck.draft.analogyMethod).map(field => <label key={field} className="block text-sm font-medium">{field === "mappingHint" ? "Visible comparison hint" : "Student response starter"}<textarea className={`${input} mt-2 resize-y`} rows={2} maxLength={field === "mappingHint" ? 140 : 100} disabled={busy} value={deck.draft.analogyPlan![field]} onChange={e => editMapping(field, e.target.value)} /></label>)}</div>}
           {tab === "notes" && <div className="space-y-4">{deck.strategy !== "analogy" && <p className="text-xs text-gray-600">Private guidance, exported as speaker notes: purpose and reasoning, then possible responses, a follow-up if students are stuck, and the spoken transition. Up to 150 words / 900 characters per note.</p>}{[0, 1].map(n => <label key={n} className="block text-sm font-medium">Teacher note {n + 1}<textarea className={`${input} mt-2 resize-y`} rows={4} disabled={busy} value={slide.teacherNotes[n] || ""} onChange={e => { const notes = [...slide.teacherNotes]; notes[n] = e.target.value; edit("teacherNotes", notes); }} onBlur={() => edit("teacherNotes", slide.teacherNotes.filter(value => value.trim()))} /></label>)}</div>}
@@ -413,7 +453,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         <h3 className="font-semibold">AI review findings</h3>
         <ul className="my-3 space-y-2" role="alert">{findings.map((finding, n) => <li key={n} className="break-words">{finding}</li>)}</ul>
         <label className="block font-medium">Teacher decision note<textarea aria-label="Teacher decision note" className={`${input} mt-2`} rows={3} maxLength={1000} value={decisionReason} onChange={e => { setDecisionReason(e.target.value); setDeck(current => current ? { ...current, teacherDecision: undefined } : current); setReviewed(false); setDownloaded(false); }} /></label>
-        <button className={`${button} mt-3`} disabled={decisionReason.trim().length < 10 || !!issues.length || !!missingImages || !!qualityErrors(deck, false).length || hasTeacherDecision(deck)} onClick={() => { setDeck({ ...deck, teacherDecision: { reason: decisionReason.trim(), draftKey: textCheckKey(deck), checks: deck.checks!, assets: deck.assets } }); setReviewed(false); setDownloaded(false); }}><ScanEye size={16} />Accept after teacher review</button>
+        <button className={`${button} mt-3`} disabled={decisionReason.trim().length < 10 || !!issues.length || !!missingImages || !!hardQualityIssues.length || hasTeacherDecision(deck)} onClick={() => { setDeck({ ...deck, teacherDecision: { reason: decisionReason.trim(), draftKey: textCheckKey(deck), checks: deck.checks!, assets: deck.assets } }); setReviewed(false); setDownloaded(false); }}><ScanEye size={16} />Accept after teacher review</button>
         {hasTeacherDecision(deck) && <p className="mt-2 font-medium">Teacher decision recorded for this version.</p>}
       </section>}
       {!!missingImages && !busy && <p className="mt-3 text-sm text-amber-900">Images pending. Download unavailable.</p>}

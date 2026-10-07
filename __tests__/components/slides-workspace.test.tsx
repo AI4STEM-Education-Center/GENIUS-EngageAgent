@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { UserContext } from "@/lib/auth";
@@ -115,6 +115,78 @@ async function generate() {
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
   await screen.findByText("5 slides ready for review.");
 }
+it("lets the labeled review row and Confirm review enable download and student publishing", async () => {
+  await generate();
+  const review = within(screen.getByRole("region", { name: "Review and publish" }));
+  const checkbox = review.getByRole("checkbox", { name: "I have reviewed all 5 slides and their images." }) as HTMLInputElement;
+  const download = review.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement;
+  const publish = review.getByRole("button", { name: "Send to students" }) as HTMLButtonElement;
+  const label = checkbox.labels?.[0];
+  expect(label?.htmlFor).toBe(checkbox.id);
+  expect(checkbox.id).not.toBe("");
+  expect(download.disabled).toBe(true);
+  expect(publish.disabled).toBe(true);
+  const help = document.getElementById(checkbox.getAttribute("aria-describedby")!);
+  expect(help).toBe(review.getByText(/The slides and images are ready/));
+
+  fireEvent.click(label!);
+  expect(checkbox.checked).toBe(true);
+  expect(download.disabled).toBe(false);
+  expect(publish.disabled).toBe(false);
+  fireEvent.click(label!);
+  expect(checkbox.checked).toBe(false);
+  expect(download.disabled).toBe(true);
+  expect(publish.disabled).toBe(true);
+
+  fireEvent.click(review.getByRole("button", { name: "Confirm review" }));
+  expect(checkbox.checked).toBe(true);
+  expect((review.getByRole("button", { name: "Review confirmed" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(download.disabled).toBe(false);
+  expect(publish.disabled).toBe(false);
+  expect(mocks.download).not.toHaveBeenCalled();
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+
+it("preserves review, prepared download and publication on unchanged Notes blur but invalidates an actual note edit", async () => {
+  await generate();
+  const review = within(screen.getByRole("region", { name: "Review and publish" }));
+  fireEvent.click(review.getByRole("button", { name: "Confirm review" }));
+  fireEvent.click(review.getByRole("button", { name: "Download PPTX" }));
+  await review.findByRole("link", { name: "Save PPTX file" });
+  fireEvent.click(review.getByRole("button", { name: "Send to students" }));
+  await review.findByRole("button", { name: "Published" });
+  const requests = mocks.fetch.mock.calls.length;
+
+  fireEvent.click(screen.getByRole("tab", { name: "Notes" }));
+  for (const name of ["Teacher note 1", "Teacher note 2"]) {
+    const note = screen.getByLabelText(name);
+    fireEvent.focus(note);
+    fireEvent.blur(note);
+  }
+  expect((review.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+  expect((review.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(false);
+  expect((review.getByRole("button", { name: "Published" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(review.getByRole("link", { name: "Save PPTX file" }).getAttribute("href")).toBe(preparedDataUri);
+  expect(mocks.download).toHaveBeenCalledOnce();
+  expect(mocks.fetch).toHaveBeenCalledTimes(requests);
+  expect(mocks.publish).toHaveBeenCalledOnce();
+  expect(mocks.revoke).not.toHaveBeenCalled();
+
+  fireEvent.change(screen.getByLabelText("Teacher note 1"), { target: { value: "Ask students to justify their prediction before showing the next page." } });
+  fireEvent.blur(screen.getByLabelText("Teacher note 1"));
+  expect((review.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  expect((review.getByRole("button", { name: "Confirm review" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((review.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((review.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(review.queryByRole("button", { name: "Published" })).toBeNull();
+  expect(review.queryByRole("link", { name: "Save PPTX file" })).toBeNull();
+  expect(review.getByText(/The current text or images need checking/)).toBeTruthy();
+  fireEvent.click(review.getByRole("button", { name: "Check slides to continue" }));
+  await screen.findByText("Quality checks complete. Teacher review pending.");
+  expect((review.getByRole("button", { name: "Confirm review" }) as HTMLButtonElement).disabled).toBe(false);
+  expect((review.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+});
+
 it("retains a native save link without regenerating and releases replaced files on export and unmount", async () => {
   await generate();
   fireEvent.click(screen.getByRole("checkbox"));
@@ -323,6 +395,23 @@ it("keeps text and successful images when one image fails and permits a focused 
   await screen.findByText("Slide text ready. Some images need a retry.");
   expect(screen.getAllByText("Missing")).toHaveLength(2); expect(screen.getByText("Ready")).toBeTruthy();
   expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("tab", { name: "Notes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Check slides" }));
+  await screen.findByText("Draft retained. Generate the missing images before teacher review.");
+  expect(screen.queryByText("Quality checks complete. Teacher review pending.")).toBeNull();
+  const review = within(screen.getByRole("region", { name: "Review and publish" }));
+  const checkbox = review.getByRole("checkbox") as HTMLInputElement;
+  expect(checkbox.disabled).toBe(true);
+  expect(document.getElementById(checkbox.getAttribute("aria-describedby")!)).toBe(review.getByText("Images are missing. Open Images to generate or retry them."));
+  for (const name of ["Confirm review", "Download PPTX", "Send to students"]) {
+    const action = review.getByRole("button", { name }) as HTMLButtonElement;
+    expect(action.disabled).toBe(true);
+    fireEvent.click(action);
+  }
+  expect(mocks.download).not.toHaveBeenCalled();
+  expect(mocks.publish).not.toHaveBeenCalled();
+  fireEvent.click(review.getByRole("button", { name: "Open images" }));
+  expect(screen.getByRole("tab", { name: "Images" }).getAttribute("aria-selected")).toBe("true");
   mocks.fetch.mockResolvedValueOnce(reply({ asset }));
   fireEvent.click(screen.getByRole("button", { name: "Regenerate target image" }));
   await screen.findByText("Image updated.");
@@ -489,15 +578,27 @@ it("repairs layout before spending requests on images and retains an unresolved 
   expect(screen.queryByText("5 slides ready for review.")).toBeNull();
 });
 
-it("keeps a visually incorrect image visible but blocks approval and export", async () => {
+it("explains unresolved image findings beside review and blocks confirmation, export and publication", async () => {
   mocks.fetch.mockImplementation(async (path: string, init?: RequestInit) => path.startsWith("/api/slides?") ? lessons : path.endsWith("/check") ? reply({ issues: JSON.parse(String(init?.body)).visualId === "target" ? ["Image target: compressed spring is longer; correct the geometry."] : [] }) : path.endsWith("/image") ? reply({ asset }) : reply({ draft: slideFixture("analogy") }));
   render(<SlidesWorkspace user={user} />); await screen.findByRole("option", { name: "8. Energy" });
   await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
-  await screen.findByText("Draft retained. Image corrections needed.");
+  await screen.findByText("Draft retained. Quality corrections needed.");
   expect(screen.getByText(/Image target: compressed spring/)).toBeTruthy();
-  expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(true);
-  expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
+  const review = within(screen.getByRole("region", { name: "Review and publish" }));
+  const checkbox = review.getByRole("checkbox") as HTMLInputElement;
+  const help = review.getByText("AI review found issues. Revise the slides, or review the findings below and record a teacher decision before confirming.");
+  expect(document.getElementById(checkbox.getAttribute("aria-describedby")!)).toBe(help);
+  expect(checkbox.disabled).toBe(true);
+  expect(review.getByRole("button", { name: "Fix slides with AI" })).toBeTruthy();
+  for (const name of ["Confirm review", "Download PPTX", "Send to students"]) {
+    const action = review.getByRole("button", { name }) as HTMLButtonElement;
+    expect(action.disabled).toBe(true);
+    fireEvent.click(action);
+  }
+  expect(checkbox.checked).toBe(false);
+  expect(mocks.download).not.toHaveBeenCalled();
+  expect(mocks.publish).not.toHaveBeenCalled();
   const attempts = mocks.fetch.mock.calls.filter(([path, init]) => path.endsWith("/image") && JSON.parse(init.body).visualId === "target");
   expect(attempts).toHaveLength(2);
   expect(JSON.parse(attempts[1][1].body).feedback).toContain("compressed spring is longer");
@@ -507,7 +608,7 @@ it("requires a written teacher decision to accept AI findings and invalidates it
   render(<SlidesWorkspace user={user} />); await screen.findByRole("option", { name: "8. Energy" });
   await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
-  await screen.findByText("Draft retained. Image corrections needed.");
+  await screen.findByText("Draft retained. Quality corrections needed.");
   const accept = screen.getByRole("button", { name: "Accept after teacher review" }) as HTMLButtonElement;
   expect(accept.disabled).toBe(true);
   fireEvent.change(screen.getByLabelText("Teacher decision note"), { target: { value: "I inspected the picture; the spring visibly touches the cart." } });
