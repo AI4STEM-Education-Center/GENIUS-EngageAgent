@@ -23,7 +23,7 @@ beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => ({ font: "", measureText: (text: string) => ({ width: text.length * 16 }) }) as never);
   mocks.decode.mockImplementation(async value => value); mocks.download.mockResolvedValue({ url: "blob:prepared-pptx", dataUri: preparedDataUri, fileName: "EngageAgent.pptx" });
   mocks.publish.mockResolvedValue({ publicationId: "published", contentItemId: "slides-deck" });
-  mocks.fetch.mockImplementation(async (path: string) => path.startsWith("/api/slides?") ? lessons : path.endsWith("/check") ? reply({ issues: [] }) : path.endsWith("/image") ? reply({ asset }) : reply({ draft: slideFixture("analogy") }));
+  mocks.fetch.mockImplementation(async (path: string) => path.startsWith("/api/slides?") ? lessons : path.endsWith("/check") ? reply({ issues: [], model: "test-review-model" }) : path.endsWith("/image") ? reply({ asset }) : reply({ draft: slideFixture("analogy") }));
 });
 
 it("publishes a generated deck directly and republishes edited text without checking or reviewing", async () => {
@@ -500,15 +500,19 @@ it("retains actual model metadata and private teacher notes in downloads without
   expect(mocks.save.mock.calls.at(-1)![1].draft.slides[0].teacherNotes).toEqual(exported.draft.slides[0].teacherNotes);
 });
 
-it("puts student-facing editing before revision and omits technical controls and private panels", async () => {
+it("shows slides before AI review and editing, and keeps publication independent of revision", async () => {
   await generate();
   const preview = screen.getByRole("region", { name: "Slide preview" });
   const editor = screen.getByRole("complementary", { name: "Slide editor" });
   const review = screen.getByRole("region", { name: "Review and publish" });
+  const aiReview = screen.getByRole("region", { name: "AI Review" });
   const revision = screen.getByRole("region", { name: /Revise slides/ });
-  for (const section of [preview, editor, review]) {
-    expect(section.compareDocumentPosition(revision) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  for (const section of [aiReview, editor, revision, review]) {
+    expect(preview.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   }
+  expect(aiReview.compareDocumentPosition(revision) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(preview).queryByRole("button", { name: "Check slides" })).toBeNull();
+  expect(within(aiReview).getByRole("button", { name: "Check slides" })).toBeTruthy();
   expect(within(revision).getByLabelText("Revision request")).toBeTruthy();
   expect(within(revision).getByRole("button", { name: "Revise with AI" })).toBeTruthy();
   for (const field of ["Slide title", "Slide body", "Slide task"]) expect(within(editor).getByLabelText(field)).toBeTruthy();
@@ -516,6 +520,38 @@ it("puts student-facing editing before revision and omits technical controls and
   expect(screen.queryByRole("tablist")).toBeNull();
   expect(screen.queryByText("Teaching design for this comparison")).toBeNull();
   expect(screen.queryByRole("region", { name: "Image recovery" })).toBeNull();
+});
+it("reports a clean current AI review, then requests rechecking edited content without blocking publication", async () => {
+  await generate();
+  const review = within(screen.getByRole("region", { name: "AI Review" }));
+  expect(review.getByText(/No revision is needed/)).toBeTruthy();
+  expect(review.queryByRole("region", { name: "AI review suggestions" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "Explore the transfer" } });
+  expect(review.queryByText(/No revision is needed/)).toBeNull();
+  expect(review.getByRole("heading", { name: "Review incomplete" })).toBeTruthy();
+  expect(review.getByText(/Text:.*out of date/)).toBeTruthy();
+  expect((screen.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(review.getByRole("button", { name: "Check slides" }));
+  await review.findByText(/No revision is needed/);
+});
+
+it.each(["text", "image"])("does not reuse an earlier clean result when a %s recheck fails", async kind => {
+  await generate();
+  expect(screen.getByText(/No revision is needed/)).toBeTruthy();
+  mocks.fetch.mockImplementation(async (_path: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    const fails = kind === "text" ? !body.visualId : body.visualId === "target";
+    return fails ? reply({ error: "Review unavailable" }, false) : reply({ issues: [], model: "test-review-model" });
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Check slides" }));
+  await screen.findByText("AI Review is incomplete. You can still send complete slides, or run Check slides again.");
+  expect(screen.queryByText(/No revision is needed/)).toBeNull();
+  expect(screen.getByRole("heading", { name: "Review incomplete" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "AI review suggestions" })).toBeNull();
+  const saved = mocks.save.mock.calls.at(-1)![1];
+  expect(kind === "text" ? saved.checks.text : saved.checks.images.target).toBeUndefined();
+  expect((screen.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(false);
 });
 it("uses the current text model and teacher feedback while preserving unchanged images", async () => {
   await generate();
@@ -713,7 +749,8 @@ it("continues image generation and direct publishing when the optional AI review
   expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
   fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
   await screen.findByRole("button", { name: "Published" });
-  expect(mocks.publish.mock.calls[0][0].checks).toBeUndefined();
+  expect(mocks.publish.mock.calls[0][0].checks.text).toBeUndefined();
+  expect(mocks.publish.mock.calls[0][0].checks.images).toEqual({});
 });
 
 it.each(["missing", "stale"] as const)("directly publishes restored decks with %s review snapshots without new model requests", async state => {

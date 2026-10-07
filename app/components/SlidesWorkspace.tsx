@@ -8,7 +8,7 @@ import { browserMeasure, layoutErrors } from "@/lib/slides/layout";
 import { decodeSlideAsset, downloadPresentation } from "@/lib/slides/export";
 import { DEFAULT_MODEL_SELECTION, INITIAL_MODEL_CATALOG, type SlideModelCatalog } from "@/lib/slides/models";
 import SlidePreview from "./SlidePreview";
-import { imageCheckKey, imageMatchesPlan, imageReferenceId, imageSourcePrompt, preservedAssets, qualityErrors, reviewFindings, textCheckKey } from "@/lib/slides/quality";
+import { imageCheckKey, imageMatchesPlan, imageReferenceId, imageSourcePrompt, preservedAssets, reviewAssessment, textCheckKey } from "@/lib/slides/quality";
 import type { SlidePromptProvenance } from "@/lib/slides/prompt-versions";
 import { analogyStudentFields } from "@/lib/slides/analogy";
 import { analogyMappingIndex, resolveAnalogyMethod } from "@/lib/slides/analogy-methods";
@@ -136,9 +136,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     try { return layoutErrors(deck, browserMeasure()); }
     catch (err) { return [err instanceof Error ? err.message : "Unable to measure slides."]; }
   }, [deck]);
-  const qualityIssues = useMemo(() => deck ? qualityErrors(deck) : [], [deck]);
-  const findings = useMemo(() => deck ? reviewFindings(deck) : [], [deck]);
-  const suggestions = useMemo(() => [...new Set([...qualityIssues, ...findings, ...reviewWarnings])], [qualityIssues, findings, reviewWarnings]);
+  const assessment = useMemo(() => deck ? reviewAssessment(deck) : { complete: false, findings: [], pending: [] }, [deck]);
+  const suggestions = assessment.findings;
   useEffect(() => {
     if (!busy && (!deck || deck === savedDeck)) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
@@ -174,7 +173,10 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     } catch {
       controller.signal.throwIfAborted();
       setReviewWarnings(current => [...new Set([...current, "Text review could not finish. You can still send complete slides, or optionally run Check slides again."])]);
-      return target;
+      // A failed recheck must not leave an earlier successful result marked current.
+      const next = { ...target, checks: { images: target.checks?.images || {} } };
+      showDraft(next, controller);
+      return next;
     }
   }
   async function checkImage(target: SlideDeck, visualId: string, controller: AbortController, force = false): Promise<SlideDeck> {
@@ -197,7 +199,11 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     } catch {
       controller.signal.throwIfAborted();
       setReviewWarnings(current => [...new Set([...current, `${label(visualId)} image review could not finish. You can still send complete slides, or optionally run Check slides again.`])]);
-      return target;
+      const images = { ...target.checks?.images };
+      delete images[visualId];
+      const next = { ...target, checks: { ...target.checks, images } };
+      showDraft(next, controller);
+      return next;
     }
   }
   async function imageFor(target: SlideDeck, visualId: string, controller: AbortController, imageModel = target.modelSelection?.imageModel || DEFAULT_MODEL_SELECTION.imageModel, feedback = ""): Promise<SlideDeck> {
@@ -223,7 +229,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       setStatus(review ? "Reviewing slide content..." : chosenStrategy === "analogy" && chosenMethod === "six-step" ? "Generating six-step slides..." : chosenStrategy === "experience bridging" ? "Generating experience-bridging slides..." : "Generating five slides...");
       const context = { lessonNumber: chosenLesson, strategy: chosenStrategy, textModel: chosenModels.textModel, promptVersion: chosenPrompt, classroomContext: chosenClassroomContext,
         ...(chosenStrategy === "analogy" ? { analogyMethod: chosenMethod } : {}) };
-      const result = await post("/api/slides", { ...context, operation: review ? "review" : "generate", ...(review && deck ? { draft: deck.draft, feedback: [feedback, ...issues, ...qualityIssues, ...findings].join("\n").slice(0, 6000) } : {}) }, controller);
+      const result = await post("/api/slides", { ...context, operation: review ? "review" : "generate", ...(review && deck ? { draft: deck.draft, feedback: [feedback, ...issues, ...suggestions].join("\n").slice(0, 6000) } : {}) }, controller);
       const draft = parseDraft(result.draft, chosenStrategy, true);
       let next: SlideDeck = { id: review && deck ? deck.id : crypto.randomUUID(), lessonNumber: chosenLesson, strategy: chosenStrategy, draft, classroomContext: chosenClassroomContext, assets: preservedAssets(review ? deck : null, draft), checks: review ? deck?.checks : undefined, modelSelection: chosenModels, textModel: result.model, promptProvenance: result.promptProvenance };
       if (controller.signal.aborted) return;
@@ -317,7 +323,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       }
       if (!controller.signal.aborted) setStatus(layoutErrors(next, browserMeasure()).length ? "Draft retained. Layout corrections needed."
         : next.draft.visuals.some(visual => !isSlideAsset(next.assets[visual.id])) ? "Draft retained. Generate the missing images before sending."
-          : "Quality checks complete. You can send the slides or optionally revise them.");
+          : reviewAssessment(next).complete ? "Quality checks complete. You can send the slides or optionally revise them."
+            : "AI Review is incomplete. You can still send complete slides, or run Check slides again.");
     });
   }
   async function download() {
@@ -395,55 +402,67 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0"><h2 className="break-words text-lg font-semibold">{deck.draft.title}</h2><p className="mt-1 text-sm text-gray-500">Lesson {deck.lessonNumber} · {label(deck.strategy)} · {deck.draft.slides.length} slides</p></div>
         <div className="flex flex-wrap gap-2">
-          <button className={button} disabled={busy} onClick={checkCurrent}><ScanEye size={16} />Check slides</button>
           <button className={icon} disabled={!!issues.length} title="Enlarge preview" aria-label="Enlarge preview" onClick={() => dialog.current?.showModal()}><Expand size={17} /></button>
         </div>
       </div>
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <section aria-label="Slide preview" className="min-w-0">
-          <SlidePreview deck={deck} index={index} />
-          <div className="my-3 flex items-center justify-between gap-2">
-            <button className={icon} title="Previous slide" aria-label="Previous slide" disabled={index === 0} onClick={() => setIndex(n => n - 1)}><ChevronLeft size={19} /></button>
-            <span className="text-sm tabular-nums">{index + 1} / {deck.draft.slides.length}</span>
-            <button className={icon} title="Next slide" aria-label="Next slide" disabled={index === deck.draft.slides.length - 1} onClick={() => setIndex(n => n + 1)}><ChevronRight size={19} /></button>
-          </div>
-          <ol className="divide-y divide-gray-200 border-y border-gray-200">{deck.draft.slides.map((item, n) => <li key={item.stage}><button className={`flex min-h-11 w-full items-start gap-3 px-3 py-3 text-left text-sm ${index === n ? "bg-teal-50 text-teal-900" : "hover:bg-gray-100"}`} aria-current={index === n ? "step" : undefined} onClick={() => setIndex(n)}><span className="font-mono">{n + 1}</span><span className="min-w-0 break-words">{item.title}</span></button></li>)}</ol>
-          <section aria-label="Review and publish" className="mt-5 rounded-lg border border-teal-200 bg-teal-50/50 p-4">
-            <h3 className="text-base font-semibold text-gray-900">Review and publish</h3>
-            <p id={reviewHelpId} aria-live="polite" className="mt-2 text-sm leading-6 text-gray-700">{reviewHelp}</p>
-            {!busy && reviewBlock === "images" && <button type="button" className={`${button} mt-3`} onClick={() => { imageRecovery.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); imageRecovery.current?.focus({ preventScroll: true }); }}><ImagePlus size={16} />Go to image recovery</button>}
-            {!!suggestions.length && !busy && <section aria-label="AI review suggestions" className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-              <h4 className="font-semibold">AI review suggestions (optional)</h4>
-              <p className="mt-2 leading-6">Refine with AI is optional. You can download or send complete slides without refining, checking again, or confirming review.</p>
-              <button type="button" className={`${button} mt-3`} disabled={!canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Refine with AI</button>
-              <details className="mt-3"><summary className="cursor-pointer font-medium">View {suggestions.length} {suggestions.length === 1 ? "suggestion" : "suggestions"}</summary><ul className="mt-3 space-y-2">{suggestions.map((finding, n) => <li key={n} className="break-words">{finding}</li>)}</ul></details>
-            </section>}
-            <p className="mt-4 text-xs text-gray-500">Optional review record — not required to send or download.</p>
-            <button id={reviewControlId} type="button" role="checkbox" aria-checked={reviewed} aria-describedby={reviewHelpId} disabled={!ready || busy}
-              onClick={() => setReviewed(current => !current)} className={`mt-4 flex min-h-12 w-full items-start gap-3 rounded-md border bg-white px-3 py-3 text-left text-sm leading-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-800 ${ready && !busy ? "cursor-pointer border-teal-600 hover:bg-teal-50" : "border-gray-300 text-gray-500"}`}>
-              <span aria-hidden="true" className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${reviewed ? "border-teal-800 bg-teal-800 text-white" : "border-gray-400 bg-white"}`}>{reviewed && <Check size={16} />}</span>
-              <span>I have reviewed all {deck.draft.slides.length} slides and their images.</span>
-            </button>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" className={button} disabled={!ready || busy || reviewed} onClick={() => setReviewed(true)}><ScanEye size={16} />{reviewed ? "Review confirmed" : "Confirm review"}</button>
-              <button type="button" className={button} disabled={busy || !ready} onClick={download}><Download size={17} />Download PPTX</button>
-              <button type="button" className={primaryButton} disabled={busy || !ready || !classId || !assignmentId || publishedDeck === deck} onClick={publish}><Send size={17} />{publishedDeck === deck ? "Published" : "Send to students"}</button>
-              {preparedDownload?.deck === deck && !busy && ready && <a className={button} href={preparedDownload.httpUrl || preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>}
-            </div>
-            {preparedDownload?.deck === deck && !busy && ready && preparedDownload.httpUrl && <p className="mt-2 text-xs text-gray-500">Save link expires in 10 minutes. Select Download PPTX again to refresh it.</p>}
-          </section>
-        </section>
-        <aside aria-label="Slide editor" className="min-w-0 border-t border-gray-200 pt-4 lg:border-t-0 lg:pt-0">
+      <section aria-label="Slide preview" className="min-w-0">
+        <SlidePreview deck={deck} index={index} />
+        <div className="my-3 flex items-center justify-between gap-2">
+          <button className={icon} title="Previous slide" aria-label="Previous slide" disabled={index === 0} onClick={() => setIndex(n => n - 1)}><ChevronLeft size={19} /></button>
+          <span className="text-sm tabular-nums">{index + 1} / {deck.draft.slides.length}</span>
+          <button className={icon} title="Next slide" aria-label="Next slide" disabled={index === deck.draft.slides.length - 1} onClick={() => setIndex(n => n + 1)}><ChevronRight size={19} /></button>
+        </div>
+        <ol className="divide-y divide-gray-200 border-y border-gray-200">{deck.draft.slides.map((item, n) => <li key={item.stage}><button className={`flex min-h-11 w-full items-start gap-3 px-3 py-3 text-left text-sm ${index === n ? "bg-teal-50 text-teal-900" : "hover:bg-gray-100"}`} aria-current={index === n ? "step" : undefined} onClick={() => setIndex(n)}><span className="font-mono">{n + 1}</span><span className="min-w-0 break-words">{item.title}</span></button></li>)}</ol>
+      </section>
+      <section aria-label="AI Review" className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-base font-semibold">AI Review</h3>
+          <button className={button} disabled={busy} onClick={checkCurrent}><ScanEye size={16} />Check slides</button>
+        </div>
+        <p className="mt-2 text-sm leading-6 text-gray-600">Checks the teaching sequence, scientific content, and images. Suggestions are optional; you decide whether to revise.</p>
+        {!busy && ready && assessment.complete && !suggestions.length && !reviewWarnings.length && <p className="mt-3 rounded-md border border-teal-200 bg-teal-50 p-3 text-sm leading-6 text-teal-900">AI Review found no issues in the current slides and images. No revision is needed.</p>}
+        {!busy && (!assessment.complete || !!reviewWarnings.length) && <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+          <h4 className="font-semibold">Review incomplete</h4>
+          <p className="mt-1 leading-6">Run Check slides to review the current version. Complete slides can still be sent or downloaded.</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">{[...new Set([...reviewWarnings, ...assessment.pending])].map((message, n) => <li key={n}>{message}</li>)}</ul>
+        </div>}
+        {!!suggestions.length && !busy && <section aria-label="AI review suggestions" className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+          <h4 className="font-semibold">Suggested improvements ({suggestions.length})</h4>
+          <p className="mt-2 leading-6">Refine with AI is optional. You can download or send complete slides without refining, checking again, or confirming review.</p>
+          <ul className="mt-3 list-disc space-y-2 pl-5">{suggestions.map((finding, n) => <li key={n} className="break-words">{finding}</li>)}</ul>
+          <button type="button" className={`${button} mt-3`} disabled={!canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Refine with AI</button>
+        </section>}
+      </section>
+      {!!issues.length && <div role="alert" className="mt-5 border-l-4 border-red-700 bg-red-50 p-4 text-sm text-red-900"><ul className="space-y-2">{issues.map((issue, n) => <li key={n} className="whitespace-pre-line break-words">{issue}</li>)}</ul></div>}
+      {!!missingImages && !busy && <p className="mt-3 text-sm text-amber-900">Images pending. Download unavailable.</p>}
+      <div className="mt-6 grid items-start gap-6 border-t border-gray-200 pt-5 lg:grid-cols-2">
+        <aside aria-label="Slide editor" className="min-w-0">
           <h3 className="mb-4 text-base font-semibold">Edit slide text</h3>
           <div className="space-y-4">{(["title", "body", "task"] as const).map(field => <label key={field} className="block text-sm font-medium">{field === "task" ? "Thinking task" : label(field)}<textarea aria-label={`Slide ${field}`} className={`${input} mt-2 resize-y`} rows={field === "title" ? 2 : 4} disabled={busy} value={slide[field]} onChange={e => edit(field, e.target.value)} />{field === "body" && deck.strategy !== "analogy" && <span className="mt-1 block text-xs font-normal text-gray-600">{slide.stage === "question" ? "Leave this empty; students see their question task and writing card." : "Optional when the picture and thinking task provide enough context."}</span>}</label>)}{index === analogyMappingIndex(deck.draft.analogyMethod) && deck.draft.analogyPlan && analogyStudentFields(deck.draft.analogyMethod).map(field => <label key={field} className="block text-sm font-medium">{field === "mappingHint" ? "Visible comparison hint" : "Student response starter"}<textarea className={`${input} mt-2 resize-y`} rows={2} maxLength={field === "mappingHint" ? 140 : 100} disabled={busy} value={deck.draft.analogyPlan![field]} onChange={e => editMapping(field, e.target.value)} /></label>)}</div>
         </aside>
+        <section aria-label="Revise slides" className="min-w-0">
+          <h3 className="text-base font-semibold">Revise slides (optional)</h3>
+          <label className="mt-3 block text-sm font-medium">Revision request<textarea aria-label="Revision request" className={`${input} mt-2 resize-y`} rows={2} maxLength={3000} disabled={busy} value={feedback} onChange={e => setFeedback(e.target.value)} placeholder="Describe what you would like to improve." /></label>
+          <button className={`${button} mt-3`} disabled={busy || !canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Revise with AI</button>
+        </section>
       </div>
-      {!!issues.length && <div role="alert" className="mt-5 border-l-4 border-red-700 bg-red-50 p-4 text-sm text-red-900"><ul className="space-y-2">{issues.map((issue, n) => <li key={n} className="whitespace-pre-line break-words">{issue}</li>)}</ul></div>}
-      {!!missingImages && !busy && <p className="mt-3 text-sm text-amber-900">Images pending. Download unavailable.</p>}
-      <section aria-label="Revise slides" className="mt-6 border-t border-gray-200 pt-5">
-        <h3 className="text-base font-semibold">Revise slides (optional)</h3>
-        <label className="mt-3 block text-sm font-medium">Revision request<textarea aria-label="Revision request" className={`${input} mt-2 resize-y`} rows={2} maxLength={3000} disabled={busy} value={feedback} onChange={e => setFeedback(e.target.value)} placeholder="Describe what you would like to improve." /></label>
-        <button className={`${button} mt-3`} disabled={busy || !canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Revise with AI</button>
+      <section aria-label="Review and publish" className="mt-5 rounded-lg border border-teal-200 bg-teal-50/50 p-4">
+        <h3 className="text-base font-semibold text-gray-900">Review and publish</h3>
+        <p id={reviewHelpId} aria-live="polite" className="mt-2 text-sm leading-6 text-gray-700">{reviewHelp}</p>
+        {!busy && reviewBlock === "images" && <button type="button" className={`${button} mt-3`} onClick={() => { imageRecovery.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); imageRecovery.current?.focus({ preventScroll: true }); }}><ImagePlus size={16} />Go to image recovery</button>}
+        <p className="mt-4 text-xs text-gray-500">Optional review record — not required to send or download.</p>
+        <button id={reviewControlId} type="button" role="checkbox" aria-checked={reviewed} aria-describedby={reviewHelpId} disabled={!ready || busy}
+          onClick={() => setReviewed(current => !current)} className={`mt-4 flex min-h-12 w-full items-start gap-3 rounded-md border bg-white px-3 py-3 text-left text-sm leading-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-800 ${ready && !busy ? "cursor-pointer border-teal-600 hover:bg-teal-50" : "border-gray-300 text-gray-500"}`}>
+          <span aria-hidden="true" className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${reviewed ? "border-teal-800 bg-teal-800 text-white" : "border-gray-400 bg-white"}`}>{reviewed && <Check size={16} />}</span>
+          <span>I have reviewed all {deck.draft.slides.length} slides and their images.</span>
+        </button>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" className={button} disabled={!ready || busy || reviewed} onClick={() => setReviewed(true)}><ScanEye size={16} />{reviewed ? "Review confirmed" : "Confirm review"}</button>
+          <button type="button" className={button} disabled={busy || !ready} onClick={download}><Download size={17} />Download PPTX</button>
+          <button type="button" className={primaryButton} disabled={busy || !ready || !classId || !assignmentId || publishedDeck === deck} onClick={publish}><Send size={17} />{publishedDeck === deck ? "Published" : "Send to students"}</button>
+          {preparedDownload?.deck === deck && !busy && ready && <a className={button} href={preparedDownload.httpUrl || preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>}
+        </div>
+        {preparedDownload?.deck === deck && !busy && ready && preparedDownload.httpUrl && <p className="mt-2 text-xs text-gray-500">Save link expires in 10 minutes. Select Download PPTX again to refresh it.</p>}
       </section>
       {(missingImages || changedImages) && <section ref={imageRecovery} tabIndex={-1} aria-label="Image recovery" className="mt-5 rounded-md border border-gray-200 p-4 focus:outline-2 focus:outline-teal-700">
         <h3 className="text-sm font-semibold">Image recovery</h3>

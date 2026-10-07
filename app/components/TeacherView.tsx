@@ -42,9 +42,8 @@ type Props = {
   initialMaterialFormat?: MaterialFormat;
 };
 
-type MaterialFormat = "text-image" | "slides" | "video";
+type MaterialFormat = "slides" | "video";
 const materialFormats = [
-  { id: "text-image", label: "Text + Image", description: "An activity with text and an illustration, ready to share with students." },
   { id: "slides", label: "Slides", description: "Teaching slides with AI review and revisions. Read them on the web, send them to students, or download PowerPoint. Analogy uses six core slides, with an optional clarification page." },
   { id: "video", label: "Video", description: "An activity with text and a short animated video, generated from its illustration." },
 ] as const;
@@ -103,7 +102,7 @@ type PersistedDraft = {
   assignmentId: string;
   lessonNumber: number | null;
   currentStep: number;
-  materialFormat?: MaterialFormat;
+  materialFormat?: MaterialFormat | "text-image";
   classroomContext?: string;
   plan: Plan | null;
   selectedStrategies: string[];
@@ -313,7 +312,8 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
   const materialDownloadJob = useRef<{ controller: AbortController; item: ContentItem; imageUrl: string; workspace: string } | null>(null);
   const materialWorkspace = JSON.stringify([user.geniusId, classId, assignmentId]);
   const initialFormatRef = useRef(initialMaterialFormat);
-  const [materialFormat, setMaterialFormat] = useState<MaterialFormat>(initialMaterialFormat ?? "text-image");
+  const [materialFormat, setMaterialFormat] = useState<MaterialFormat>(initialMaterialFormat ?? "slides");
+  const [savedActivitiesExpanded, setSavedActivitiesExpanded] = useState(false);
   const [classroomContext, setClassroomContext] = useState("");
   const [queuedVideoIds, setQueuedVideoIds] = useState<Set<string>>(new Set());
   const videoStartsRef = useRef(new Set<string>());
@@ -614,7 +614,8 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     setSelectedForPublish(new Set());
     setPublishedContentIds(new Set());
     setCurrentStep(initialFormatRef.current ? 3 : 1);
-    setMaterialFormat(initialFormatRef.current ?? "text-image");
+    setMaterialFormat(initialFormatRef.current ?? "slides");
+    setSavedActivitiesExpanded(false);
     setClassroomContext("");
     setQueuedVideoIds(new Set());
 
@@ -671,7 +672,9 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
           setSelectedForPublish(new Set((draft.selectedForPublish ?? []).filter((itemId) => contentIds.has(itemId))));
           setPublishedContentIds(new Set((draft.publishedContentIds ?? []).filter((itemId) => contentIds.has(itemId))));
           setCurrentStep(initialFormatRef.current ? 3 : clampStep(draft.currentStep));
-          setMaterialFormat(initialFormatRef.current ?? (isMaterialFormat(draft.materialFormat) ? draft.materialFormat : "text-image"));
+          // Retain earlier activities and their media, while migrating their
+          // retired generation format to the current default.
+          setMaterialFormat(initialFormatRef.current ?? (isMaterialFormat(draft.materialFormat) ? draft.materialFormat : "slides"));
           setClassroomContext(typeof draft.classroomContext === "string" ? draft.classroomContext.slice(0, 1200) : "");
 
           shouldRestorePersistedMedia = restoredContent.length > 0 && Boolean(classId && assignmentId);
@@ -1619,7 +1622,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     || Object.values(videos).some((state) => state.status === "loading" || state.status === "polling");
   const canGenerateMaterials = isHydrated && !isRestoringStep3State && !generationBusy && Boolean(selectedLesson) && selectedStrategies.length === 1
     && (materialFormat !== "slides" || (slidesAvailable && !unsupportedSlideStrategies.length && slideStrategies.every((strategy) => slideReady[strategy])));
-  const canPublishSelectedContent = materialFormat !== "slides" && selectedForPublish.size > 0
+  const canPublishSelectedContent = selectedForPublish.size > 0
     && Array.from(selectedForPublish).every((id) => content.some((item) => item.id === id)
       && (materialFormat === "video" ? videos[id]?.status === "ready" && Boolean(getEmbeddablePublishedMediaUrl(videos[id]?.url))
         : images[id]?.status === "ready" && Boolean(getEmbeddablePublishedMediaUrl(images[id]?.url))));
@@ -2058,7 +2061,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
 
               <fieldset className="grid gap-3" aria-label="Material type">
                 <legend className="mb-3 text-sm font-semibold text-slate-700">Material type</legend>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {materialFormats.map((format) => (
                     <label key={format.id} className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 text-sm font-semibold transition ${materialFormat === format.id ? "border-[#BA0C2F] bg-[#BA0C2F]/5 text-[#BA0C2F]" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
                       <input type="radio" name="material-format" value={format.id} checked={materialFormat === format.id} onChange={() => setMaterialFormat(format.id)} className="h-4 w-4 accent-[#BA0C2F]" />
@@ -2089,7 +2092,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                 </button>
               </div>
               {materialFormat === "slides" && !slidesAvailable && <p role="status" className="text-sm text-amber-800">Open a class task in GENIUS or My classes to generate slides.</p>}
-              {materialFormat === "slides" && unsupportedSlideStrategies.length > 0 && <p role="status" className="text-sm text-amber-800">Slides do not yet support {unsupportedSlideStrategies.map(getStrategyLabel).join(", ")}. Change the strategy in Step 2, or choose Text + Image or Video.</p>}
+              {materialFormat === "slides" && unsupportedSlideStrategies.length > 0 && <p role="status" className="text-sm text-amber-800">Slides do not yet support {unsupportedSlideStrategies.map(getStrategyLabel).join(", ")}. Change the strategy in Step 2, or choose Video.</p>}
               {(!selectedLesson || !selectedStrategies.length) && <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
                 <span>Complete your material settings:</span>
                 {!selectedLesson && <button type="button" onClick={() => setCurrentStep(1)} className="font-semibold text-[#BA0C2F] underline">Choose lesson</button>}
@@ -2106,7 +2109,13 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                     onBusyChange={onSlideBusyChange} onReadyChange={onSlideReadyChange} onPublished={onSlidesPublished} />
                 ))}
               </div>
-              <div hidden={materialFormat === "slides"} className={materialFormat === "slides" ? "hidden" : "grid gap-6"}>
+              {materialFormat === "slides" && content.length > 0 && <button type="button"
+                onClick={() => setSavedActivitiesExpanded((expanded) => !expanded)} aria-expanded={savedActivitiesExpanded} aria-controls="saved-activities"
+                className="justify-self-start text-sm font-semibold text-slate-600 underline">
+                {savedActivitiesExpanded ? "Hide saved activities" : "View saved activities"}
+              </button>}
+              <div id="saved-activities" hidden={materialFormat === "slides" && !savedActivitiesExpanded}
+                className={materialFormat === "slides" && !savedActivitiesExpanded ? "hidden" : "grid gap-6"}>
 
               {content.length === 0 && (
                 <p className="text-sm text-slate-400">No activity generated yet. Choose a material type above and select Generate materials.</p>
@@ -2250,12 +2259,12 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                                 </button>
                               )}
                             </div>
-                            {materialFormat === "text-image" && <button type="button" onClick={() => void downloadMaterial(item)}
+                            {materialFormat !== "video" && <button type="button" onClick={() => void downloadMaterial(item)}
                               disabled={images[item.id]?.status !== "ready" || Boolean(downloadingMaterialId)}
                               className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:text-slate-400">
                               {downloadingMaterialId === item.id ? "Preparing download..." : "Download material (HTML)"}
                             </button>}
-                            {materialFormat === "text-image" && preparedMaterial?.item === item && preparedMaterial.workspace === materialWorkspace
+                            {materialFormat !== "video" && preparedMaterial?.item === item && preparedMaterial.workspace === materialWorkspace
                               && images[item.id]?.status === "ready" && preparedMaterial.imageUrl === images[item.id]?.url && <div className="mt-2 text-sm text-slate-600">
                                 <p>Material ready. If downloading did not start, use the save link.</p>
                                 <a href={preparedMaterial.httpUrl || preparedMaterial.dataUri || preparedMaterial.url} download={preparedMaterial.fileName}

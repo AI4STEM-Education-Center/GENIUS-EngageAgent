@@ -36,7 +36,7 @@ const reply = (data: unknown, status = 200) => ({
 function seedDraft(content: ContentItem[] = [], images: Record<string, ImageState> = {}) {
   localStorage.setItem(`engage-agent:draft:v3:${teacher.classId}:${teacher.assignmentId}`, JSON.stringify({
     version: 2, classId: teacher.classId, assignmentId: teacher.assignmentId,
-    lessonNumber: 3, currentStep: 3, materialFormat: "text-image", plan,
+    lessonNumber: 3, currentStep: 3, materialFormat: "video", plan,
     selectedStrategies: ["analogy"], annotationDecision: null, annotationReason: "", annotationStatus: "idle",
     content, images, videos: {}, selectedForPublish: [], publishedContentIds: [],
   }));
@@ -102,7 +102,7 @@ it("explicit Video generation runs content, image, then one video with the nativ
     item: { ...activity, id: expect.any(String) },
   });
 
-  fireEvent.click(screen.getByRole("radio", { name: "Text + Image" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
   fireEvent.click(screen.getByRole("radio", { name: "Video" }));
   expect(callsTo("/api/engagement-video")).toHaveLength(1);
 });
@@ -115,7 +115,6 @@ it("switching material types with an existing image never starts a video or rege
   fireEvent.click(screen.getByRole("radio", { name: "Video" }));
   expect(screen.getByRole("button", { name: /Generate video/ })).toBeTruthy();
   fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
-  fireEvent.click(screen.getByRole("radio", { name: "Text + Image" }));
   fireEvent.click(screen.getByRole("radio", { name: "Video" }));
   expect(screen.getByRole("button", { name: /Generate video/ })).toBeTruthy();
   expect(posts()).toHaveLength(0);
