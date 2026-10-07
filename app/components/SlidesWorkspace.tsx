@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Download, Expand, ImagePlus, LoaderCircle, RefreshCw, ScanEye, Send, Sparkles, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, Expand, ImagePlus, LoaderCircle, RefreshCw, ScanEye, Send, Sparkles, X } from "lucide-react";
 import type { UserContext } from "@/lib/auth";
 import { STRATEGIES, parseDraft, type SlideDeck, type SlideLesson, type SlideStrategy, type SlideVisual, type TeachingSlide } from "@/lib/slides/model";
 import { browserMeasure, layoutErrors } from "@/lib/slides/layout";
@@ -74,7 +74,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const job = useRef<AbortController | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const classroomHelpId = useId();
-  const reviewInputId = useId();
+  const reviewControlId = useId();
   const reviewHelpId = useId();
   const editor = useRef<HTMLElement>(null);
   const { classId, assignmentId } = user;
@@ -426,10 +426,11 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
             {!busy && (reviewBlock === "images" || reviewBlock === "changedImages") && <button type="button" className={`${button} mt-3`} onClick={() => { setTab("images"); editor.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); }}><ImagePlus size={16} />Open images</button>}
             {!busy && reviewBlock === "checks" && <button type="button" className={`${button} mt-3`} onClick={checkCurrent}><ScanEye size={16} />Check slides to continue</button>}
             {!busy && (reviewBlock === "layout" || reviewBlock === "content" || reviewBlock === "findings") && <button type="button" className={`${button} mt-3`} disabled={!canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Fix slides with AI</button>}
-            <label htmlFor={reviewInputId} className={`mt-4 flex min-h-12 items-start gap-3 rounded-md border bg-white px-3 py-3 text-sm leading-6 ${ready && !busy ? "cursor-pointer border-teal-600 hover:bg-teal-50" : "border-gray-300 text-gray-500"}`}>
-              <input id={reviewInputId} type="checkbox" aria-describedby={reviewHelpId} checked={reviewed} disabled={!ready || busy} onChange={e => setReviewed(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-800" />
+            <button id={reviewControlId} type="button" role="checkbox" aria-checked={reviewed} aria-describedby={reviewHelpId} disabled={!ready || busy}
+              onClick={() => setReviewed(current => !current)} className={`mt-4 flex min-h-12 w-full items-start gap-3 rounded-md border bg-white px-3 py-3 text-left text-sm leading-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-800 ${ready && !busy ? "cursor-pointer border-teal-600 hover:bg-teal-50" : "border-gray-300 text-gray-500"}`}>
+              <span aria-hidden="true" className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${reviewed ? "border-teal-800 bg-teal-800 text-white" : "border-gray-400 bg-white"}`}>{reviewed && <Check size={16} />}</span>
               <span>I have reviewed all {deck.draft.slides.length} slides and their images.</span>
-            </label>
+            </button>
             <div className="mt-3 flex flex-wrap gap-2">
               <button type="button" className={button} disabled={!ready || busy || reviewed} onClick={() => setReviewed(true)}><ScanEye size={16} />{reviewed ? "Review confirmed" : "Confirm review"}</button>
               <button type="button" className={button} disabled={busy || !ready || !reviewed} onClick={download}><Download size={17} />Download PPTX</button>

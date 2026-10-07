@@ -115,31 +115,32 @@ async function generate() {
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
   await screen.findByText("5 slides ready for review.");
 }
-it("lets the labeled review row and Confirm review enable download and student publishing", async () => {
+it("toggles review with the accessible full-row button and also accepts Confirm review", async () => {
   await generate();
   const review = within(screen.getByRole("region", { name: "Review and publish" }));
-  const checkbox = review.getByRole("checkbox", { name: "I have reviewed all 5 slides and their images." }) as HTMLInputElement;
+  const checkbox = review.getByRole("checkbox", { name: "I have reviewed all 5 slides and their images." }) as HTMLButtonElement;
   const download = review.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement;
   const publish = review.getByRole("button", { name: "Send to students" }) as HTMLButtonElement;
-  const label = checkbox.labels?.[0];
-  expect(label?.htmlFor).toBe(checkbox.id);
-  expect(checkbox.id).not.toBe("");
+  expect(checkbox.tagName).toBe("BUTTON");
+  expect(checkbox.type).toBe("button");
+  expect(checkbox.getAttribute("aria-checked")).toBe("false");
+  expect(checkbox.disabled).toBe(false);
   expect(download.disabled).toBe(true);
   expect(publish.disabled).toBe(true);
   const help = document.getElementById(checkbox.getAttribute("aria-describedby")!);
   expect(help).toBe(review.getByText(/The slides and images are ready/));
 
-  fireEvent.click(label!);
-  expect(checkbox.checked).toBe(true);
+  fireEvent.click(checkbox);
+  expect(checkbox.getAttribute("aria-checked")).toBe("true");
   expect(download.disabled).toBe(false);
   expect(publish.disabled).toBe(false);
-  fireEvent.click(label!);
-  expect(checkbox.checked).toBe(false);
+  fireEvent.click(checkbox);
+  expect(checkbox.getAttribute("aria-checked")).toBe("false");
   expect(download.disabled).toBe(true);
   expect(publish.disabled).toBe(true);
 
   fireEvent.click(review.getByRole("button", { name: "Confirm review" }));
-  expect(checkbox.checked).toBe(true);
+  expect(checkbox.getAttribute("aria-checked")).toBe("true");
   expect((review.getByRole("button", { name: "Review confirmed" }) as HTMLButtonElement).disabled).toBe(true);
   expect(download.disabled).toBe(false);
   expect(publish.disabled).toBe(false);
@@ -163,7 +164,7 @@ it("preserves review, prepared download and publication on unchanged Notes blur 
     fireEvent.focus(note);
     fireEvent.blur(note);
   }
-  expect((review.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+  expect(review.getByRole("checkbox").getAttribute("aria-checked")).toBe("true");
   expect((review.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(false);
   expect((review.getByRole("button", { name: "Published" }) as HTMLButtonElement).disabled).toBe(true);
   expect(review.getByRole("link", { name: "Save PPTX file" }).getAttribute("href")).toBe(preparedDataUri);
@@ -174,7 +175,7 @@ it("preserves review, prepared download and publication on unchanged Notes blur 
 
   fireEvent.change(screen.getByLabelText("Teacher note 1"), { target: { value: "Ask students to justify their prediction before showing the next page." } });
   fireEvent.blur(screen.getByLabelText("Teacher note 1"));
-  expect((review.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  expect(review.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
   expect((review.getByRole("button", { name: "Confirm review" }) as HTMLButtonElement).disabled).toBe(true);
   expect((review.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
   expect((review.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(true);
@@ -184,7 +185,7 @@ it("preserves review, prepared download and publication on unchanged Notes blur 
   fireEvent.click(review.getByRole("button", { name: "Check slides to continue" }));
   await screen.findByText("Quality checks complete. Teacher review pending.");
   expect((review.getByRole("button", { name: "Confirm review" }) as HTMLButtonElement).disabled).toBe(false);
-  expect((review.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  expect(review.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
 });
 
 it("retains a native save link without regenerating and releases replaced files on export and unmount", async () => {
@@ -353,7 +354,7 @@ it("generates, previews, edits, requires teacher review and downloads the curren
   fireEvent.change(screen.getByLabelText("Slide body"), { target: { value: "word ".repeat(30) } });
   await waitFor(() => expect(download.disabled).toBe(true));
   expect(screen.getAllByRole("alert").some(alert => alert.textContent?.includes("Slide 2.body"))).toBe(true);
-  expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
 });
 it("retains the generated prompt version through dropdown changes, revisions and download", async () => {
   const provenance = { version: "reference", revision: "test-revision", sourceSha256: "a".repeat(64) };
@@ -400,8 +401,10 @@ it("keeps text and successful images when one image fails and permits a focused 
   await screen.findByText("Draft retained. Generate the missing images before teacher review.");
   expect(screen.queryByText("Quality checks complete. Teacher review pending.")).toBeNull();
   const review = within(screen.getByRole("region", { name: "Review and publish" }));
-  const checkbox = review.getByRole("checkbox") as HTMLInputElement;
+  const checkbox = review.getByRole("checkbox") as HTMLButtonElement;
   expect(checkbox.disabled).toBe(true);
+  fireEvent.click(checkbox);
+  expect(checkbox.getAttribute("aria-checked")).toBe("false");
   expect(document.getElementById(checkbox.getAttribute("aria-describedby")!)).toBe(review.getByText("Images are missing. Open Images to generate or retry them."));
   for (const name of ["Confirm review", "Download PPTX", "Send to students"]) {
     const action = review.getByRole("button", { name }) as HTMLButtonElement;
@@ -492,7 +495,7 @@ it("switching a dropdown alone does not regenerate, invalidate, or relabel exist
   fireEvent.change(screen.getByLabelText("Image model"), { target: { value: "gpt-image-2" } });
   expect(mocks.fetch).toHaveBeenCalledTimes(calls);
   expect(screen.getByText("Text: gpt-4.1")).toBeTruthy();
-  expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+  expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("true");
   fireEvent.click(screen.getByRole("tab", { name: "Images" }));
   expect(screen.getAllByText("gpt-image-1")).toHaveLength(3);
   mocks.fetch.mockResolvedValueOnce(reply({ asset: { ...asset, model: "gpt-image-2" } }));
@@ -501,7 +504,7 @@ it("switching a dropdown alone does not regenerate, invalidate, or relabel exist
   expect(JSON.parse(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image")).at(-1)![1].body).imageModel).toBe("gpt-image-2");
   expect(screen.getAllByText("gpt-image-1")).toHaveLength(2);
   expect(screen.getByText("gpt-image-2")).toBeTruthy();
-  expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
 });
 it("uses selected text model and teacher feedback while preserving unchanged images", async () => {
   await generate();
@@ -586,17 +589,18 @@ it("explains unresolved image findings beside review and blocks confirmation, ex
   await screen.findByText("Draft retained. Quality corrections needed.");
   expect(screen.getByText(/Image target: compressed spring/)).toBeTruthy();
   const review = within(screen.getByRole("region", { name: "Review and publish" }));
-  const checkbox = review.getByRole("checkbox") as HTMLInputElement;
+  const checkbox = review.getByRole("checkbox") as HTMLButtonElement;
   const help = review.getByText("AI review found issues. Revise the slides, or review the findings below and record a teacher decision before confirming.");
   expect(document.getElementById(checkbox.getAttribute("aria-describedby")!)).toBe(help);
   expect(checkbox.disabled).toBe(true);
+  fireEvent.click(checkbox);
   expect(review.getByRole("button", { name: "Fix slides with AI" })).toBeTruthy();
   for (const name of ["Confirm review", "Download PPTX", "Send to students"]) {
     const action = review.getByRole("button", { name }) as HTMLButtonElement;
     expect(action.disabled).toBe(true);
     fireEvent.click(action);
   }
-  expect(checkbox.checked).toBe(false);
+  expect(checkbox.getAttribute("aria-checked")).toBe("false");
   expect(mocks.download).not.toHaveBeenCalled();
   expect(mocks.publish).not.toHaveBeenCalled();
   const attempts = mocks.fetch.mock.calls.filter(([path, init]) => path.endsWith("/image") && JSON.parse(init.body).visualId === "target");
@@ -628,17 +632,17 @@ it("retains the old picture after editing its plan, regenerates only that pictur
   fireEvent.click(screen.getByRole("tab", { name: "Images" }));
   fireEvent.change(screen.getByLabelText("target prompt"), { target: { value: "One cart touching a visibly short compressed spring, no release panel." } });
   expect(screen.getAllByText("Plan changed")).toHaveLength(2);
-  expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
   fireEvent.click(screen.getByRole("button", { name: "Regenerate target image" }));
   await screen.findByText("Image updated. Quality check needs attention.");
   const images = mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image"));
   expect(images).toHaveLength(4);
   expect(JSON.parse(images[3][1].body).draft.visuals[1].prompt).toContain("visibly short");
   fireEvent.click(screen.getByRole("button", { name: "Check slides" }));
-  await waitFor(() => expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(true));
+  await waitFor(() => expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(true));
   fireEvent.click(screen.getByRole("button", { name: "Regenerate variation image" }));
   await screen.findByText("Image updated.");
-  expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(false);
+  expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(false);
 });
 
 it("does not erase text or mark quality checks passed when checking fails", async () => {
@@ -648,5 +652,5 @@ it("does not erase text or mark quality checks passed when checking fails", asyn
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
   await screen.findByText("Quality service unavailable");
   expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe("Tracking energy transfers");
-  expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(true);
 });
