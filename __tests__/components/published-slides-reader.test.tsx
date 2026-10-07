@@ -34,6 +34,25 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+it.each(["student", "teacher"] as const)("shows only the slide canvas while retaining an accessible transcript for %s readers", async audience => {
+  const deck = deckFixture("experience bridging");
+  deck.draft.slides[0].teacherNotes = ["PRIVATE TEACHER GUIDANCE"];
+  fetchMock.mockResolvedValue(reply(response(deck)));
+  const { container } = render(<PublishedSlidesReader {...props} audience={audience} />);
+  await screen.findByText("Slide 1 of 5");
+  const transcript = screen.getByRole("region", { name: "Slide text" });
+  expect(transcript.classList.contains("sr-only")).toBe(true);
+  expect(transcript.hasAttribute("aria-hidden")).toBe(false);
+  expect(within(transcript).getByText(deck.draft.slides[0].body)).toBeTruthy();
+  expect(within(transcript).getByText(deck.draft.visuals[0].alt)).toBeTruthy();
+  expect(container.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+  expect(container.querySelectorAll("image")).toHaveLength(1);
+  expect(container.textContent).not.toContain("PRIVATE TEACHER GUIDANCE");
+  fireEvent.click(screen.getByRole("button", { name: "Enlarge slides" }));
+  expect(screen.getAllByRole("region", { name: "Slide text" })).toHaveLength(1);
+  expect(within(screen.getByRole("dialog")).getByRole("region", { name: "Slide text" }).classList.contains("sr-only")).toBe(true);
+});
+
 it("requires a typed prediction before rendering any future evidence and compares the learner's recorded prediction", async () => {
   const onQuestion = vi.fn();
   const { container } = render(<PublishedSlidesReader {...props} onQuestion={onQuestion} />);

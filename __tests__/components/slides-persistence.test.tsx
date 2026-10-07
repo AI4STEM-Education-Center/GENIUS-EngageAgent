@@ -38,8 +38,9 @@ it("restores a saved deck with images and checks, requires fresh human confirmat
   expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
   expect(posts()).toHaveLength(0);
   expect(mocks.load).toHaveBeenCalledWith({ userId: user.geniusId, classId: user.classId, assignmentId: user.assignmentId, lessonNumber: 3, strategy: context.strategy });
-  fireEvent.click(screen.getByRole("tab", { name: "Images" }));
-  expect(screen.getByText("Ready")).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Image recovery" })).toBeNull();
+  await waitFor(() => expect(mocks.save).toHaveBeenCalled());
+  expect(mocks.save.mock.calls.at(-1)![1].assets).toEqual(saved.assets);
 });
 
 it("commits the latest generated image and edit, then restores them when the editor remounts", async () => {

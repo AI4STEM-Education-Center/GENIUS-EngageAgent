@@ -3,9 +3,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { UserContext } from "@/lib/auth";
 import { INITIAL_MODEL_CATALOG } from "@/lib/slides/models";
-import { sixStepDraft, tinyJpeg } from "../fixtures/analogy-six-step";
+import { sixStepDeck, sixStepDraft, tinyJpeg } from "../fixtures/analogy-six-step";
 
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), decode: vi.fn(), download: vi.fn() }));
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), decode: vi.fn(), download: vi.fn(), load: vi.fn(), save: vi.fn() }));
+vi.mock("@/lib/slides/draft-storage", async importOriginal => ({ ...await importOriginal<object>(), loadSlideDraft: mocks.load, saveSlideDraft: mocks.save }));
 vi.mock("@/lib/slides/export", () => ({ downloadPresentation: mocks.download, decodeSlideAsset: mocks.decode }));
 import SlidesWorkspace from "@/app/components/SlidesWorkspace";
 
@@ -16,7 +17,7 @@ let includeLimits = false;
 let phenomenonData = tinyJpeg;
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.clearAllMocks(); mocks.load.mockResolvedValue(null); mocks.save.mockResolvedValue(undefined);
   includeLimits = false;
   phenomenonData = tinyJpeg;
   vi.stubGlobal("fetch", mocks.fetch);
@@ -40,7 +41,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function generate() {
   render(<SlidesWorkspace user={user} />);
   await screen.findByRole("option", { name: "5. Contact forces" });
-  expect((screen.getByLabelText("Analogy story") as HTMLSelectElement).value).toBe("six-step");
+  expect(screen.queryByLabelText("Analogy story")).toBeNull();
   await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
   await screen.findByText(`${includeLimits ? 7 : 6} slides ready for review.`);
@@ -75,15 +76,12 @@ it.each([false, true])("previews all six-step pages with limits=%s and uses a ma
 
 it("keeps six-step revision routing while adding a seventh page and updates the final question position", async () => {
   await generate();
-  const calls = mocks.fetch.mock.calls.length;
-  fireEvent.change(screen.getByLabelText("Analogy story"), { target: { value: "predict-transfer" } });
-  expect(mocks.fetch).toHaveBeenCalledTimes(calls);
   includeLimits = true;
   fireEvent.change(screen.getByLabelText("Revision request"), { target: { value: "Clarify that fixed supports cannot adjust their grip." } });
   fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
   await screen.findByText("7 slides ready for review.");
   expect(bodies("/api/slides")[1]).toMatchObject({ operation: "review", analogyMethod: "six-step", draft: { analogyMethod: "six-step" } });
-  expect((screen.getByLabelText("Analogy story") as HTMLSelectElement).value).toBe("predict-transfer");
+  expect(screen.queryByLabelText("Analogy story")).toBeNull();
   for (let i = 0; i < 5; i++) fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
   const preview = screen.getByRole("region", { name: "Slide preview" });
   expect(within(preview).getByText("6 / 7")).toBeTruthy();
@@ -95,25 +93,29 @@ it("keeps six-step revision routing while adding a seventh page and updates the 
   expect(screen.getByRole("checkbox", { name: "I have reviewed all 7 slides and their images." })).toBeTruthy();
 });
 
-it("requires the target to be regenerated after a new phenomenon image and passes the new reference", async () => {
-  await generate();
-  fireEvent.click(screen.getByRole("checkbox"));
+it("recovers a stale phenomenon and its dependent target using the new reference", async () => {
+  const saved = sixStepDeck(); saved.assets.phenomenon.sourcePrompt = "Earlier phenomenon image plan";
+  mocks.load.mockResolvedValue(saved);
+  render(<SlidesWorkspace user={user} />);
+  await screen.findByText(/Saved draft restored/);
   const download = screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement;
-  expect(download.disabled).toBe(false);
-  fireEvent.click(screen.getByRole("tab", { name: "Images" }));
+  expect(download.disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Regenerate target image" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole("region", { name: "Image recovery" })).toBeTruthy();
   phenomenonData = "data:image/jpeg;base64,/9j/4AE=";
   fireEvent.click(screen.getByRole("button", { name: "Regenerate phenomenon image" }));
   await screen.findByText("Image updated. Quality check needs attention.");
   expect(download.disabled).toBe(true);
   expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
   expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(true);
-  expect(bodies("/api/slides/image").map(body => body.visualId)).toEqual(["phenomenon", "analogue", "target", "phenomenon"]);
+  expect(bodies("/api/slides/image").map(body => body.visualId)).toEqual(["phenomenon"]);
   fireEvent.click(screen.getByRole("button", { name: "Regenerate target image" }));
   await screen.findByText("Image updated.");
   await waitFor(() => expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(false));
   expect(bodies("/api/slides/image").at(-1)).toMatchObject({ visualId: "target", referenceAsset: { data: phenomenonData } });
   expect(bodies("/api/slides/check").at(-1)).toMatchObject({ visualId: "target", phenomenonAsset: { data: phenomenonData }, referenceAsset: { data: tinyJpeg } });
-  expect(bodies("/api/slides/image").filter(body => body.visualId === "analogue")).toHaveLength(1);
+  expect(bodies("/api/slides/image").filter(body => body.visualId === "analogue")).toHaveLength(0);
+  expect(screen.queryByRole("region", { name: "Image recovery" })).toBeNull();
   fireEvent.click(screen.getByRole("checkbox"));
   expect(download.disabled).toBe(false);
 });
