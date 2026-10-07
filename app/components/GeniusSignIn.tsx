@@ -12,7 +12,7 @@ export default function GeniusSignIn({ error }: GeniusSignInProps) {
         <h1 id="sign-in-title" className="mt-3 break-words text-3xl font-semibold">
           EngageAgent
         </h1>
-        <p className="mt-3 text-base text-gray-600">GENIUS account sign-in</p>
+        <p className="mt-3 text-base text-gray-600">Choose the GENIUS account you want to use.</p>
         {error && (
           <p role="alert" className="mt-6 border-l-2 border-red-700 pl-3 text-sm text-red-800">
             Your EngageAgent session could not be verified. Sign-in is required again.

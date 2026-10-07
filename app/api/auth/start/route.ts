@@ -6,7 +6,7 @@ export async function GET() {
     const state = randomValue(), nonce = randomValue(), verifier = randomValue();
     const destination = new URL("/api/sso/engage/authorize", geniusOrigin());
     destination.search = new URLSearchParams({
-      redirect_uri: callbackUrl(), state, nonce,
+      redirect_uri: callbackUrl(), state, nonce, prompt: "select_account",
       code_challenge: challengeFor(verifier), code_challenge_method: "S256",
     }).toString();
     const response = NextResponse.redirect(destination);
