@@ -44,7 +44,7 @@ async function generate() {
   expect(screen.queryByLabelText("Analogy story")).toBeNull();
   await waitFor(() => expect((screen.getByRole("button", { name: "Generate slides" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Generate slides" }));
-  await screen.findByText(`${includeLimits ? 7 : 6} slides ready for review.`);
+  await screen.findByText(`${includeLimits ? 7 : 6} slides ready to send.`);
 }
 
 it.each([false, true])("previews all six-step pages with limits=%s and uses a matching teacher review count", async boundary => {
@@ -69,7 +69,7 @@ it.each([false, true])("previews all six-step pages with limits=%s and uses a ma
   expect((screen.getByRole("button", { name: "Next slide" }) as HTMLButtonElement).disabled).toBe(true);
   const checkbox = screen.getByRole("checkbox", { name: `I have reviewed all ${count} slides and their images.` });
   expect((checkbox as HTMLButtonElement).disabled).toBe(false);
-  expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(false);
   fireEvent.click(checkbox);
   expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(false);
 });
@@ -79,7 +79,7 @@ it("keeps six-step revision routing while adding a seventh page and updates the 
   includeLimits = true;
   fireEvent.change(screen.getByLabelText("Revision request"), { target: { value: "Clarify that fixed supports cannot adjust their grip." } });
   fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
-  await screen.findByText("7 slides ready for review.");
+  await screen.findByText("7 slides ready to send.");
   expect(bodies("/api/slides")[1]).toMatchObject({ operation: "review", analogyMethod: "six-step", draft: { analogyMethod: "six-step" } });
   expect(screen.queryByLabelText("Analogy story")).toBeNull();
   for (let i = 0; i < 5; i++) fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
@@ -93,24 +93,24 @@ it("keeps six-step revision routing while adding a seventh page and updates the 
   expect(screen.getByRole("checkbox", { name: "I have reviewed all 7 slides and their images." })).toBeTruthy();
 });
 
-it("recovers a stale phenomenon and its dependent target using the new reference", async () => {
+it("permits existing images with stale plans and optionally refreshes dependent target using the new reference", async () => {
   const saved = sixStepDeck(); saved.assets.phenomenon.sourcePrompt = "Earlier phenomenon image plan";
   mocks.load.mockResolvedValue(saved);
   render(<SlidesWorkspace user={user} />);
   await screen.findByText(/Saved draft restored/);
   const download = screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement;
-  expect(download.disabled).toBe(true);
+  expect(download.disabled).toBe(false);
   expect((screen.getByRole("button", { name: "Regenerate target image" }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByRole("region", { name: "Image recovery" })).toBeTruthy();
   phenomenonData = "data:image/jpeg;base64,/9j/4AE=";
   fireEvent.click(screen.getByRole("button", { name: "Regenerate phenomenon image" }));
-  await screen.findByText("Image updated. Quality check needs attention.");
-  expect(download.disabled).toBe(true);
+  await screen.findByText("Image updated. Review suggestions are optional.");
+  expect(download.disabled).toBe(false);
   expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
-  expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(false);
   expect(bodies("/api/slides/image").map(body => body.visualId)).toEqual(["phenomenon"]);
   fireEvent.click(screen.getByRole("button", { name: "Regenerate target image" }));
-  await screen.findByText("Image updated.");
+  await screen.findByText("Image updated. Review suggestions are optional.");
   await waitFor(() => expect((screen.getByRole("checkbox") as HTMLButtonElement).disabled).toBe(false));
   expect(bodies("/api/slides/image").at(-1)).toMatchObject({ visualId: "target", referenceAsset: { data: phenomenonData } });
   expect(bodies("/api/slides/check").at(-1)).toMatchObject({ visualId: "target", phenomenonAsset: { data: phenomenonData }, referenceAsset: { data: tinyJpeg } });
@@ -145,7 +145,7 @@ it("keeps the question editor available when automatic repair removes page seven
   expect(within(screen.getByRole("region", { name: "Slide preview" })).getByText("7 / 7")).toBeTruthy();
   expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe("Your question about supports");
   await act(async () => { resolveRepair!(reply({ draft: sixStepDraft() })); });
-  await screen.findByText("6 slides ready for review.");
+  await screen.findByText("6 slides ready to send.");
   const preview = screen.getByRole("region", { name: "Slide preview" });
   expect(within(preview).getByText("6 / 6")).toBeTruthy();
   expect(within(preview).getByText("MY QUESTION")).toBeTruthy();

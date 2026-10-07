@@ -3,7 +3,7 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Download, Expand, ImagePlus, LoaderCircle, RefreshCw, ScanEye, Send, Sparkles, X } from "lucide-react";
 import type { UserContext } from "@/lib/auth";
-import { STRATEGIES, parseDraft, type SlideDeck, type SlideLesson, type SlideStrategy, type TeachingSlide } from "@/lib/slides/model";
+import { STRATEGIES, isSlideAsset, parseDraft, type SlideDeck, type SlideLesson, type SlideStrategy, type TeachingSlide } from "@/lib/slides/model";
 import { browserMeasure, layoutErrors } from "@/lib/slides/layout";
 import { decodeSlideAsset, downloadPresentation } from "@/lib/slides/export";
 import { DEFAULT_MODEL_SELECTION, INITIAL_MODEL_CATALOG, type SlideModelCatalog } from "@/lib/slides/models";
@@ -47,6 +47,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const [index, setIndex] = useState(0);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [reviewWarnings, setReviewWarnings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [reviewed, setReviewed] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
@@ -117,8 +118,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   useEffect(() => { if (publishedDeck && publishedDeck !== deck) setPublishedDeck(null); }, [deck, publishedDeck]);
   useEffect(() => () => { if (preparedDownload) URL.revokeObjectURL(preparedDownload.url); }, [preparedDownload]);
   useEffect(() => {
-    if (preparedDownload && (preparedDownload.deck !== deck || !reviewed)) setPreparedDownload(null);
-  }, [deck, reviewed, preparedDownload]);
+    if (preparedDownload && preparedDownload.deck !== deck) setPreparedDownload(null);
+  }, [deck, preparedDownload]);
   useEffect(() => { onBusyChange?.(strategy, busy); }, [onBusyChange, strategy, busy]);
   useEffect(() => () => { onBusyChange?.(strategy, false); }, [onBusyChange, strategy]);
   useEffect(() => { onReadyChange?.(strategy, canGenerate); }, [onReadyChange, strategy, canGenerate]);
@@ -132,6 +133,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   }, [deck]);
   const qualityIssues = useMemo(() => deck ? qualityErrors(deck) : [], [deck]);
   const findings = useMemo(() => deck ? reviewFindings(deck) : [], [deck]);
+  const suggestions = useMemo(() => [...new Set([...qualityIssues, ...findings, ...reviewWarnings])], [qualityIssues, findings, reviewWarnings]);
   useEffect(() => {
     if (!busy && (!deck || deck === savedDeck)) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
@@ -146,7 +148,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   async function run(work: (controller: AbortController) => Promise<void>) {
     job.current?.abort();
     const controller = new AbortController(); job.current = controller;
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setReviewWarnings([]);
     try { await work(controller); }
     catch (err) { if (!controller.signal.aborted) { setError(err instanceof Error ? err.message : "Unable to complete this request."); setStatus(""); } }
     finally { if (job.current === controller) { setBusy(false); job.current = null; } }
@@ -159,10 +161,16 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   }
   async function checkText(target: SlideDeck, controller: AbortController): Promise<SlideDeck> {
     setStatus("Checking teaching sequence and scientific content...");
-    const result = await post("/api/slides/check", { lessonNumber: target.lessonNumber, strategy: target.strategy, draft: target.draft, textModel: target.modelSelection?.textModel, classroomContext: target.classroomContext ?? "" }, controller);
-    const next = { ...target, checks: { images: target.checks?.images || {}, text: { key: textCheckKey(target), issues: result.issues, model: result.model } } };
-    showDraft(next, controller);
-    return next;
+    try {
+      const result = await post("/api/slides/check", { lessonNumber: target.lessonNumber, strategy: target.strategy, draft: target.draft, textModel: target.modelSelection?.textModel, classroomContext: target.classroomContext ?? "" }, controller);
+      const next = { ...target, checks: { images: target.checks?.images || {}, text: { key: textCheckKey(target), issues: result.issues, model: result.model } } };
+      showDraft(next, controller);
+      return next;
+    } catch {
+      controller.signal.throwIfAborted();
+      setReviewWarnings(current => [...new Set([...current, "Text review could not finish. You can still send complete slides, or optionally run Check slides again."])]);
+      return target;
+    }
   }
   async function checkImage(target: SlideDeck, visualId: string, controller: AbortController, force = false): Promise<SlideDeck> {
     const asset = target.assets[visualId];
@@ -173,13 +181,19 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     setStatus(`Checking ${visualId} image against the slide text...`);
     const reference = visualId === "variation" ? target.assets.target : target.strategy === "analogy" && target.draft.analogyPlan && visualId === "target" ? target.assets.analogue : undefined;
     const phenomenon = target.draft.analogyMethod === "six-step" && visualId === "target" ? target.assets.phenomenon : undefined;
-    const result = await post("/api/slides/check", { lessonNumber: target.lessonNumber, strategy: target.strategy, draft: target.draft, textModel: target.modelSelection?.textModel, classroomContext: target.classroomContext ?? "", visualId,
-      asset: { data: asset.data, width: asset.width, height: asset.height },
-      ...(reference ? { referenceAsset: { data: reference.data, width: reference.width, height: reference.height } } : {}),
-      ...(phenomenon ? { phenomenonAsset: { data: phenomenon.data, width: phenomenon.width, height: phenomenon.height } } : {}) }, controller);
-    const next = { ...target, checks: { ...target.checks, images: { ...target.checks?.images, [visualId]: { key, issues: result.issues, model: result.model, imageData: asset.data } } } };
-    showDraft(next, controller);
-    return next;
+    try {
+      const result = await post("/api/slides/check", { lessonNumber: target.lessonNumber, strategy: target.strategy, draft: target.draft, textModel: target.modelSelection?.textModel, classroomContext: target.classroomContext ?? "", visualId,
+        asset: { data: asset.data, width: asset.width, height: asset.height },
+        ...(reference ? { referenceAsset: { data: reference.data, width: reference.width, height: reference.height } } : {}),
+        ...(phenomenon ? { phenomenonAsset: { data: phenomenon.data, width: phenomenon.width, height: phenomenon.height } } : {}) }, controller);
+      const next = { ...target, checks: { ...target.checks, images: { ...target.checks?.images, [visualId]: { key, issues: result.issues, model: result.model, imageData: asset.data } } } };
+      showDraft(next, controller);
+      return next;
+    } catch {
+      controller.signal.throwIfAborted();
+      setReviewWarnings(current => [...new Set([...current, `${label(visualId)} image review could not finish. You can still send complete slides, or optionally run Check slides again.`])]);
+      return target;
+    }
   }
   async function imageFor(target: SlideDeck, visualId: string, controller: AbortController, imageModel = target.modelSelection?.imageModel || DEFAULT_MODEL_SELECTION.imageModel, feedback = ""): Promise<SlideDeck> {
     const referenceId = imageReferenceId(target.draft, visualId);
@@ -213,17 +227,22 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       next = await checkText(next, controller);
       const textFindings = (candidate: SlideDeck) => [...(candidate.checks?.text?.issues || []), ...layoutErrors(candidate, browserMeasure())];
       for (let attempt = 0; attempt < 2 && textFindings(next).length; attempt++) {
-        setStatus("Correcting slide content and layout...");
-        const repaired = await post("/api/slides", { ...context, operation: "review", draft: next.draft, feedback: textFindings(next).join("\n").slice(0, 6000) }, controller);
-        const corrected = parseDraft(repaired.draft, chosenStrategy, true);
-        const unchanged = JSON.stringify(corrected) === JSON.stringify(next.draft);
-        next = { ...next, draft: corrected, assets: preservedAssets(next, corrected), textModel: repaired.model, promptProvenance: repaired.promptProvenance };
-        showDraft(next, controller);
-        next = await checkText(next, controller);
-        if (unchanged) break;
+        try {
+          setStatus("Correcting slide content and layout...");
+          const repaired = await post("/api/slides", { ...context, operation: "review", draft: next.draft, feedback: textFindings(next).join("\n").slice(0, 6000) }, controller);
+          const corrected = parseDraft(repaired.draft, chosenStrategy, true);
+          const unchanged = JSON.stringify(corrected) === JSON.stringify(next.draft);
+          next = { ...next, draft: corrected, assets: preservedAssets(next, corrected), textModel: repaired.model, promptProvenance: repaired.promptProvenance };
+          showDraft(next, controller);
+          next = await checkText(next, controller);
+          if (unchanged) break;
+        } catch {
+          controller.signal.throwIfAborted();
+          setReviewWarnings(current => [...new Set([...current, "Automatic text refinement could not finish. The generated draft is retained; further refinement is optional."])]);
+          break;
+        }
       }
       if (controller.signal.aborted) return;
-      if (next.checks?.text?.model === "output-rules" && next.checks.text.issues.length) { setStatus("Draft retained. Teaching-content corrections needed."); return; }
       if (layoutErrors(next, browserMeasure()).length) { setStatus("Draft retained. Layout corrections needed."); return; }
       const failures: string[] = [];
       // Generate both reference pictures before checking their shared target image.
@@ -246,10 +265,16 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
             next = await checkImage(next, visual.id, controller, true);
           }
         }
-        catch (err) { if (!controller.signal.aborted) failures.push(`${label(visual.id)}: ${err instanceof Error ? err.message : "Image generation failed."}`); }
+        catch (err) {
+          if (!controller.signal.aborted) {
+            const message = `${label(visual.id)}: ${err instanceof Error ? err.message : "Image generation failed."}`;
+            if (isSlideAsset(next.assets[visual.id])) setReviewWarnings(current => [...new Set([...current, `${message} The existing image is retained; refinement is optional.`])]);
+            else failures.push(message);
+          }
+        }
       }
       if (controller.signal.aborted) return;
-      setError(failures.join("\n")); setStatus(failures.length ? "Slide text ready. Some images need a retry." : layoutErrors(next, browserMeasure()).length ? "Draft retained. Layout corrections needed." : qualityErrors(next).length ? "Draft retained. Quality corrections needed." : `${next.draft.slides.length} slides ready for review.`);
+      setError(failures.join("\n")); setStatus(failures.length ? "Slide text ready. Some images need a retry." : layoutErrors(next, browserMeasure()).length ? "Draft retained. Layout corrections needed." : `${next.draft.slides.length} slides ready to send.`);
     });
   }
   function edit(field: keyof Omit<TeachingSlide, "stage">, value: string | string[]) {
@@ -272,8 +297,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       const feedback = check?.key === imageCheckKey(deck, visualId) && check.imageData === deck.assets[visualId]?.data ? check.issues.join("\n").slice(0, 4000) : "";
       const next = await imageFor({ ...deck, modelSelection: { ...selection } }, visualId, controller, selection.imageModel, feedback);
       if (controller.signal.aborted) return;
-      const checked = await checkImage(next, visualId, controller);
-      if (!controller.signal.aborted) setStatus(qualityErrors(checked).length ? "Image updated. Quality check needs attention." : "Image updated.");
+      await checkImage(next, visualId, controller);
+      if (!controller.signal.aborted) setStatus("Image updated. Review suggestions are optional.");
     });
   }
   function checkCurrent() {
@@ -286,12 +311,12 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         next = await checkImage(next, visual.id, controller, true);
       }
       if (!controller.signal.aborted) setStatus(layoutErrors(next, browserMeasure()).length ? "Draft retained. Layout corrections needed."
-        : next.draft.visuals.some(visual => !next.assets[visual.id]) ? "Draft retained. Generate the missing images before teacher review."
-          : qualityErrors(next).length ? "Draft retained. Quality corrections needed." : "Quality checks complete. Teacher review pending.");
+        : next.draft.visuals.some(visual => !isSlideAsset(next.assets[visual.id])) ? "Draft retained. Generate the missing images before sending."
+          : "Quality checks complete. You can send the slides or optionally revise them.");
     });
   }
   async function download() {
-    if (!deck || !reviewed || busy || qualityIssues.length || exportJob.current) return;
+    if (!deck || !ready || busy || exportJob.current) return;
     const request = ++exportRequest.current;
     const controller = new AbortController(); exportJob.current = controller;
     setPreparedDownload(null);
@@ -305,7 +330,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     finally { if (exportJob.current === controller) { exportJob.current = null; setBusy(false); } }
   }
   async function publish() {
-    if (!deck || !ready || !reviewed || busy || publishJob.current || publishedDeck === deck || !classId || !assignmentId) return;
+    if (!deck || !ready || busy || publishJob.current || publishedDeck === deck || !classId || !assignmentId) return;
     const controller = new AbortController(); publishJob.current = controller;
     setBusy(true); setError("");
     try {
@@ -318,31 +343,23 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       if (!controller.signal.aborted) { setError(err instanceof Error ? err.message : "Unable to send slides. Your draft is retained; try again."); setStatus(""); }
     } finally { if (publishJob.current === controller) { publishJob.current = null; setBusy(false); } }
   }
-  const missingImages = deck?.draft.visuals.some(visual => !deck.assets[visual.id]);
+  const missingImages = deck?.draft.visuals.some(visual => !isSlideAsset(deck.assets[visual.id]));
   const slide = deck?.draft.slides[index];
-  const ready = !!deck && !missingImages && !issues.length && !qualityIssues.length;
+  const ready = !!deck && !missingImages && !issues.length;
   const changedImages = useMemo(() => deck?.draft.visuals.some(visual => deck.assets[visual.id] && !imageMatchesPlan(deck, visual.id)), [deck]);
-  const checksPending = useMemo(() => deck && (deck.checks?.text?.key !== textCheckKey(deck) || deck.draft.visuals.some(visual => {
-    const check = deck.checks?.images[visual.id];
-    return deck.assets[visual.id] && (check?.key !== imageCheckKey(deck, visual.id) || check?.imageData !== deck.assets[visual.id].data);
-  })), [deck]);
   const recoveryImages = useMemo(() => deck?.draft.visuals.flatMap(visual => {
-    const missing = !deck.assets[visual.id];
+    const missing = !isSlideAsset(deck.assets[visual.id]);
     if (!missing && imageMatchesPlan(deck, visual.id)) return [];
     const referenceId = imageReferenceId(deck.draft, visual.id);
     return [{ id: visual.id, missing, needsReference: referenceId && !imageMatchesPlan(deck, referenceId) ? referenceId : undefined }];
   }) ?? [], [deck]);
-  const reviewBlock = busy ? "busy" : issues.length ? "layout" : missingImages ? "images" : changedImages ? "changedImages"
-    : checksPending ? "checks" : qualityIssues.length ? "content" : null;
-  const reviewHelp = reviewBlock === "busy" ? "Finish the current operation before confirming your review."
+  const reviewBlock = busy ? "busy" : issues.length ? "layout" : missingImages ? "images" : null;
+  const reviewHelp = reviewBlock === "busy" ? "Finish the current operation before sending or downloading."
     : reviewBlock === "layout" ? "The slide layout or required content needs correction. Review the details below, then edit the draft or revise it with AI."
       : reviewBlock === "images" ? "Images are missing. Use Image recovery below to generate or retry them."
-        : reviewBlock === "changedImages" ? "An image needs updating. Use Image recovery below to regenerate it."
-          : reviewBlock === "checks" ? "The current text or images need checking after generation or edits. Run Check slides to continue."
-            : reviewBlock === "content" ? "Required content checks need attention. Review the details below, then edit the draft or revise it with AI."
-              : publishedDeck === deck ? "This version is published. Students can read it in Explore and ask. You can also download the PowerPoint."
+        : publishedDeck === deck ? "This version is published. Students can read it in Explore and ask. You can also download the PowerPoint."
                 : reviewed ? "Review confirmed for this version. Download the PowerPoint or send the slides to students."
-                  : "The slides and images are ready. Review every page, then confirm below to download or send them to students.";
+                  : "The slides and images are ready. You can send them to students or download now. Checking, confirming review, and refining are optional.";
 
   const Container = embedded ? "section" : "main";
   const Heading = embedded ? "h3" : "h1";
@@ -389,15 +406,14 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           <section aria-label="Review and publish" className="mt-5 rounded-lg border border-teal-200 bg-teal-50/50 p-4">
             <h3 className="text-base font-semibold text-gray-900">Review and publish</h3>
             <p id={reviewHelpId} aria-live="polite" className="mt-2 text-sm leading-6 text-gray-700">{reviewHelp}</p>
-            {!busy && (reviewBlock === "images" || reviewBlock === "changedImages") && <button type="button" className={`${button} mt-3`} onClick={() => { imageRecovery.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); imageRecovery.current?.focus({ preventScroll: true }); }}><ImagePlus size={16} />Go to image recovery</button>}
-            {!busy && reviewBlock === "checks" && <button type="button" className={`${button} mt-3`} onClick={checkCurrent}><ScanEye size={16} />Check slides to continue</button>}
-            {!busy && (reviewBlock === "layout" || reviewBlock === "content") && <button type="button" className={`${button} mt-3`} disabled={!canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Fix slides with AI</button>}
-            {!!findings.length && !busy && <section aria-label="AI review suggestions" className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+            {!busy && reviewBlock === "images" && <button type="button" className={`${button} mt-3`} onClick={() => { imageRecovery.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); imageRecovery.current?.focus({ preventScroll: true }); }}><ImagePlus size={16} />Go to image recovery</button>}
+            {!!suggestions.length && !busy && <section aria-label="AI review suggestions" className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
               <h4 className="font-semibold">AI review suggestions (optional)</h4>
-              <p className="mt-2 leading-6">Refine with AI is recommended. You can also confirm your review and download or send these slides without refining.</p>
+              <p className="mt-2 leading-6">Refine with AI is optional. You can download or send complete slides without refining, checking again, or confirming review.</p>
               <button type="button" className={`${button} mt-3`} disabled={!canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Refine with AI</button>
-              <details className="mt-3"><summary className="cursor-pointer font-medium">View {findings.length} {findings.length === 1 ? "suggestion" : "suggestions"}</summary><ul className="mt-3 space-y-2">{findings.map((finding, n) => <li key={n} className="break-words">{finding}</li>)}</ul></details>
+              <details className="mt-3"><summary className="cursor-pointer font-medium">View {suggestions.length} {suggestions.length === 1 ? "suggestion" : "suggestions"}</summary><ul className="mt-3 space-y-2">{suggestions.map((finding, n) => <li key={n} className="break-words">{finding}</li>)}</ul></details>
             </section>}
+            <p className="mt-4 text-xs text-gray-500">Optional review record — not required to send or download.</p>
             <button id={reviewControlId} type="button" role="checkbox" aria-checked={reviewed} aria-describedby={reviewHelpId} disabled={!ready || busy}
               onClick={() => setReviewed(current => !current)} className={`mt-4 flex min-h-12 w-full items-start gap-3 rounded-md border bg-white px-3 py-3 text-left text-sm leading-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-800 ${ready && !busy ? "cursor-pointer border-teal-600 hover:bg-teal-50" : "border-gray-300 text-gray-500"}`}>
               <span aria-hidden="true" className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${reviewed ? "border-teal-800 bg-teal-800 text-white" : "border-gray-400 bg-white"}`}>{reviewed && <Check size={16} />}</span>
@@ -405,11 +421,11 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
             </button>
             <div className="mt-3 flex flex-wrap gap-2">
               <button type="button" className={button} disabled={!ready || busy || reviewed} onClick={() => setReviewed(true)}><ScanEye size={16} />{reviewed ? "Review confirmed" : "Confirm review"}</button>
-              <button type="button" className={button} disabled={busy || !ready || !reviewed} onClick={download}><Download size={17} />Download PPTX</button>
-              <button type="button" className={primaryButton} disabled={busy || !ready || !reviewed || !classId || !assignmentId || publishedDeck === deck} onClick={publish}><Send size={17} />{publishedDeck === deck ? "Published" : "Send to students"}</button>
-              {preparedDownload?.deck === deck && !busy && ready && reviewed && <a className={button} href={preparedDownload.httpUrl || preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>}
+              <button type="button" className={button} disabled={busy || !ready} onClick={download}><Download size={17} />Download PPTX</button>
+              <button type="button" className={primaryButton} disabled={busy || !ready || !classId || !assignmentId || publishedDeck === deck} onClick={publish}><Send size={17} />{publishedDeck === deck ? "Published" : "Send to students"}</button>
+              {preparedDownload?.deck === deck && !busy && ready && <a className={button} href={preparedDownload.httpUrl || preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>}
             </div>
-            {preparedDownload?.deck === deck && !busy && ready && reviewed && preparedDownload.httpUrl && <p className="mt-2 text-xs text-gray-500">Save link expires in 10 minutes. Select Download PPTX again to refresh it.</p>}
+            {preparedDownload?.deck === deck && !busy && ready && preparedDownload.httpUrl && <p className="mt-2 text-xs text-gray-500">Save link expires in 10 minutes. Select Download PPTX again to refresh it.</p>}
           </section>
         </section>
         <aside aria-label="Slide editor" className="min-w-0 border-t border-gray-200 pt-4 lg:border-t-0 lg:pt-0">
@@ -418,16 +434,15 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         </aside>
       </div>
       {!!issues.length && <div role="alert" className="mt-5 border-l-4 border-red-700 bg-red-50 p-4 text-sm text-red-900"><ul className="space-y-2">{issues.map((issue, n) => <li key={n} className="whitespace-pre-line break-words">{issue}</li>)}</ul></div>}
-      {!!qualityIssues.length && !busy && <div role="alert" className="mt-5 border-l-4 border-amber-700 bg-amber-50 p-4 text-sm text-amber-950"><ul className="space-y-2">{qualityIssues.map((issue, n) => <li key={n} className="break-words">{issue}</li>)}</ul></div>}
       {!!missingImages && !busy && <p className="mt-3 text-sm text-amber-900">Images pending. Download unavailable.</p>}
       <section aria-label="Revise slides" className="mt-6 border-t border-gray-200 pt-5">
-        <h3 className="text-base font-semibold">Revise slides</h3>
+        <h3 className="text-base font-semibold">Revise slides (optional)</h3>
         <label className="mt-3 block text-sm font-medium">Revision request<textarea aria-label="Revision request" className={`${input} mt-2 resize-y`} rows={2} maxLength={3000} disabled={busy} value={feedback} onChange={e => setFeedback(e.target.value)} placeholder="Describe what you would like to improve." /></label>
         <button className={`${button} mt-3`} disabled={busy || !canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Revise with AI</button>
       </section>
       {(missingImages || changedImages) && <section ref={imageRecovery} tabIndex={-1} aria-label="Image recovery" className="mt-5 rounded-md border border-gray-200 p-4 focus:outline-2 focus:outline-teal-700">
         <h3 className="text-sm font-semibold">Image recovery</h3>
-        <p className="mt-1 text-sm text-gray-600">Complete these images before reviewing the slides.</p>
+        <p className="mt-1 text-sm text-gray-600">Missing or invalid images must be generated before sending. Updating existing images is optional.</p>
         <ul className="mt-3 flex flex-wrap gap-3">{recoveryImages.map(visual => <li key={visual.id} className="rounded-md border border-gray-200 bg-white p-3">
           <p className="mb-2 text-sm">{label(visual.id)} · {visual.missing ? "Missing" : "Needs update"}</p>
           {visual.needsReference && <p className="mb-2 text-sm text-gray-600">Regenerate {visual.needsReference} first.</p>}

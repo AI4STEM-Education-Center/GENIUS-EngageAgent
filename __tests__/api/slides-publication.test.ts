@@ -158,9 +158,26 @@ it("stops expired staging operations and bounds the complete JSON upload", async
   expect(response.status).toBe(413); expect(mocks.send).not.toHaveBeenCalled();
 });
 
-it("requires strict draft rules and complete dimensions before creating a ticket", async () => {
-  const bad = startBody(); bad.draft.slides[0].body = "Teacher should explain everything to students.";
-  expect((await POST(request(bad))).status).toBe(422);
+it("publishes a complete draft despite teaching-rule suggestions without requiring review or refinement metadata", async () => {
+  const body = startBody(); body.draft.slides[0].task = "Describe the scene. Explain your thinking.";
+  const response = await POST(request(body));
+  expect(response.status).toBe(200);
+  const id = (await response.json()).publicationId;
+  expect((await asset(id)).status).toBe(200);
+  expect((await commit(id)).status).toBe(200);
+  mocks.session.mockResolvedValue(student);
+  const readable = await read(id);
+  expect(readable.status).toBe(200);
+  const result = await readable.json();
+  expect(isPublishedSlideResponse(result)).toBe(true);
+  expect(result.manifest.pages[0].elements).toEqual(expect.arrayContaining([expect.objectContaining({ text: body.draft.slides[0].task })]));
+});
+
+it("requires valid draft structure and complete dimensions before creating a ticket", async () => {
+  const wrongStage = startBody(); wrongStage.draft.slides[0].stage = "question";
+  expect((await POST(request(wrongStage))).status).toBe(422);
+  const tooLong = startBody(); tooLong.draft.slides[0].body = "x".repeat(261);
+  expect((await POST(request(tooLong))).status).toBe(422);
   expect((await POST(request({ ...startBody(), assets: {} }))).status).toBe(422);
   expect((await POST(request({ ...startBody(), checks: {} }))).status).toBe(400);
   expect(records.size).toBe(0);

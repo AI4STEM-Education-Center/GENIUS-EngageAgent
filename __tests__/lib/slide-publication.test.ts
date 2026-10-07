@@ -33,13 +33,20 @@ describe("student-only slide publication projection", () => {
     expect(serialized).not.toMatch(/PRIVATE_|teacherNotes|analogyPlan|classroomContext|checks|sourcePrompt|referenceData|data:image|renderedLines/u);
     expect(serialized).toContain(deck.draft.analogyPlan!.responseStarter);
   });
-  it("rejects invalid stages, overlong draft text and student-facing production directions", () => {
+  it("rejects invalid stages and overlong draft text", () => {
     const wrong = deckFixture("cognitive conflict"); wrong.draft.slides[0].stage = "question";
     expect(() => projectPublishedSlides(wrong)).toThrow();
     const long = deckFixture("experience bridging"); long.draft.slides[0].body = "x".repeat(261);
     expect(() => projectPublishedSlides(long)).toThrow();
-    const instructions = deckFixture("experience bridging"); instructions.draft.slides[0].body = "Teacher should tell students the answer.";
-    expect(() => projectPublishedSlides(instructions)).toThrow();
+  });
+  it("allows publication with optional pedagogical suggestions while omitting review metadata", () => {
+    const deck = deckFixture("experience bridging");
+    deck.draft.slides[0].body = "Teacher should tell students the answer.";
+    deck.checks!.text!.model = "output-rules";
+    deck.checks!.text!.issues = ["PRIVATE_REVIEW: address students directly."];
+    const manifest = projectPublishedSlides(deck);
+    expect(manifest.pages[0].elements).toEqual(expect.arrayContaining([expect.objectContaining({ text: deck.draft.slides[0].body })]));
+    expect(JSON.stringify(manifest)).not.toMatch(/PRIVATE_REVIEW|checks|teacherDecision/u);
   });
   it("accepts four-page experience bridging and optional seven-page analogy", () => {
     const experience = deckFixture("experience bridging"); experience.draft.slides.splice(3, 1);

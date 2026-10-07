@@ -67,7 +67,7 @@ it("rejects an oversized final image before starting or uploading earlier images
   const original = image.data;
   expect(image.data.length).toBeLessThan(4_400_000);
   await expect(publishSlideDeck(value, scope, new AbortController().signal)).rejects.toThrow(
-    "The variation image is too large for online publishing. Regenerate this image and review the slides again. Your draft is unchanged.");
+    "The variation image is too large for online publishing. Regenerate this image, then try sending again. Your draft is unchanged.");
   expect(fetchMock).not.toHaveBeenCalled();
   expect(image.data).toBe(original);
 });

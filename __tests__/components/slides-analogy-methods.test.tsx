@@ -56,7 +56,7 @@ it("restores a compare-and-predict story with its original mapping and predictio
   expect(screen.queryByLabelText("Visible comparison hint")).toBeNull();
   expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe("Move the same load");
   fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
-  await screen.findByText("5 slides ready for review.");
+  await screen.findByText("5 slides ready to send.");
   expect(generationRequests()).toHaveLength(1);
   expect(generationRequests()[0]).toMatchObject({ operation: "review", analogyMethod: "predict-transfer", draft: { analogyMethod: "predict-transfer" } });
 });
@@ -73,11 +73,11 @@ it("keeps a restored reference story and student scaffold through revision, then
   fireEvent.change(hint, { target: { value: "The hands support the board as supports hold the bridge." } });
   fireEvent.change(screen.getByLabelText("Revision request"), { target: { value: "Keep the familiar board before the mapping." } });
   fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
-  await screen.findByText("5 slides ready for review.");
+  await screen.findByText("5 slides ready to send.");
   const revision = generationRequests()[0];
   expect(revision).toMatchObject({ operation: "review", analogyMethod: "reference-story", draft: { analogyMethod: "reference-story" } });
   expect(revision.draft.analogyPlan.mappingHint).toBe("The hands support the board as supports hold the bridge.");
-  expect(revision.draft.analogyPlan.targetConcept).toBe(saved.draft.analogyPlan!.targetConcept);
+  expect(revision.draft.analogyPlan.targetDifficulty).toBe(saved.draft.analogyPlan!.targetDifficulty);
   expect(screen.queryByText("Teaching design for this comparison")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
   expect(screen.queryByLabelText("Student response starter")).toBeNull();
@@ -89,7 +89,7 @@ it("keeps a restored reference story and student scaffold through revision, then
   expect(mocks.download.mock.calls[0][0].draft.analogyPlan).toEqual(analogyMethodDraft("reference-story").analogyPlan);
   expect(mocks.download.mock.calls[0][0].draft.slides[0].teacherNotes).toEqual(saved.draft.slides[0].teacherNotes);
   fireEvent.click(screen.getByRole("button", { name: "Generate new slides" }));
-  await screen.findByText("6 slides ready for review.");
+  await screen.findByText("6 slides ready to send.");
   expect(generationRequests()).toHaveLength(2);
   expect(generationRequests()[1]).toMatchObject({ operation: "generate", analogyMethod: "six-step", promptVersion: "optimized", textModel: "current" });
   expect(generationRequests()[1]).not.toHaveProperty("draft");
@@ -104,5 +104,5 @@ it("revises legacy untagged drafts as compare-and-predict while new generation r
   await waitFor(() => expect(generationRequests()).toHaveLength(1));
   expect(generationRequests()[0]).toMatchObject({ operation: "review", analogyMethod: "predict-transfer" });
   expect(generationRequests()[0].draft).not.toHaveProperty("analogyMethod");
-  await screen.findByText("5 slides ready for review.");
+  await screen.findByText("5 slides ready to send.");
 });

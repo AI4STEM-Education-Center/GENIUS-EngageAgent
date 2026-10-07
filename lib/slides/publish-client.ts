@@ -50,7 +50,7 @@ export async function publishSlideDeck(deck: SlideDeck, scope: { classId: string
     const requestBytes = new TextEncoder().encode(JSON.stringify({ ...scope, operation: "asset", publicationId: PUBLICATION_ID_PLACEHOLDER,
       visualId: visual.id, asset: { data, width, height } })).byteLength;
     if (requestBytes > MAX_PUBLICATION_REQUEST_BYTES) {
-      throw new Error(`The ${visual.id} image is too large for online publishing. Regenerate this image and review the slides again. Your draft is unchanged.`);
+      throw new Error(`The ${visual.id} image is too large for online publishing. Regenerate this image, then try sending again. Your draft is unchanged.`);
     }
   }
   const assets = Object.fromEntries(visuals.map(({ id }) => {

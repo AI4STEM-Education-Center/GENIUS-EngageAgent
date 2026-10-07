@@ -58,22 +58,44 @@ it("invalidates checks after prose, image plan or actual image changes", () => {
   swapped.assets.target.data = swapped.assets.target.data.replace("png", "jpeg");
   expect(qualityErrors(swapped).join()).toContain("visual check pending");
 });
-it("blocks direct exports with missing or stale checks, missing images and hard output-rule failures", () => {
-  const deck = deckFixture("analogy");
+it.each(["analogy", "cognitive conflict", "experience bridging"] as const)("exports complete %s materials without checks, with stale checks or with output-rule suggestions", async strategy => {
   const measure = (text: string) => text.length;
-  deck.checks = undefined;
-  expect(exportErrors(deck, measure).join()).toContain("quality check pending");
-  const stale = deckFixture("analogy");
-  stale.checks!.images.target.key = "earlier-version";
-  expect(exportErrors(stale, measure)).toContain("Image target: visual check pending after generation or edits.");
+  for (const state of ["missing", "stale", "output-rules"] as const) {
+    const deck = deckFixture(strategy);
+    const visualId = deck.draft.visuals[0].id;
+    if (state === "missing") deck.checks = undefined;
+    else if (state === "stale") {
+      deck.checks!.text!.key = "earlier-version";
+      deck.checks!.images[visualId].key = "earlier-version";
+    } else {
+      deck.draft.slides[0].task = "Describe the scene. Explain your thinking.";
+      deck.checks!.text!.key = textCheckKey(deck);
+      deck.checks!.text!.model = "output-rules";
+      deck.checks!.text!.issues = ["Slide 1.task: use one thinking-task sentence."];
+    }
+    // Diagnostics remain visible, without requiring check/refine/confirmation.
+    expect(qualityErrors(deck).length).toBeGreaterThan(0);
+    expect(exportErrors(deck, measure)).toEqual([]);
+    expect(deck.teacherDecision).toBeUndefined();
+    const zip = await JSZip.loadAsync(await buildPresentationBytes(deck, measure));
+    expect(Object.keys(zip.files).filter(path => /^ppt\/slides\/slide\d+\.xml$/u.test(path))).toHaveLength(deck.draft.slides.length);
+    expect(projectPublishedSlides(deck).pages).toHaveLength(deck.draft.slides.length);
+  }
+});
+it("still blocks exports with missing/invalid images or invalid draft structure", () => {
+  const measure = (text: string) => text.length;
   const missing = deckFixture("analogy");
   delete missing.assets.target;
   expect(exportErrors(missing, measure).join()).toContain("Image target: generate an image before downloading.");
-  const failed = deckFixture("analogy");
-  failed.checks!.text!.model = "output-rules";
-  failed.checks!.text!.issues = ["Required output field is invalid."];
-  expect(exportErrors(failed, measure)).toContain("Required output field is invalid.");
-  expect(reviewFindings(failed)).toEqual([]);
+  const invalidImage = deckFixture("analogy");
+  invalidImage.assets.target.data = "https://example.test/image.png";
+  expect(exportErrors(invalidImage, measure).join()).toContain("Image target: generate an image before downloading.");
+  const invalidStage = deckFixture("cognitive conflict");
+  invalidStage.draft.slides[0].stage = "question";
+  expect(exportErrors(invalidStage, measure).length).toBeGreaterThan(0);
+  const overlong = deckFixture("experience bridging");
+  overlong.draft.slides[0].body = "x".repeat(261);
+  expect(exportErrors(overlong, measure).length).toBeGreaterThan(0);
 });
 it.each(["analogy", "cognitive conflict", "experience bridging"] as const)("exports and projects %s with advisory text/image findings and no written teacher decision", async strategy => {
   const deck = deckFixture(strategy);
@@ -96,7 +118,7 @@ it.each(["analogy", "cognitive conflict", "experience bridging"] as const)("expo
   expect(published.pages).toHaveLength(deck.draft.slides.length);
   expect(JSON.stringify(published)).not.toContain("PRIVATE_REVIEW_");
 });
-it("permits a documented teacher decision on AI findings, never on hard rules or stale checks", () => {
+it("retains optional documented teacher decisions without hiding teaching-rule or stale-check diagnostics", () => {
   const deck = deckFixture("analogy");
   deck.checks!.images.target.issues = ["Image target: possible spring ambiguity."];
   deck.teacherDecision = { reason: "I inspected the contact and coil geometry and accept this schematic.", draftKey: textCheckKey(deck), checks: deck.checks!, assets: deck.assets };

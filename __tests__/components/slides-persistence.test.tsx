@@ -29,13 +29,13 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-it("restores a saved deck with images and checks, requires fresh human confirmation and makes no paid requests", async () => {
+it("restores a saved deck ready to send without fresh human confirmation or paid requests", async () => {
   const saved = deckFixture(context.strategy); mocks.load.mockResolvedValue(saved);
   render(<SlidesWorkspace user={user} embeddedContext={context} />);
   await screen.findByText(/Saved draft restored/);
   expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe(saved.draft.slides[0].title);
   expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
-  expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(false);
   expect(posts()).toHaveLength(0);
   expect(mocks.load).toHaveBeenCalledWith({ userId: user.geniusId, classId: user.classId, assignmentId: user.assignmentId, lessonNumber: 3, strategy: context.strategy });
   expect(screen.queryByRole("region", { name: "Image recovery" })).toBeNull();
@@ -50,7 +50,7 @@ it("commits the latest generated image and edit, then restores them when the edi
   const ref = createRef<SlidesWorkspaceHandle>(); const ready = vi.fn();
   const view = render(<SlidesWorkspace ref={ref} user={user} embeddedContext={context} onReadyChange={ready} />);
   await waitFor(() => expect(ready).toHaveBeenLastCalledWith(context.strategy, true));
-  act(() => ref.current?.generate()); await screen.findByText("5 slides ready for review.");
+  act(() => ref.current?.generate()); await screen.findByText("5 slides ready to send.");
   fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "The teacher's latest title" } });
   await waitFor(() => expect(storage.deck?.draft.slides[0].title).toBe("The teacher's latest title"));
   expect(storage.deck?.assets.evidence.data).toBe(deckFixture(context.strategy).assets.evidence.data);
@@ -59,6 +59,8 @@ it("commits the latest generated image and edit, then restores them when the edi
   await screen.findByText(/Saved draft restored/);
   expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe("The teacher's latest title");
   expect(posts()).toHaveLength(requestCount);
+  expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(false);
 });
 
 it("ignores a late restore from the previous user/task and does not overwrite the new workspace", async () => {
@@ -102,9 +104,9 @@ it("uses shared classroom context for new decks while restored revisions retain 
   await waitFor(() => expect(ready).toHaveBeenLastCalledWith(context.strategy, true));
   expect(screen.queryByLabelText("Classroom context (optional)")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
-  await screen.findByText("5 slides ready for review.");
+  await screen.findByText("5 slides ready to send.");
   expect(posts().find(body => body.operation === "review")?.classroomContext).toBe("Earlier classroom context");
-  act(() => ref.current?.generate()); await screen.findByText("5 slides ready for review.");
+  act(() => ref.current?.generate()); await screen.findByText("5 slides ready to send.");
   expect(posts().find(body => body.operation === "generate")?.classroomContext).toBe(context.classroomContext);
 });
 
@@ -131,7 +133,7 @@ it("continues the native slide pipeline after asynchronous draft polling without
   vi.useFakeTimers();
   act(() => ref.current?.generate());
   await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
-  expect(screen.getByText("5 slides ready for review.")).toBeTruthy();
+  expect(screen.getByText("5 slides ready to send.")).toBeTruthy();
   expect(mocks.fetch.mock.calls.filter(([path]) => path === "/api/slides")).toHaveLength(1);
   expect(polls).toBe(2);
 });

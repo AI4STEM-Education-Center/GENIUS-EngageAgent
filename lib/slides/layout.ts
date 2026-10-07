@@ -1,6 +1,5 @@
 import { assertSlideLayout, containImage, wrapText } from "@/scripts/slides/layout-rules.mjs";
 import { draftErrors, isSlideAsset, visibleVisualIds, type SlideDeck } from "./model";
-import { qualityErrors } from "./quality";
 import { getSlideLearningTarget } from "./learning-target";
 import { analogyMappingIndex } from "./analogy-methods";
 
@@ -75,7 +74,9 @@ export function layoutErrors(deck: SlideDeck, measure: MeasureText): string[] {
 }
 
 export function exportErrors(deck: SlideDeck, measure: MeasureText): string[] {
-  const errors = [...layoutErrors(deck, measure), ...qualityErrors(deck)];
+  // Reviews and refinements are optional. Only an unusable draft/layout or
+  // missing/invalid media prevents downloading a generated deck.
+  const errors = layoutErrors(deck, measure);
   for (const visual of deck.draft.visuals) if (!isSlideAsset(deck.assets[visual.id])) errors.push(`Image ${visual.id}: generate an image before downloading.`);
   return errors;
 }
