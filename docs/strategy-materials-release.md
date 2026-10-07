@@ -14,6 +14,8 @@ Teachers can prepare materials before student submissions by selecting strategie
 
 Slides perform text/layout checks before image generation, then check actual images against their teaching purpose. Bounded repairs retain the draft if a step fails. Teachers can edit or request a revision and must review the result before downloading an editable PPTX or sending slides to students. Editable drafts, images and checks are saved in IndexedDB on the current browser/device, scoped to the teacher, class, task, lesson and strategy; recovery does not automatically restart generation or retain a prior human approval. Published student slides are stored on the platform and can be read from another device.
 
+The **Review and publish** area groups teacher confirmation, PowerPoint download and student publication immediately below the slide preview. Teachers can confirm through the large checkbox row or **Confirm review**. If confirmation is unavailable, the same area explains the remaining image, layout or quality work and provides the next action. Checking an incomplete deck does not generate its missing images or report it ready for teacher approval. Unchanged teacher notes do not invalidate an existing review merely when focus leaves the field; actual edits still require review again.
+
 Text + Image materials can be downloaded as self-contained HTML with the image embedded and the staged student interaction preserved. Downloaded responses stay on that page; the platform's student review continues to use the existing saved-question submission. Text + Image publishing still uses the existing durable media storage.
 
 ### Reading Slides on the web
