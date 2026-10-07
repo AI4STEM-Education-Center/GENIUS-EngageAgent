@@ -160,10 +160,11 @@ describe("authorized slide APIs", () => {
     for (const invalid of [null, [], {}, "x".repeat(4001)]) expect((await image(req({ ...data, feedback: invalid }))).status).toBe(400);
     expect(mocks.generate).toHaveBeenCalledTimes(1);
   });
-  it("uses only authorized lesson-specific aggregate diagnostics without learner identities or answer keys", async () => {
-    const answer = { class_id: base.classId, assignment_id: base.assignmentId, lesson_number: 1, student_id: "private-genius-id", student_name: "Private Learner", answers: { L1_Q1: "D" }, submitted_at: "" };
+  it.each(["local JSON", "DynamoDB"])("uses only authorized lesson-specific %s diagnostics without learner identities or answer keys", async storage => {
+    const answer = { class_id: storage === "DynamoDB" ? `CLASS#${base.classId}` : base.classId, assignment_id: base.assignmentId, lesson_number: 1, student_id: "private-genius-id", student_name: "Private Learner", answers: { L1_Q1: "D" }, submitted_at: "" };
     mocks.answers.mockResolvedValue([answer, { ...answer, student_id: "private-id-two" },
-      { ...answer, lesson_number: 2 }, { ...answer, class_id: "ea-class-other" }, { ...answer, assignment_id: "ea-task-other" }]);
+      { ...answer, lesson_number: 2 }, { ...answer, class_id: "ea-class-other" }, { ...answer, class_id: "CLASS#ea-class-other" },
+      { ...answer, class_id: `CLASS#CLASS#${base.classId}` }, { ...answer, assignment_id: "ea-task-other" }]);
     const data = { ...base, lessonNumber: 1, studentEvidence: { responses: 99999 } };
     expect((await POST(req(data))).status).toBe(200);
     expect(mocks.answers).toHaveBeenCalledWith(base.classId, base.assignmentId);

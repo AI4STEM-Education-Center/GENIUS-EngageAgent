@@ -37,6 +37,9 @@ The existing completion message to GENIUS remains unchanged.
 
 ## Authentication and deployment contract
 
+Follow [the production release checklist](./production-release.md) for the
+ordered GENIUS/Amplify rollout and real HTTPS acceptance checks.
+
 GENIUS launches the iframe with a one-hour signed `sso_token` containing the
 user's role, `classId`, `assignmentId` and `taskId`. For EngageAgent, GENIUS must
 validate class ownership/enrollment and assignment scope before issuing an

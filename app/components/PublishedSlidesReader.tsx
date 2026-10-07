@@ -55,9 +55,12 @@ function Reader({ classId, assignmentId, publicationId, audience, onQuestion }: 
       setLoading(true);
       try {
         const query = new URLSearchParams({ classId, assignmentId, publicationId });
-        const response = await fetch(`/api/slides/publication?${query}`, { headers: scopedClientAuthHeaders({ classId, assignmentId }), signal: controller.signal, cache: "no-store" });
-        if (!response.ok) throw new Error(response.status === 401 || response.status === 403
-          ? "Sign in to this class to read these slides." : "Unable to load the published slides. Please retry.");
+        const headers = scopedClientAuthHeaders({ classId, assignmentId });
+        const response = await fetch(`/api/slides/publication?${query}`, { headers, signal: controller.signal, cache: "no-store" });
+        if (!response.ok) throw new Error(response.status === 401 && headers.Authorization
+          ? "Your GENIUS session is no longer valid. Reopen this task in GENIUS to continue reading the slides."
+          : response.status === 401 || response.status === 403
+            ? "Sign in to this class to read these slides." : "Unable to load the published slides. Please retry.");
         const value: unknown = await response.json();
         if (!isPublishedSlideResponse(value) || value.publicationId !== publicationId) throw new Error("The published slides could not be read. Please retry.");
         if (active && request === controller && !controller.signal.aborted) {

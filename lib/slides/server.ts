@@ -68,7 +68,10 @@ export async function authorizeSlides(request: Request, context: Record<string, 
 export async function slideDiagnosticContext(context: { classId: string; assignmentId: string }, lessonNumber: number) {
   const answers = await listStudentAnswers(context.classId, context.assignmentId);
   return summarizeDiagnosticAnswers(lessonNumber, answers
-    .filter(answer => answer.class_id === context.classId && answer.assignment_id === context.assignmentId && answer.lesson_number === lessonNumber)
+    // DynamoDB exposes its physical class partition; local JSON uses the logical ID.
+    // Admit only these two exact representations of the already-authorized scope.
+    .filter(answer => [context.classId, `CLASS#${context.classId}`].includes(answer.class_id)
+      && answer.assignment_id === context.assignmentId && answer.lesson_number === lessonNumber)
     .map(answer => answer.answers));
 }
 
