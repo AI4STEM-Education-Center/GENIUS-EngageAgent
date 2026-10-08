@@ -299,6 +299,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
   // Student answers
   const [studentAnswers, setStudentAnswers] = useState<StudentAnswer[]>([]);
   const [loadingAnswers, setLoadingAnswers] = useState(false);
+  const [answersError, setAnswersError] = useState<string | null>(null);
   const [autoAnsweringTestStudents, setAutoAnsweringTestStudents] = useState(false);
 
   // Plan
@@ -1106,10 +1107,12 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     }
     try {
       const res = await fetch(`/api/student-answers?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&lessonNumber=${encodeURIComponent(selectedLesson)}`);
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to load student answers.");
       setStudentAnswers(data.answers ?? []);
-    } catch {
-      setError("Failed to load student answers.");
+      setAnswersError(null);
+    } catch (err) {
+      setAnswersError(err instanceof Error ? err.message : "Failed to load student answers.");
     } finally {
       if (!silent) {
         setLoadingAnswers(false);
@@ -1134,7 +1137,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
   }, [currentStep, quizStatus, classId, assignmentId, selectedLesson]);
 
   const analyzeClass = () => {
-    if (!classId || !assignmentId || generationBusy) return;
+    if (!classId || !assignmentId || generationBusy || loadingAnswers || answersError) return;
     if (!selectedLesson) {
       setError("Select a lesson before generating strategies.");
       return;
@@ -1874,9 +1877,12 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                     </button>
                   </div>
                 </div>
-                <p className="mt-2 text-sm text-slate-700">
+                {answersError && <p role="alert" className="mt-2 text-sm text-rose-700">
+                  {answersError} Select Refresh to try again.{studentAnswers.length > 0 ? " Showing previously loaded responses." : ""}
+                </p>}
+                {(!answersError || studentAnswers.length > 0) && <p className="mt-2 text-sm text-slate-700">
                   <span className="font-semibold">{studentAnswers.length}</span> student{studentAnswers.length === 1 ? " has" : "s have"} answered so far.
-                </p>
+                </p>}
                 {!classId.startsWith("ea-class-") && <p className="mt-1 text-xs text-slate-500">
                   Generates stable random answers for the five configured test students and overwrites their prior submissions for this assignment.
                 </p>}
@@ -1914,7 +1920,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                     <button
                       type="button"
                       onClick={analyzeClass}
-                      disabled={generationBusy || studentAnswers.length === 0}
+                      disabled={generationBusy || loadingAnswers || !!answersError || studentAnswers.length === 0}
                       className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
                     >
                       Analyze {studentAnswers.length} students

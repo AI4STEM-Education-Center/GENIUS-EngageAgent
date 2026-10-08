@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import StudentQuizView from "@/app/components/StudentQuizView";
 import type { UserContext } from "@/lib/auth";
@@ -36,7 +36,77 @@ beforeEach(() => {
     throw new Error(`Unexpected request: ${url}`);
   });
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+it.each(["timer", "focus", "button"])("loads a newly published quiz through %s without a page reload or replacing answers once open", async trigger => {
+  let published = false;
+  const originalFetch = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (url: string, init?: RequestInit) => url.startsWith("/api/quiz-status")
+    ? reply({ quizStatus: published ? { lesson_number: 8, status: "published" } : null }) : originalFetch(url, init));
+  vi.useFakeTimers();
+  await act(async () => { render(<StudentQuizView user={user} />); });
+  expect(screen.getByText("No quiz available yet")).toBeTruthy();
+  published = true;
+  await act(async () => {
+    if (trigger === "timer") await vi.advanceTimersByTimeAsync(15000);
+    else if (trigger === "focus") fireEvent.focus(window);
+    else fireEvent.click(screen.getByRole("button", { name: "Refresh quiz" }));
+  });
+  expect(screen.getByText("Answer the questions below")).toBeTruthy();
+  expect(screen.queryByText("No quiz available yet")).toBeNull();
+  const choice = within(screen.getAllByRole("radiogroup")[0]).getByRole("radio", { name: "Very confident" });
+  fireEvent.click(choice);
+  const count = fetchMock.mock.calls.length;
+  await act(async () => { fireEvent.focus(window); await vi.advanceTimersByTimeAsync(30000); });
+  expect(fetchMock.mock.calls).toHaveLength(count);
+  expect(choice.getAttribute("aria-checked")).toBe("true");
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+});
+
+it("lets a student retry a failed initial quiz load", async () => {
+  const originalFetch = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementationOnce(async () => ({ ok: false, json: async () => ({ error: "Quiz temporarily unavailable." }) }));
+  render(<StudentQuizView user={user} />);
+  await screen.findByText("Quiz temporarily unavailable.");
+  fetchMock.mockImplementation(originalFetch);
+  fireEvent.click(screen.getByRole("button", { name: "Retry loading quiz" }));
+  await screen.findByText("Answer the questions below");
+  expect(screen.queryByText("Unable to load quiz")).toBeNull();
+});
+
+it.each(["quiz", "survey"])("preserves answers after a failed %s submission and retries only the unsaved part", async part => {
+  const originalFetch = fetchMock.getMockImplementation()!;
+  const failedPath = part === "quiz" ? "/api/student-answers" : "/api/survey-responses";
+  let failOnce = true;
+  fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url === failedPath && init?.method === "POST" && failOnce) {
+      failOnce = false;
+      return { ok: false, json: async () => ({ error: "Temporary submission failure." }) };
+    }
+    return originalFetch(url, init);
+  });
+  render(<StudentQuizView user={user} />);
+  const groups = await screen.findAllByRole("radiogroup");
+  for (const item of contentQuestions) fireEvent.click(within(screen.getByText(item.stem).parentElement!).getByRole("button", { name: `A${item.options.A}` }));
+  for (const group of groups) fireEvent.click(within(group).getByRole("radio", { name: "Very confident" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Describe your experience" }), { target: { value: "I pushed a cart." } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Where did you feel uncertain?" }), { target: { value: "Getting it moving." } });
+  fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("Temporary submission failure.");
+  expect(screen.queryByText("Unable to load quiz")).toBeNull();
+  expect((screen.getByRole("textbox", { name: "Describe your experience" }) as HTMLTextAreaElement).value).toBe("I pushed a cart.");
+  for (const group of groups) expect(within(group).getByRole("radio", { name: "Very confident" }).getAttribute("aria-checked")).toBe("true");
+  const submit = screen.getByRole("button", { name: "Submit answers" }) as HTMLButtonElement;
+  expect(submit.disabled).toBe(false);
+  fireEvent.click(submit);
+  await screen.findByRole("button", { name: "Submitted" });
+  const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+  expect(posts.map(([url]) => url)).toEqual(part === "quiz"
+    ? ["/api/student-answers", "/api/student-answers", "/api/survey-responses"]
+    : ["/api/student-answers", "/api/survey-responses", "/api/survey-responses"]);
+  const attempts = posts.filter(([url]) => url === failedPath);
+  expect(attempts[0][1].body).toBe(attempts[1][1].body);
+});
 
 it("renders only confidence checks as four-option horizontal ratings with unchanged labels and keyboard selection", async () => {
   render(<StudentQuizView user={user} />);
