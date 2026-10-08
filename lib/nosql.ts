@@ -1717,21 +1717,22 @@ export const listReviewQuestions = async (
   if (useDynamoDb) {
     const client = getDynamoClient();
     if (!client) return [];
-    const skPrefix = studentId
-      ? `REVIEW_Q#ASSIGN#${assignmentId}#STUDENT#${studentId}`
-      : `REVIEW_Q#ASSIGN#${assignmentId}#STUDENT#`;
+    const studentKey = `REVIEW_Q#ASSIGN#${assignmentId}#STUDENT#${studentId}`;
     const result = await client.send(
       new QueryCommand({
         TableName: dynamoTableName,
-        KeyConditionExpression:
-          "#pk = :pk AND begins_with(#sk, :skPrefix)",
+        // A student's ID may be a prefix of another ID. Only teachers listing
+        // the whole assignment may use a prefix query for these records.
+        KeyConditionExpression: studentId
+          ? "#pk = :pk AND #sk = :sk"
+          : "#pk = :pk AND begins_with(#sk, :skPrefix)",
         ExpressionAttributeNames: {
           "#pk": pkField,
           "#sk": skField,
         },
         ExpressionAttributeValues: {
           ":pk": `CLASS#${classId}`,
-          ":skPrefix": skPrefix,
+          ...(studentId ? { ":sk": studentKey } : { ":skPrefix": `REVIEW_Q#ASSIGN#${assignmentId}#STUDENT#` }),
         },
       }),
     );

@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SurveyResultsSection from "./SurveyResultsSection";
 import Link from "next/link";
 import type { UserContext } from "@/lib/auth";
+import { isPublishedSlideReference } from "@/lib/slides/publication";
 import {
   engagementStrategies,
   getEngagementStrategyLabel,
@@ -47,6 +48,18 @@ type DashboardReviewQuestionRow = {
   questions: string[];
 };
 
+const emptyDashboardSource = (classId: string, assignmentId: string) => ({
+  classId, assignmentId,
+  lesson: null as number | null,
+  quizStatus: "draft" as QuizStatus,
+  answers: [] as StudentAnswer[],
+  published: [] as DashboardPublishedRecord[],
+  ratings: [] as ContentRatingRecord[],
+  media: [] as DashboardMediaRecord[],
+  strategies: [] as Array<{ studentId?: string; plan?: Plan }>,
+  questions: [] as Array<{ student_id?: string; questions?: string[] }>,
+});
+
 const formatDate = (iso: string) => {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", {
@@ -82,9 +95,13 @@ export default function TeacherDashboardView({ user }: Props) {
   const [dashboardMedia, setDashboardMedia] = useState<Record<string, { image: boolean; video: boolean }>>({});
   const [quizStatus, setQuizStatus] = useState<QuizStatus>("draft");
   const [selectedLesson, setSelectedLesson] = useState<number | null>(null);
+  const dashboardSource = useRef(emptyDashboardSource(classId, assignmentId));
+  const refreshVersion = useRef(0);
 
   const loadDashboard = useCallback(async (options?: { silent?: boolean }) => {
+    const version = ++refreshVersion.current;
     if (!classId || !assignmentId) {
+      dashboardSource.current = emptyDashboardSource(classId, assignmentId);
       setDashboardStudents([]);
       setDashboardStrategyDistribution({});
       setDashboardPublishedRecords([]);
@@ -114,20 +131,26 @@ export default function TeacherDashboardView({ user }: Props) {
         fetch(`/api/review-questions?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
       ]);
 
+      // A failed refresh must not turn previously received feedback into zero
+      // responses. Retain each source until that endpoint succeeds again.
+      const previous = dashboardSource.current.classId === classId && dashboardSource.current.assignmentId === assignmentId
+        ? dashboardSource.current : emptyDashboardSource(classId, assignmentId);
       let partialFailure = false;
-      let fetchedAnswers: StudentAnswer[] = [];
-      let fetchedPublished: DashboardPublishedRecord[] = [];
-      let fetchedRatings: ContentRatingRecord[] = [];
-      let fetchedMedia: DashboardMediaRecord[] = [];
-      let fetchedStrategyResults: Array<{ studentId?: string; plan?: Plan }> = [];
-      let fetchedReviewQuestions: Array<{ student_id?: string; questions?: string[] }> = [];
+      let fetchedLesson = previous.lesson;
+      let fetchedQuizStatus = previous.quizStatus;
+      let fetchedAnswers = previous.answers;
+      let fetchedPublished = previous.published;
+      let fetchedRatings = previous.ratings;
+      let fetchedMedia = previous.media;
+      let fetchedStrategyResults = previous.strategies;
+      let fetchedReviewQuestions = previous.questions;
 
       if (quizResult.status === "fulfilled" && quizResult.value.ok) {
         const quizData = (await quizResult.value.json()) as {
           quizStatus?: { lesson_number?: number; status?: QuizStatus };
         };
-        setSelectedLesson(quizData.quizStatus?.lesson_number ?? null);
-        setQuizStatus(quizData.quizStatus?.status ?? "draft");
+        fetchedLesson = quizData.quizStatus?.lesson_number ?? null;
+        fetchedQuizStatus = quizData.quizStatus?.status ?? "draft";
       } else if (quizResult.status === "fulfilled" || quizResult.status === "rejected") {
         partialFailure = true;
       }
@@ -184,6 +207,10 @@ export default function TeacherDashboardView({ user }: Props) {
         partialFailure = true;
       }
 
+      if (version !== refreshVersion.current) return;
+      dashboardSource.current = { classId, assignmentId, lesson: fetchedLesson, quizStatus: fetchedQuizStatus,
+        answers: fetchedAnswers, published: fetchedPublished, ratings: fetchedRatings, media: fetchedMedia,
+        strategies: fetchedStrategyResults, questions: fetchedReviewQuestions };
       const strategyDistribution: Record<string, number> = {};
       const strategyByStudent = new Map<string, { strategy?: string; tldr?: string }>();
       for (const entry of fetchedStrategyResults) {
@@ -233,6 +260,8 @@ export default function TeacherDashboardView({ user }: Props) {
         }));
 
       setDashboardStudents(studentRows);
+      setSelectedLesson(fetchedLesson);
+      setQuizStatus(fetchedQuizStatus);
       setDashboardStrategyDistribution(strategyDistribution);
       setDashboardPublishedRecords(fetchedPublished);
       setDashboardRatings(fetchedRatings);
@@ -244,13 +273,15 @@ export default function TeacherDashboardView({ user }: Props) {
         setDashboardError("Some dashboard data could not be refreshed. Showing the latest available results.");
       }
     } catch (err) {
-      setDashboardError(err instanceof Error ? err.message : "Failed to load dashboard.");
+      if (version === refreshVersion.current) setDashboardError(err instanceof Error ? err.message : "Failed to load dashboard.");
     } finally {
-      if (!options?.silent) {
+      if (version === refreshVersion.current) {
         setDashboardLoading(false);
       }
     }
   }, [assignmentId, classId]);
+
+  const cancelDashboardRefresh = useCallback(() => { refreshVersion.current++; }, []);
 
   useEffect(() => {
     if (!hasAssignmentContext) {
@@ -269,8 +300,8 @@ export default function TeacherDashboardView({ user }: Props) {
       void loadDashboard({ silent: true });
     }, 15000);
 
-    return () => window.clearInterval(intervalId);
-  }, [hasAssignmentContext, loadDashboard]);
+    return () => { window.clearInterval(intervalId); cancelDashboardRefresh(); };
+  }, [hasAssignmentContext, loadDashboard, cancelDashboardRefresh]);
 
   const strategyChartRows = useMemo(() => {
     const analyzedStudentTotal = Object.values(dashboardStrategyDistribution).reduce((sum, count) => sum + count, 0);
@@ -332,6 +363,7 @@ export default function TeacherDashboardView({ user }: Props) {
           averageRating,
           ratingsCount: itemRatings.length,
           mediaState,
+          slideCount: parsedItem.type === "Slides" && isPublishedSlideReference(parsedItem.slides) ? parsedItem.slides.slideCount : null,
           publishedAt: record.published_at,
           publishedBy: record.published_by,
         };
@@ -558,8 +590,12 @@ export default function TeacherDashboardView({ user }: Props) {
                             </td>
                             <td className="py-3 pr-4">
                               <div className="flex flex-wrap gap-2">
+                                {row.type === "Slides" ? <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${row.slideCount ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
+                                  {row.slideCount ? `${row.slideCount} slides published` : "Slide reference unavailable"}
+                                </span> : <>
                                 <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${row.mediaState.image ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>Image {row.mediaState.image ? "ready" : "missing"}</span>
                                 <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${row.mediaState.video ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>Video {row.mediaState.video ? "ready" : "missing"}</span>
+                                </>}
                               </div>
                             </td>
                             <td className="py-3 pr-4">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import type { UserContext } from "@/lib/auth";
 import { findExistingStudentAnswer } from "@/lib/student-answer-lookup";
 import { findMissingAnswers, getSurveyAvailability } from "@/lib/survey-response";
@@ -25,6 +25,9 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [existingAnswers, setExistingAnswers] = useState<Record<string, string> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const quizLoadInFlight = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,10 +43,14 @@ export default function StudentQuizView({ user, onProgress }: Props) {
 
   const loadQuiz = useCallback(async () => {
     if (!classId || !assignmentId) {
-      setError("Missing class or assignment context.");
+      setLoadError("Missing class or assignment context.");
       setLoading(false);
       return;
     }
+    if (quizLoadInFlight.current) return;
+    quizLoadInFlight.current = true;
+    setRefreshing(true);
+    setLoadError(null);
 
     try {
       // Fetch quiz status
@@ -71,6 +78,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
       // Fetch quiz questions from lesson data
       const lessonRes = await fetch(`/api/lessons/${qs.lesson_number}`);
       const lessonData = await lessonRes.json();
+      if (!lessonRes.ok) throw new Error(lessonData.error ?? "Failed to load quiz questions.");
       setQuestions(lessonData.quiz_items ?? []);
 
       const existingAnswer = await findExistingStudentAnswer({
@@ -114,15 +122,33 @@ export default function StudentQuizView({ user, onProgress }: Props) {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load quiz.");
+      setLoadError(err instanceof Error ? err.message : "Failed to load quiz.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
+      quizLoadInFlight.current = false;
     }
   }, [classId, assignmentId, user.userId, user.email]);
 
   useEffect(() => {
     loadQuiz();
   }, [loadQuiz]);
+
+  // A student may open the task before the teacher publishes its quiz.
+  // Stop refreshing once it opens, so in-progress answers are never replaced.
+  useEffect(() => {
+    if (loading || quizStatus?.status === "published") return;
+    const refresh = () => { void loadQuiz(); };
+    const onVisibility = () => { if (document.visibilityState === "visible") refresh(); };
+    const interval = window.setInterval(refresh, 15000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [loading, quizStatus?.status, loadQuiz]);
 
   useEffect(() => {
     if (loading) return;
@@ -235,11 +261,15 @@ export default function StudentQuizView({ user, onProgress }: Props) {
     );
   }
 
-  if (error) {
+  if (loadError) {
     return (
       <div className="rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center">
         <p className="text-lg font-semibold text-rose-700">Unable to load quiz</p>
-        <p className="mt-2 text-sm text-rose-600">{error}</p>
+        <p className="mt-2 text-sm text-rose-600">{loadError}</p>
+        <button type="button" disabled={refreshing} onClick={() => void loadQuiz()}
+          className="mt-4 rounded-xl border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50">
+          {refreshing ? "Refreshing..." : "Retry loading quiz"}
+        </button>
       </div>
     );
   }
@@ -251,6 +281,10 @@ export default function StudentQuizView({ user, onProgress }: Props) {
         <p className="mt-2 text-sm text-slate-500">
           Your teacher hasn&apos;t published the quiz for this assignment yet. Check back later.
         </p>
+        <button type="button" disabled={refreshing} onClick={() => void loadQuiz()}
+          className="mt-4 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50">
+          {refreshing ? "Refreshing..." : "Refresh quiz"}
+        </button>
       </div>
     );
   }
@@ -262,6 +296,10 @@ export default function StudentQuizView({ user, onProgress }: Props) {
         <p className="mt-2 text-sm text-slate-500">
           This quiz is no longer accepting responses.
         </p>
+        <button type="button" disabled={refreshing} onClick={() => void loadQuiz()}
+          className="mt-4 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50">
+          {refreshing ? "Refreshing..." : "Refresh quiz"}
+        </button>
       </div>
     );
   }
@@ -274,7 +312,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   const surveyComplete = !survey || findMissingAnswers(survey, surveyAnswers).length === 0;
   const allDone = submitted && (!survey || surveySubmitted);
   const canSubmit =
-    (submitted || (allAnswered && allConfidenceAnswered)) && surveyComplete && !allDone;
+    !refreshing && !loadError && (submitted || (allAnswered && allConfidenceAnswered)) && surveyComplete && !allDone;
   const questionCount = multipleChoiceQuestions.length;
 
   return (
@@ -420,7 +458,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
         ))}
 
       {error && (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+        <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
           {error}
         </div>
       )}
