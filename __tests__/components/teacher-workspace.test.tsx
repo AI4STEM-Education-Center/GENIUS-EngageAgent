@@ -51,7 +51,7 @@ it.each([true, false])("shows response loading failures without claiming zero su
     if (url.startsWith("/api/quiz-status")) return { ok: true, json: async () => ({ quizStatus: { lesson_number: 8, status: "published" } }) } as Response;
     if (url.startsWith("/api/student-answers")) return {
       ok: !fail,
-      json: async () => fail ? { error: "Responses temporarily unavailable." } : { answers: [{ student_id: "student-1", student_name: "Avery", lesson_number: 8, answers: { L8_Q1: "C" } }] },
+      json: async () => fail ? { error: "Responses temporarily unavailable." } : { answers: [{ student_id: "student-1", student_name: "Avery", class_id: scopedTeacher.classId, assignment_id: scopedTeacher.assignmentId, lesson_number: 8, answers: { L8_Q1: "C" } }] },
     } as Response;
     return originalFetch(input, init);
   });

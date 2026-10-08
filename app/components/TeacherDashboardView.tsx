@@ -5,6 +5,8 @@ import SurveyResultsSection from "./SurveyResultsSection";
 import Link from "next/link";
 import type { UserContext } from "@/lib/auth";
 import { isPublishedSlideReference } from "@/lib/slides/publication";
+import { recommendWorkspaceCohort } from "@/lib/cohort-recommendation";
+import { buildTeacherSummary, type StrategyRecommendation } from "@/lib/strategy-recommendation";
 import {
   engagementStrategies,
   getEngagementStrategyLabel,
@@ -89,6 +91,7 @@ export default function TeacherDashboardView({ user }: Props) {
   const [dashboardUpdatedAt, setDashboardUpdatedAt] = useState<string | null>(null);
   const [dashboardStudents, setDashboardStudents] = useState<DashboardStudentRow[]>([]);
   const [dashboardStrategyDistribution, setDashboardStrategyDistribution] = useState<Record<string, number>>({});
+  const [cohortRecommendation, setCohortRecommendation] = useState<StrategyRecommendation | null>(null);
   const [dashboardPublishedRecords, setDashboardPublishedRecords] = useState<DashboardPublishedRecord[]>([]);
   const [dashboardRatings, setDashboardRatings] = useState<ContentRatingRecord[]>([]);
   const [dashboardReviewQuestions, setDashboardReviewQuestions] = useState<DashboardReviewQuestionRow[]>([]);
@@ -104,6 +107,7 @@ export default function TeacherDashboardView({ user }: Props) {
       dashboardSource.current = emptyDashboardSource(classId, assignmentId);
       setDashboardStudents([]);
       setDashboardStrategyDistribution({});
+      setCohortRecommendation(null);
       setDashboardPublishedRecords([]);
       setDashboardRatings([]);
       setDashboardReviewQuestions([]);
@@ -214,7 +218,7 @@ export default function TeacherDashboardView({ user }: Props) {
       const strategyDistribution: Record<string, number> = {};
       const strategyByStudent = new Map<string, { strategy?: string; tldr?: string }>();
       for (const entry of fetchedStrategyResults) {
-        if (!entry.studentId || !entry.plan) continue;
+        if (!entry.studentId || entry.studentId === "cohort" || !entry.plan) continue;
         strategyByStudent.set(entry.studentId, {
           strategy: entry.plan.strategy,
           tldr: entry.plan.tldr,
@@ -222,6 +226,13 @@ export default function TeacherDashboardView({ user }: Props) {
         if (entry.plan.strategy) {
           strategyDistribution[entry.plan.strategy] = (strategyDistribution[entry.plan.strategy] ?? 0) + 1;
         }
+      }
+
+      let recommendation: StrategyRecommendation | null = null;
+      try {
+        if (fetchedLesson) recommendation = recommendWorkspaceCohort(fetchedAnswers, { classId, assignmentId, lessonNumber: fetchedLesson });
+      } catch {
+        partialFailure = true;
       }
 
       const mediaMap: Record<string, { image: boolean; video: boolean }> = {};
@@ -263,6 +274,7 @@ export default function TeacherDashboardView({ user }: Props) {
       setSelectedLesson(fetchedLesson);
       setQuizStatus(fetchedQuizStatus);
       setDashboardStrategyDistribution(strategyDistribution);
+      setCohortRecommendation(recommendation);
       setDashboardPublishedRecords(fetchedPublished);
       setDashboardRatings(fetchedRatings);
       setDashboardReviewQuestions(reviewQuestionRows);
@@ -287,6 +299,7 @@ export default function TeacherDashboardView({ user }: Props) {
     if (!hasAssignmentContext) {
       setDashboardStudents([]);
       setDashboardStrategyDistribution({});
+      setCohortRecommendation(null);
       setDashboardPublishedRecords([]);
       setDashboardRatings([]);
       setDashboardReviewQuestions([]);
@@ -317,14 +330,6 @@ export default function TeacherDashboardView({ user }: Props) {
       }),
     };
   }, [dashboardStrategyDistribution]);
-
-  const dominantStrategy = useMemo(
-    () =>
-      strategyChartRows.rows
-        .slice()
-        .sort((left, right) => right.count - left.count)[0],
-    [strategyChartRows.rows],
-  );
 
   const publishedContentRows = useMemo(
     () =>
@@ -426,7 +431,7 @@ export default function TeacherDashboardView({ user }: Props) {
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Teacher dashboard</p>
                   <h1 className="text-3xl font-semibold text-slate-900">Assignment summary</h1>
                 </div>
-                <p className="max-w-3xl text-sm text-slate-600">A separate reporting space for this assignment. Review quiz completion, cohort strategy patterns, published content, and student feedback without interrupting the content-generation workflow.</p>
+                <p className="max-w-3xl text-sm text-slate-600">Review quiz completion, the cohort recommendation, published content, and student feedback for this assignment.</p>
                 {dashboardUpdatedAt && (
                   <p className="text-xs text-slate-400">Last updated {formatDateTime(dashboardUpdatedAt)}</p>
                 )}
@@ -487,9 +492,9 @@ export default function TeacherDashboardView({ user }: Props) {
                 <p className="mt-1 text-xs text-slate-500">Students who submitted the quiz</p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase text-slate-400">Dominant strategy</p>
-                <p className="mt-2 text-xl font-semibold text-slate-900">{dominantStrategy?.count ? dominantStrategy.label : "Not analyzed"}</p>
-                <p className="mt-1 text-xs text-slate-500">Lead strategy for the current cohort</p>
+                <p className="text-xs font-semibold uppercase text-slate-400">Cohort recommendation</p>
+                <p className="mt-2 text-xl font-semibold text-slate-900">{cohortRecommendation ? getEngagementStrategyLabel(cohortRecommendation.strategy) : "Awaiting quiz responses"}</p>
+                <p className="mt-1 text-xs text-slate-500">Based on submitted answers for the selected lesson</p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <p className="text-xs font-semibold uppercase text-slate-400">Content sent</p>
@@ -504,18 +509,23 @@ export default function TeacherDashboardView({ user }: Props) {
             </div>
 
             <div className="grid gap-6 xl:grid-cols-2">
-              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <section aria-label="Quiz-based cohort recommendation" className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-semibold uppercase text-slate-400">Strategy chart</p>
-                    <h2 className="text-lg font-semibold text-slate-900">Cohort strategy distribution</h2>
+                    <p className="text-xs font-semibold uppercase text-slate-400">Current quiz results</p>
+                    <h2 className="text-lg font-semibold text-slate-900">Quiz-based cohort recommendation</h2>
                   </div>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{strategyChartRows.analyzedStudentTotal} analyzed</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{cohortRecommendation?.counts.students ?? 0} {cohortRecommendation?.counts.students === 1 ? "response" : "responses"}</span>
                 </div>
-                {strategyChartRows.analyzedStudentTotal === 0 ? (
-                  <p className="mt-4 text-sm text-slate-500">Run cohort analysis after students submit the quiz to populate this chart.</p>
-                ) : (
-                  <div className="mt-4 grid gap-3">
+                {cohortRecommendation ? <>
+                  <p className="mt-4 text-base font-semibold text-slate-900">{getEngagementStrategyLabel(cohortRecommendation.strategy)}</p>
+                  <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600">{buildTeacherSummary(cohortRecommendation)}</p>
+                </> : <p className="mt-4 text-sm text-slate-500">Publish a lesson quiz and collect student responses to see a cohort recommendation.</p>}
+                <p className="mt-3 text-xs leading-5 text-slate-500">Updates from the submitted quiz answers using the same rule as Step 2. This does not change the teacher&apos;s selected strategy. The strategy used for each published material appears below.</p>
+                {strategyChartRows.analyzedStudentTotal > 0 && <details className="mt-4 border-t border-slate-100 pt-3">
+                  <summary className="cursor-pointer text-sm font-semibold text-slate-700">Individual strategy records ({strategyChartRows.analyzedStudentTotal})</summary>
+                  <p className="mt-2 text-xs text-slate-500">Separately recorded recommendations for individual students.</p>
+                  <div className="mt-3 grid gap-3">
                     {strategyChartRows.rows.map((row) => (
                       <div key={row.id} className="grid gap-2">
                         <div className="flex items-center justify-between text-sm">
@@ -528,8 +538,8 @@ export default function TeacherDashboardView({ user }: Props) {
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
+                </details>}
+              </section>
 
               <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-center justify-between">
@@ -631,7 +641,7 @@ export default function TeacherDashboardView({ user }: Props) {
                         <tr className="border-b border-slate-200 text-xs uppercase text-slate-400">
                           <th className="pb-3 pr-4 font-semibold">Student</th>
                           <th className="pb-3 pr-4 font-semibold">Submitted</th>
-                          <th className="pb-3 pr-4 font-semibold">Strategy</th>
+                          {strategyChartRows.analyzedStudentTotal > 0 && <th className="pb-3 pr-4 font-semibold">Individual strategy</th>}
                           <th className="pb-3 font-semibold">Ratings</th>
                         </tr>
                       </thead>
@@ -643,7 +653,7 @@ export default function TeacherDashboardView({ user }: Props) {
                               {row.tldr && <p className="mt-1 text-xs text-slate-500">{row.tldr}</p>}
                             </td>
                             <td className="py-3 pr-4 text-slate-600">{formatDate(row.submittedAt)}</td>
-                            <td className="py-3 pr-4 text-slate-600">{row.strategy ? getEngagementStrategyLabel(row.strategy) : "Not analyzed yet"}</td>
+                            {strategyChartRows.analyzedStudentTotal > 0 && <td className="py-3 pr-4 text-slate-600">{row.strategy ? getEngagementStrategyLabel(row.strategy) : "No individual record"}</td>}
                             <td className="py-3 text-slate-600">{ratingsByStudent[row.id] ?? 0}</td>
                           </tr>
                         ))}
