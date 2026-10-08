@@ -530,8 +530,8 @@ it("carries the actual class rule-based recommendation into the shared material 
   mocks.fetch.mockImplementation(async (input: string, init?: RequestInit) => {
     if (input.startsWith("/api/quiz-status")) return reply({ quizStatus: { lesson_number: 8, status: "published" } });
     if (input.startsWith("/api/student-answers")) return reply({ answers: [
-      { student_id: "student-a", student_name: "Student A", answers: { L8_Q1: "C", L8_Q2: "C", L8_Q3: "A", L8_Q4: "A" } },
-      { student_id: "student-b", student_name: "Student B", answers: { L8_Q1: "C", L8_Q2: "C", L8_Q3: "A", L8_Q4: "A" } },
+      { student_id: "student-a", student_name: "Student A", class_id: user.classId, assignment_id: user.assignmentId, lesson_number: 8, answers: { L8_Q1: "C", L8_Q2: "C", L8_Q3: "A", L8_Q4: "A" } },
+      { student_id: "student-b", student_name: "Student B", class_id: user.classId, assignment_id: user.assignmentId, lesson_number: 8, answers: { L8_Q1: "C", L8_Q2: "C", L8_Q3: "A", L8_Q4: "A" } },
     ] });
     return defaultFetch(input, init);
   });

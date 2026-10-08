@@ -17,6 +17,23 @@ const reply = (data: unknown, ok = true) => ({ ok, json: async () => data });
 const lessons = reply({ lessons: [{ lessonNumber: 8, lessonTitle: "Energy", learningObjective: "Track energy" }], models: INITIAL_MODEL_CATALOG });
 const asset = deckFixture("analogy").assets.target;
 const preparedDataUri = "data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,UEsDBA==";
+function cartRevisionFixture() {
+  const saved = deckFixture("cognitive conflict");
+  saved.lessonNumber = 8;
+  saved.draft.title = "A Cart Leaves the Spring";
+  const text = [
+    ["A cart and a spring", "Imagine a cart touching a compressed spring fixed on the left.", "What could happen when the cart is released?"],
+    ["Record your prediction", "The cart can separate from the spring.", "Write a prediction about where the cart will be after release."],
+    ["Look at the cart's positions", "", "What happens to the cart after it leaves the spring?"],
+    ["Compare with your prediction", "Your prediction: revisit your idea. What we observed in the activity: the cart moves right after contact ends.", "How did your prediction match or differ from the picture?"],
+    ["Your question about the cart", "", "Write one scientific question about the cart's motion."],
+  ];
+  saved.draft.slides.forEach((slide, i) => { [slide.title, slide.body, slide.task] = text[i]; });
+  saved.draft.visuals[0] = { id: "evidence", prompt: "A spring fixed at left; three ordered exposures of the same blue cart progressively farther right after release. Same track and camera. No labels.",
+    caption: "A cart at three moments", alt: "The same blue cart is progressively farther right of a spring fixed at left." };
+  saved.assets.evidence.sourcePrompt = saved.draft.visuals[0].prompt;
+  return saved;
+}
 beforeEach(() => {
   vi.clearAllMocks(); mocks.load.mockResolvedValue(null); mocks.save.mockResolvedValue(undefined); vi.stubGlobal("fetch", mocks.fetch);
   vi.stubGlobal("URL", Object.assign(class extends URL {}, { revokeObjectURL: mocks.revoke }));
@@ -559,8 +576,87 @@ it("uses the current text model and teacher feedback while preserving unchanged 
   fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
   await screen.findByText("5 slides ready to send.");
   const reviewCall = mocks.fetch.mock.calls.find(([, init]) => init?.body && JSON.parse(init.body).operation === "review");
-  expect(JSON.parse(reviewCall![1].body)).toMatchObject({ textModel: "current", strategy: "analogy", lessonNumber: 8, feedback: "Keep the analogue independent." });
+  expect(JSON.parse(reviewCall![1].body)).toMatchObject({ textModel: "current", strategy: "analogy", lessonNumber: 8,
+    feedback: expect.stringContaining("Teacher revision request") });
+  expect(JSON.parse(reviewCall![1].body).feedback).toContain("Keep the analogue independent.");
   expect(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image"))).toHaveLength(3);
+});
+
+it.each(["revision", "new generation"] as const)("keeps the teacher request scoped to its %s across both automatic correction rounds", async operation => {
+  const saved = cartRevisionFixture();
+  mocks.load.mockResolvedValue(saved);
+  let draftRequests = 0;
+  let textChecks = 0;
+  mocks.fetch.mockImplementation(async (path: string, init?: RequestInit) => {
+    if (path.startsWith("/api/slides?")) return lessons;
+    const body = JSON.parse(String(init?.body));
+    if (path.endsWith("/check")) return reply({ issues: !body.visualId && ++textChecks <= 2
+      ? [`Slide 3.task: clarify the observation, correction ${textChecks}.`] : [], model: "test-review-model" });
+    if (path.endsWith("/image")) return reply({ asset });
+    draftRequests++;
+    const draft = structuredClone(saved.draft);
+    draft.slides[2].teacherNotes = [`Facilitation for correction ${draftRequests}.`];
+    return reply({ draft });
+  });
+  const handle = createRef<SlidesWorkspaceHandle>();
+  render(<SlidesWorkspace ref={handle} user={user} embeddedContext={{ lessonNumber: 8, strategy: "cognitive conflict" }} />);
+  await screen.findByRole("button", { name: "Revise with AI" });
+  const teacherRequest = "Simplify only the evidence image: one fixed spring on the left, the same cart in three positions progressively RIGHT. Preserve the story; no bumper or reversal.";
+  fireEvent.change(screen.getByLabelText("Revision request"), { target: { value: teacherRequest } });
+  if (operation === "revision") fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
+  else act(() => handle.current?.generate());
+  await screen.findByText("5 slides ready to send.");
+  const requests = mocks.fetch.mock.calls.filter(([path]) => path === "/api/slides").map(([, init]) => JSON.parse(init.body));
+  expect(requests).toHaveLength(3);
+  expect(requests.map(request => request.operation)).toEqual([operation === "revision" ? "review" : "generate", "review", "review"]);
+  for (const request of requests) {
+    if (operation === "revision") {
+      expect(request.feedback).toContain(teacherRequest);
+    } else expect(request.feedback ?? "").not.toContain(teacherRequest);
+  }
+  for (const request of requests.slice(1)) {
+    expect(request.feedback).toContain("AI review findings");
+    expect(request.feedback).toContain("Slide 3.task: clarify the observation");
+    if (operation === "revision") {
+      expect(request.feedback).toContain("Teacher revision request");
+      expect(request.feedback.indexOf(teacherRequest)).toBeLessThan(request.feedback.indexOf("AI review findings"));
+    }
+  }
+  // A wording/notes repair must not discard an unchanged, successful image.
+  expect(mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image"))).toHaveLength(operation === "revision" ? 0 : 1);
+});
+
+it("keeps teacher image constraints during planned redraw and a later automatic image repair", async () => {
+  const saved = cartRevisionFixture();
+  mocks.load.mockResolvedValue(saved);
+  let imageChecks = 0;
+  mocks.fetch.mockImplementation(async (path: string, init?: RequestInit) => {
+    if (path.startsWith("/api/slides?")) return lessons;
+    const body = JSON.parse(String(init?.body));
+    if (path.endsWith("/check")) return reply({ issues: body.visualId && ++imageChecks === 1
+      ? ["Image evidence: separate the cart exposures more clearly."] : [], model: "test-review-model" });
+    if (path.endsWith("/image")) return reply({ asset });
+    const draft = structuredClone(saved.draft);
+    draft.visuals[0].prompt += " Leave clear spacing between the cart exposures.";
+    return reply({ draft });
+  });
+  render(<SlidesWorkspace user={user} embeddedContext={{ lessonNumber: 8, strategy: "cognitive conflict" }} />);
+  await screen.findByRole("button", { name: "Revise with AI" });
+  const teacherRequest = "Simplify only the evidence image; preserve the fixed left spring and rightward motion. No bumper or reversal.";
+  fireEvent.change(screen.getByLabelText("Revision request"), { target: { value: teacherRequest } });
+  fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
+  await screen.findByText("5 slides ready to send.");
+  const images = mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image")).map(([, init]) => JSON.parse(init.body));
+  expect(images).toHaveLength(2);
+  for (const request of images) {
+    expect(request.feedback).toContain(teacherRequest);
+    expect(request.feedback).toContain("Teacher revision request");
+    expect(request.feedback.length).toBeLessThanOrEqual(4000);
+    expect(request.draft.visuals[0].prompt).toContain("same blue cart progressively farther right");
+  }
+  expect(images[0].feedback).not.toContain("AI review findings");
+  expect(images[1].feedback).toContain("AI review findings");
+  expect(images[1].feedback).toContain("separate the cart exposures more clearly");
 });
 
 it("stops unchanged automatic text repair but completes images and permits direct sending despite suggestions", async () => {
@@ -636,7 +732,8 @@ it("automatically corrects a rejected baseline before generating its dependent v
   await generate();
   const images = mocks.fetch.mock.calls.filter(([path]) => path.endsWith("/image")).map(([, init]) => JSON.parse(init.body));
   expect(images.map(body => body.visualId)).toEqual(["analogue", "target", "target", "variation"]);
-  expect(images[2].feedback).toBe("Image target: fix the contact gap.");
+  expect(images[2].feedback).toContain("AI review findings");
+  expect(images[2].feedback).toContain("Image target: fix the contact gap.");
   expect(images[3].referenceAsset.data).toBe("data:image/jpeg;base64,/9j/4AA=");
   expect(targetChecks).toBe(2);
 });

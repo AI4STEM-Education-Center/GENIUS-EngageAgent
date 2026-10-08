@@ -16,6 +16,7 @@ import { loadSlideDraft, saveSlideDraft, slideDraftKey } from "@/lib/slides/draf
 import { postSlideRequest } from "@/lib/slides/client-transport";
 import { publishSlideDeck } from "@/lib/slides/publish-client";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
+import { slideRevisionFeedback } from "@/lib/slides/revision";
 
 const input = "w-full min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-2 focus:outline-teal-700 disabled:opacity-50";
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium hover:bg-gray-100 disabled:opacity-50";
@@ -219,6 +220,9 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   }
   function generate(review = false) {
     if (!canGenerate || busy || job.current || (review && !deck)) return;
+    // Capture this operation's request once; automatic repairs must keep it,
+    // while a new generation must not inherit an earlier revision request.
+    const teacherRequest = review ? feedback : "";
     void run(async controller => {
       const chosenLesson = review && deck ? deck.lessonNumber : lessonNumber;
       const chosenStrategy = review && deck ? deck.strategy : strategy;
@@ -229,7 +233,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       setStatus(review ? "Reviewing slide content..." : chosenStrategy === "analogy" && chosenMethod === "six-step" ? "Generating six-step slides..." : chosenStrategy === "experience bridging" ? "Generating experience-bridging slides..." : "Generating five slides...");
       const context = { lessonNumber: chosenLesson, strategy: chosenStrategy, textModel: chosenModels.textModel, promptVersion: chosenPrompt, classroomContext: chosenClassroomContext,
         ...(chosenStrategy === "analogy" ? { analogyMethod: chosenMethod } : {}) };
-      const result = await post("/api/slides", { ...context, operation: review ? "review" : "generate", ...(review && deck ? { draft: deck.draft, feedback: [feedback, ...issues, ...suggestions].join("\n").slice(0, 6000) } : {}) }, controller);
+      const result = await post("/api/slides", { ...context, operation: review ? "review" : "generate", ...(review && deck ? { draft: deck.draft, feedback: slideRevisionFeedback(teacherRequest, [...issues, ...suggestions]) } : {}) }, controller);
       const draft = parseDraft(result.draft, chosenStrategy, true);
       let next: SlideDeck = { id: review && deck ? deck.id : crypto.randomUUID(), lessonNumber: chosenLesson, strategy: chosenStrategy, draft, classroomContext: chosenClassroomContext, assets: preservedAssets(review ? deck : null, draft), checks: review ? deck?.checks : undefined, modelSelection: chosenModels, textModel: result.model, promptProvenance: result.promptProvenance };
       if (controller.signal.aborted) return;
@@ -240,7 +244,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       for (let attempt = 0; attempt < 2 && textFindings(next).length; attempt++) {
         try {
           setStatus("Correcting slide content and layout...");
-          const repaired = await post("/api/slides", { ...context, operation: "review", draft: next.draft, feedback: textFindings(next).join("\n").slice(0, 6000) }, controller);
+          const repaired = await post("/api/slides", { ...context, operation: "review", draft: next.draft, feedback: slideRevisionFeedback(teacherRequest, textFindings(next)) }, controller);
           const corrected = parseDraft(repaired.draft, chosenStrategy, true);
           const unchanged = JSON.stringify(corrected) === JSON.stringify(next.draft);
           next = { ...next, draft: corrected, assets: preservedAssets(next, corrected), textModel: repaired.model, promptProvenance: repaired.promptProvenance };
@@ -265,14 +269,14 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         try {
           if (!imageMatchesPlan(next, visual.id)) {
             setStatus(`Generating image ${n + 1} of ${next.draft.visuals.length}...`);
-            next = await imageFor(next, visual.id, controller);
+            next = await imageFor(next, visual.id, controller, chosenModels.imageModel, slideRevisionFeedback(teacherRequest, [], 4000));
           }
           if (controller.signal.aborted) return;
           next = await checkImage(next, visual.id, controller);
           const imageFindings = next.checks?.images[visual.id]?.issues || [];
           if (imageFindings.length) {
             setStatus(`Correcting ${visual.id} image...`);
-            next = await imageFor(next, visual.id, controller, chosenModels.imageModel, imageFindings.join("\n").slice(0, 4000));
+            next = await imageFor(next, visual.id, controller, chosenModels.imageModel, slideRevisionFeedback(teacherRequest, imageFindings, 4000));
             next = await checkImage(next, visual.id, controller, true);
           }
         }

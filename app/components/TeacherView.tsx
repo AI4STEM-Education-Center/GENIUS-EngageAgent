@@ -11,6 +11,7 @@ import { parseMaterialActivity } from "@/lib/material-activities";
 import { downloadStudentMaterial, type PreparedMaterialFile } from "@/lib/material-export";
 import type { UserContext } from "@/lib/auth";
 import { MOCK_USER_STORAGE_KEY, parseMockUserRole } from "@/lib/mock-auth";
+import { recommendWorkspaceCohort, workspaceQuizAnswers } from "@/lib/cohort-recommendation";
 import {
   engagementStrategies as strategies,
   getEngagementStrategyDescription,
@@ -30,7 +31,6 @@ import type {
 import {
   buildClassPlan,
   buildTeacherSummary,
-  recommendStrategy,
   type StrategyRecommendation,
 } from "@/lib/strategy-recommendation";
 
@@ -1109,7 +1109,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
       const res = await fetch(`/api/student-answers?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&lessonNumber=${encodeURIComponent(selectedLesson)}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to load student answers.");
-      setStudentAnswers(data.answers ?? []);
+      setStudentAnswers(workspaceQuizAnswers(data.answers ?? [], { classId, assignmentId, lessonNumber: selectedLesson }));
       setAnswersError(null);
     } catch (err) {
       setAnswersError(err instanceof Error ? err.message : "Failed to load student answers.");
@@ -1158,10 +1158,8 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     setSelectedForPublish(new Set());
 
     try {
-      const recommendation = recommendStrategy(
-        selectedLesson,
-        studentAnswers.map((studentAnswer) => studentAnswer.answers),
-      );
+      const recommendation = recommendWorkspaceCohort(studentAnswers, { classId, assignmentId, lessonNumber: selectedLesson });
+      if (!recommendation) throw new Error("No student answers available for this lesson. Refresh the responses and try again.");
       const masterPlan = buildClassPlan(recommendation);
       setClassRecommendation(recommendation);
       setPlan(masterPlan);
