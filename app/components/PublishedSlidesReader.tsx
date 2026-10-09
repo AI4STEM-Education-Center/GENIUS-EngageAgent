@@ -6,6 +6,7 @@ import type { SlideElement } from "@/lib/slides/layout";
 import { isPublishedSlideResponse, type PublishedSlideResponse } from "@/lib/slides/publication";
 import SlideCanvas from "./SlideCanvas";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
+import { GENIUS_LAUNCH_UPGRADE_CODE, GENIUS_LAUNCH_UPGRADE_MESSAGE } from "@/lib/slides/access-errors";
 
 type Props = {
   classId: string;
@@ -57,10 +58,20 @@ function Reader({ classId, assignmentId, publicationId, audience, onQuestion }: 
         const query = new URLSearchParams({ classId, assignmentId, publicationId });
         const headers = scopedClientAuthHeaders({ classId, assignmentId });
         const response = await fetch(`/api/slides/publication?${query}`, { headers, signal: controller.signal, cache: "no-store" });
-        if (!response.ok) throw new Error(response.status === 401 && headers.Authorization
-          ? "Your GENIUS session is no longer valid. Reopen this task in GENIUS to continue reading the slides."
-          : response.status === 401 || response.status === 403
-            ? "Sign in to this class to read these slides." : "Unable to load the published slides. Please retry.");
+        if (!response.ok) {
+          let message = response.status === 401 || response.status === 403
+            ? "Sign in to this class to read these slides." : "Unable to load the published slides. Please retry.";
+          if (response.status === 401 && headers.Authorization) {
+            message = "Your GENIUS session is no longer valid. Reopen this task in GENIUS to continue reading the slides.";
+            const failure: unknown = await response.json().catch(() => null);
+            // This code is emitted only after the server verifies the launch.
+            // Unknown responses retain session guidance; never display arbitrary error text.
+            if (failure && typeof failure === "object" && "code" in failure && failure.code === GENIUS_LAUNCH_UPGRADE_CODE) {
+              message = GENIUS_LAUNCH_UPGRADE_MESSAGE;
+            }
+          }
+          throw new Error(message);
+        }
         const value: unknown = await response.json();
         if (!isPublishedSlideResponse(value) || value.publicationId !== publicationId) throw new Error("The published slides could not be read. Please retry.");
         if (active && request === controller && !controller.signal.aborted) {

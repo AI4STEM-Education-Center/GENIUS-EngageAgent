@@ -1,6 +1,6 @@
 # Release the GENIUS embedded material workflow
 
-Status reviewed on October 7, 2026. This release preserves the existing split:
+Status reviewed on October 8, 2026. This release preserves the existing split:
 GENIUS manages login, enrollment, assignments and the iframe; EngageAgent
 generates, publishes and presents materials. No duplicate EngageAgent class is
 needed for a GENIUS assignment.
@@ -9,8 +9,18 @@ needed for a GENIUS assignment.
 
 | Application | Production branch and destination | Required changes |
 | --- | --- | --- |
-| GENIUS | `genius-platform-main` → GitHub Actions → existing EC2/PM2 services | [#79](https://github.com/AI4STEM-Education-Center/GENIUS_Learning_Platform/pull/79) (merged, deployment blocked) and [#80](https://github.com/AI4STEM-Education-Center/GENIUS_Learning_Platform/pull/80) |
-| EngageAgent | `main` → existing AWS Amplify application | [#136](https://github.com/AI4STEM-Education-Center/GENIUS-EngageAgent/pull/136) |
+| GENIUS | `genius-platform-main` → GitHub Actions → existing EC2/PM2 services | [#79](https://github.com/AI4STEM-Education-Center/GENIUS_Learning_Platform/pull/79) and [#80](https://github.com/AI4STEM-Education-Center/GENIUS_Learning_Platform/pull/80) are merged. The combined production-branch commit is `da80d670a5bd2a47af3bbc1aa5103c4ec2e764bf`; deployment remains unconfirmed. |
+| EngageAgent | `main` → existing AWS Amplify application | Embedded Slides support from [#136](https://github.com/AI4STEM-Education-Center/GENIUS-EngageAgent/pull/136) is deployed. The latest verified public release includes [#139](https://github.com/AI4STEM-Education-Center/GENIUS-EngageAgent/pull/139), commit `e4a8a7170061535609a09c91959491f1fd3568b8`. |
+
+The October 8 production browser check confirmed a fresh GENIUS teacher launch
+with the correct class and assignment, but without the required
+`aud: engageagent-embed` claim. Authentication can therefore open the teacher
+interface while the protected Slides catalog correctly rejects the launch.
+Repeatedly reopening the task cannot repair this until GENIUS is updated.
+The latest inspected GENIUS [deployment run](https://github.com/AI4STEM-Education-Center/GENIUS_Learning_Platform/actions/runs/37799687419)
+did not start because of the GitHub account billing/spending restriction.
+PR #80 merged on October 8 at 23:34:38 EDT (October 9, 03:34:38 UTC); its
+production rollout must still be confirmed separately from this merge.
 
 Resolving GitHub's billing/spending restriction restores the ability to run
 GENIUS's deployment job. It does not merge pending pull requests or establish
@@ -58,8 +68,8 @@ them when committing a deck.
 
 ## Ordered release and acceptance
 
-1. Resolve the GENIUS Actions account restriction. Review and merge GENIUS #80
-   into `genius-platform-main`; that release includes #79. Its workflow must
+1. Resolve the GENIUS Actions account restriction and deploy the reviewed
+   `genius-platform-main` commit containing #79 and #80. Its workflow must
    finish tests, deploy the exact tested SHA and pass internal/public health
    checks, including the live MongoDB ping. See the GENIUS repository's
    `docs/engage-production-release.md` for the server configuration checklist.
@@ -68,9 +78,9 @@ them when committing a deck.
    `engageagent-embed`, and matching role, class, assignment and task. An enrolled
    student's assignment response must include `learningTask.id`. Inspect only
    necessary claims privately; do not log complete tokens or secrets.
-3. Review and merge EngageAgent #136 into `main`. Confirm the Amplify production
-   branch is connected and auto-build is enabled, or trigger a build of that
-   exact reviewed commit in Amplify. Confirm preflight, build and deploy succeed.
+3. Confirm the deployed EngageAgent release retains the embedded Slides support
+   already live through #139. For subsequent fixes, deploy the exact reviewed
+   `main` commit through Amplify and confirm preflight, build and deploy succeed.
 4. Reopen the GENIUS task to obtain fresh credentials. Older generic tokens
    intentionally cannot operate the protected slide APIs. Verify standalone
    sign-in still works and cannot access an unrelated GENIUS class by changing
@@ -102,7 +112,18 @@ them when committing a deck.
   they do not depend on third-party session cookies.
 - Production-shaped DynamoDB diagnostic records have regression coverage, as do
   authorization, job ownership, publication, download and expired-reader handling.
+- EngageAgent #139 was verified publicly on October 8 at 03:37:59 UTC. Both
+  teacher and student pages referenced the expected bundles, whose SHA256 values
+  matched the validated production build. Standalone generation, publication,
+  download and student feedback have been verified separately.
+- A fresh production GENIUS launch still lacked the required audience during the
+  October 8 embedded check. A valid signed launch with the wrong or missing
+  audience receives HTTP 401 with `code: genius_launch_upgrade_required` and an
+  integration-update instruction in the current code. Invalid or expired tokens
+  keep the generic sign-in instruction. This diagnostic change does not grant
+  legacy tokens access or replace the required GENIUS deployment.
 
-Actual production secret values, AWS resource policies and the complete new
-HTTPS workflow have not been verified in this audit. Neither PR has been merged
-or deployed by this audit. Do not confuse preparation with a completed release.
+Actual production secret values and AWS resource policies were not inspected.
+The complete new GENIUS-hosted HTTPS workflow remains unverified until the host
+update is deployed and the teacher/student acceptance above passes. Local
+success and the working standalone workflow do not establish embedded acceptance.
