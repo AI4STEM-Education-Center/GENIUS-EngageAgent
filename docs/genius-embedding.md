@@ -5,6 +5,25 @@ independent workspaces and GENIUS learning tasks. An assigned GENIUS task opens
 the existing three-step teacher workflow or student activity directly. It does
 not require creating a second class in EngageAgent.
 
+## Production status — October 8, 2026
+
+EngageAgent's embedded Slides implementation is deployed, with the public
+release verified through [#139](https://github.com/AI4STEM-Education-Center/GENIUS-EngageAgent/pull/139).
+The companion GENIUS [#79](https://github.com/AI4STEM-Education-Center/GENIUS_Learning_Platform/pull/79)
+and [#80](https://github.com/AI4STEM-Education-Center/GENIUS_Learning_Platform/pull/80)
+are merged into the production branch at `da80d670a5bd2a47af3bbc1aa5103c4ec2e764bf`.
+The #80 merge completed at 23:34:38 EDT; deployment remains unconfirmed after
+the previous job was blocked by GitHub's billing/spending restriction.
+A fresh production teacher launch during this check
+still lacked the audience required by Slides. Consequently the teacher
+interface opens, but slide generation is unavailable. The full local embedded
+workflow has passed; the production embedded workflow has not yet passed.
+
+If the Slides page says the GENIUS integration needs an update, the platform
+administrator must deploy the host changes before reopening the task will help.
+An expired-session message still means a fresh launch is needed. See the
+[release checklist](./production-release.md) for current evidence and acceptance.
+
 ## Teacher setup
 
 1. In GENIUS, open **My Classes → Create New Class**, or use an existing class.

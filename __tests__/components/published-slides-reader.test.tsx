@@ -241,9 +241,35 @@ it.each([false, true])("directs an expired verified GENIUS reader to reopen its 
   expect(fetchMock.mock.calls.at(-1)![1].headers.Authorization).toBe("Bearer expired-reader-token");
 });
 
+it.each([false, true])("explains a verified legacy GENIUS launch upgrade (existing slides: %s)", async alreadyLoaded => {
+  const host = { ...props, classId: "host-class", assignmentId: "host-task" };
+  setVerifiedClientAuth("legacy-reader-token", host as unknown as EmbeddedUserContext);
+  if (alreadyLoaded) fetchMock.mockResolvedValueOnce(reply(response(deckFixture("experience bridging"))));
+  fetchMock.mockResolvedValue(reply({ code: "genius_launch_upgrade_required", error: "Untrusted response text must not be rendered." }, 401));
+  const view = render(<PublishedSlidesReader {...host} />);
+  if (alreadyLoaded) {
+    await screen.findByText("Slide 1 of 5");
+    fireEvent.error(view.container.querySelector("image")!);
+  }
+  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "This GENIUS launch does not support Slides yet. Ask the platform administrator to update the GENIUS integration, then reopen this activity.");
+  expect(view.container.textContent).not.toContain("Untrusted response text");
+  expect(view.container.innerHTML).not.toContain("legacy-reader-token");
+  if (alreadyLoaded) expect(screen.getByText("Slide 1 of 5")).toBeTruthy();
+});
+
+it.each(["unknown code", "invalid JSON"] as const)("retains generic embedded expiry guidance for %s", async failure => {
+  const host = { ...props, classId: "host-class", assignmentId: "host-task" };
+  setVerifiedClientAuth("reader-token", host as unknown as EmbeddedUserContext);
+  fetchMock.mockResolvedValue(failure === "unknown code"
+    ? reply({ code: "other_error", error: "Arbitrary error text" }, 401)
+    : { ok: false, status: 401, json: async () => { throw new Error("Invalid JSON"); } });
+  render(<PublishedSlidesReader {...host} />);
+  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Your GENIUS session is no longer valid. Reopen this task in GENIUS to continue reading the slides.");
+});
+
 it("keeps native sign-in guidance when an unrelated verified GENIUS identity exists", async () => {
   setVerifiedClientAuth("other-task-token", { classId: "host-class", assignmentId: "host-task" } as EmbeddedUserContext);
-  fetchMock.mockResolvedValue(reply({}, 401));
+  fetchMock.mockResolvedValue(reply({ code: "genius_launch_upgrade_required" }, 401));
   render(<PublishedSlidesReader {...props} />);
   expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Sign in to this class to read these slides.");
   expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("Authorization");
@@ -252,7 +278,7 @@ it("keeps native sign-in guidance when an unrelated verified GENIUS identity exi
 it("does not treat unverified URL context as a verified GENIUS session", async () => {
   window.history.replaceState({}, "", "/?classId=host-class&assignmentId=host-task&sso_token=unverified-token");
   try {
-    fetchMock.mockResolvedValue(reply({}, 401));
+    fetchMock.mockResolvedValue(reply({ code: "genius_launch_upgrade_required" }, 401));
     render(<PublishedSlidesReader {...props} classId="host-class" assignmentId="host-task" />);
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Sign in to this class to read these slides.");
     expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("Authorization");

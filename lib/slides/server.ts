@@ -8,10 +8,11 @@ import { listStudentAnswers } from "../nosql";
 import { summarizeDiagnosticAnswers } from "../material-prompts";
 import { isSlideStrategy, parseDraft, type SlideDraft } from "./model";
 import { isAnalogyMethod, resolveAnalogyMethod, type AnalogyMethod } from "./analogy-methods";
+import { GENIUS_LAUNCH_UPGRADE_CODE, GENIUS_LAUNCH_UPGRADE_MESSAGE } from "./access-errors";
 
 export const slideJson = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 export class SlideRequestError extends Error {
-  constructor(message: string, public status = 400) { super(message); }
+  constructor(message: string, public status = 400, public code?: typeof GENIUS_LAUNCH_UPGRADE_CODE) { super(message); }
 }
 
 export type AuthorizedSlideContext = { classId: string; assignmentId: string; userId: string };
@@ -25,16 +26,18 @@ export async function authorizeSlideAccess(request: Request, context: Record<str
     // unrelated standalone cookie when the token is invalid or its scope differs.
     const token = /^Bearer ([^\s]+)$/iu.exec(authorization)?.[1];
     if (!token || token.length > 16_384) throw new SlideRequestError("Reopen this activity from GENIUS to sign in.", 401);
+    let claims: ReturnType<typeof decodeJwt>;
     try {
       user = await verifySSOToken(token);
-      const claims = decodeJwt(token); // Signature, issuer, algorithm and expiry were verified above.
-      // Only GENIUS's membership-checked EngageAgent launch may authorize these
-      // APIs. Generic SSO tokens for other embedded tools are not interchangeable.
-      if (claims.aud !== "engageagent-embed" || typeof claims.exp !== "number" || !Number.isFinite(claims.exp)
+      claims = decodeJwt(token); // Signature, issuer, algorithm and expiry were verified above.
+      if (typeof claims.exp !== "number" || !Number.isFinite(claims.exp)
         || typeof claims.iat !== "number" || !Number.isFinite(claims.iat)
         || claims.exp <= claims.iat || claims.iat > Math.floor(Date.now() / 1000) + 60
         || typeof user.geniusId !== "string" || !user.geniusId.trim() || user.geniusId.length > 160) throw new Error("Invalid embedded claims");
     } catch { throw new SlideRequestError("Reopen this activity from GENIUS to sign in.", 401); }
+    // A valid legacy launch cannot be fixed by repeatedly reopening the task.
+    // Only the membership-checked host integration may issue this exact audience.
+    if (claims.aud !== "engageagent-embed") throw new SlideRequestError(GENIUS_LAUNCH_UPGRADE_MESSAGE, 401, GENIUS_LAUNCH_UPGRADE_CODE);
   } else {
     user = await sessionUser();
     if (!user) throw new SlideRequestError("Sign in to EngageAgent first.", 401);
@@ -131,7 +134,9 @@ export function requestDraft(value: unknown, strategy: Parameters<typeof parseDr
   catch (error) { throw new SlideRequestError(error instanceof Error ? error.message : "Invalid slide draft.", 422); }
 }
 export function slideFailure(error: unknown) {
-  if (error instanceof SlideRequestError || error instanceof WorkspaceError) return slideJson({ error: error.message }, error.status);
+  if (error instanceof SlideRequestError || error instanceof WorkspaceError) return slideJson({ error: error.message,
+    ...(error instanceof SlideRequestError && error.code ? { code: error.code } : {}),
+  }, error.status);
   console.error("Slides request failed", { type: error instanceof Error ? error.name : "Unknown" });
   return slideJson({ error: "Slide generation is unavailable or timed out. Your current draft is unchanged. Try again shortly." }, 503);
 }

@@ -30,9 +30,9 @@ const contents = new Map<string, Record<string, unknown>>();
 const draft = () => slideFixture("cognitive conflict");
 const base = () => ({ ...context, lessonNumber: 3, strategy: "cognitive conflict" });
 const startBody = () => ({ ...base(), operation: "start", deckId: "embedded-deck", draft: draft(), assets: { evidence: { width: 1, height: 1 } } });
-const token = async (claims: Record<string, unknown> = {}, signingSecret = secret) => new SignJWT({
+const token = async (claims: Record<string, unknown> = {}, signingSecret = secret, issuer = SSO_ISSUER) => new SignJWT({
   sub: "embedded-teacher", role: "teacher", name: "GENIUS Teacher", aud: "engageagent-embed", ...context, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600, ...claims,
-}).setProtectedHeader({ alg: "HS256" }).setIssuer(SSO_ISSUER).sign(new TextEncoder().encode(signingSecret));
+}).setProtectedHeader({ alg: "HS256" }).setIssuer(issuer).sign(new TextEncoder().encode(signingSecret));
 const request = (path: string, bearer: string | undefined, body?: object, origin = "https://engage.test") => new Request(`https://engage.test${path}`, {
   ...(body ? { method: "POST", body: JSON.stringify(body) } : {}), headers: { origin, "Content-Type": "application/json", ...(bearer !== undefined ? { authorization: `Bearer ${bearer}` } : {}) },
 });
@@ -157,19 +157,45 @@ describe("GENIUS embedded slide requests with genuine signed JWTs and no applica
   ])("rejects %s audience at every protected API even with an unrelated teacher cookie", async (_name, aud) => {
     mocks.session.mockResolvedValue(teacher);
     const bearer = await token({ aud });
-    expect((await catalog(request(`/api/slides?${new URLSearchParams(context)}`, bearer))).status).toBe(401);
+    const upgradeError = { code: "genius_launch_upgrade_required",
+      error: "This GENIUS launch does not support Slides yet. Ask the platform administrator to update the GENIUS integration, then reopen this activity." };
+    const result = await catalog(request(`/api/slides?${new URLSearchParams(context)}`, bearer));
+    expect(result.status).toBe(401); expect(await result.json()).toEqual(upgradeError);
     for (const [handler, path, body] of [
       [generate, "/api/slides", base()], [check, "/api/slides/check", { ...base(), draft: draft() }],
       [image, "/api/slides/image", { ...base(), draft: draft(), visualId: "evidence" }],
       [jobs, "/api/slides/jobs", { ...context, jobId: "00000000-0000-4000-8000-000000000000" }],
       [publish, "/api/slides/publication", startBody()],
-    ] as const) expect((await handler(request(path, bearer, body))).status).toBe(401);
-    expect((await lookup(bearer, "00000000-0000-4000-8000-000000000000")).status).toBe(401);
+    ] as const) {
+      const response = await handler(request(path, bearer, body));
+      expect(response.status).toBe(401); expect(await response.json()).toEqual(upgradeError);
+    }
+    const reading = await lookup(bearer, "00000000-0000-4000-8000-000000000000");
+    expect(reading.status).toBe(401); expect(await reading.json()).toEqual(upgradeError);
     const file = fileRequest(bearer, await pptx()); const readBytes = vi.spyOn(file.body!, "getReader");
-    expect((await materialFile(file)).status).toBe(401); expect(readBytes).not.toHaveBeenCalled();
+    const fileResponse = await materialFile(file);
+    expect(fileResponse.status).toBe(401); expect(await fileResponse.json()).toEqual(upgradeError); expect(readBytes).not.toHaveBeenCalled();
     expect(mocks.session).not.toHaveBeenCalled(); expect(mocks.context).not.toHaveBeenCalled(); expect(mocks.answers).not.toHaveBeenCalled();
     expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.retrieve).not.toHaveBeenCalled(); expect(mocks.get).not.toHaveBeenCalled();
     expect(mocks.put).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled(); expect(mocks.sign).not.toHaveBeenCalled();
+  });
+
+  it.each(["expired", "forged", "wrong issuer", "missing expiry", "missing issue time"])("does not diagnose a host upgrade from %s legacy credentials", async reason => {
+    mocks.session.mockResolvedValue(teacher);
+    const bearer = await token({ aud: undefined,
+      ...(reason === "expired" ? { exp: Math.floor(Date.now() / 1000) - 1 } : {}),
+      ...(reason === "missing expiry" ? { exp: undefined } : {}),
+      ...(reason === "missing issue time" ? { iat: undefined } : {}),
+    }, reason === "forged" ? "wrong-secret" : secret, reason === "wrong issuer" ? "another-issuer" : SSO_ISSUER);
+    for (const response of [
+      await catalog(request(`/api/slides?${new URLSearchParams(context)}`, bearer)),
+      await generate(request("/api/slides", bearer, base())),
+    ]) {
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: "Reopen this activity from GENIUS to sign in." });
+    }
+    expect(mocks.session).not.toHaveBeenCalled(); expect(mocks.answers).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.get).not.toHaveBeenCalled(); expect(mocks.put).not.toHaveBeenCalled();
   });
 
   it("retains same-origin write protection for valid host tokens", async () => {
