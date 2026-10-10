@@ -52,6 +52,25 @@ describe("native class authorization", () => {
     vi.mocked(getQuizStatus).mockResolvedValue(null);
     expect((await guardWorkspaceRequest(request("student-answers", "POST", fields)))?.status).toBe(409);
   });
+  it("lets students in live classes take the task survey, and only their own response", async () => {
+    vi.mocked(sessionUser).mockResolvedValue(student);
+    const survey = { surveyId: "survey-1" };
+    // Read the published task survey, never create or edit one.
+    expect(await guardWorkspaceRequest(request("surveys"))).toBeNull();
+    expect((await guardWorkspaceRequest(request("surveys", "POST", { title: "x", dailyExperienceTopic: "x" })))?.status).toBe(403);
+    // Load and submit their own response.
+    expect(await guardWorkspaceRequest(request("survey-responses", "GET", { ...survey, studentId: "s1" }))).toBeNull();
+    expect(await guardWorkspaceRequest(request("survey-responses", "POST", { ...survey, studentId: "s1", studentName: "Student", answers: {}, action: "submit" }))).toBeNull();
+    // Never anyone else's, all responses, or under another name.
+    expect((await guardWorkspaceRequest(request("survey-responses", "GET", { ...survey, studentId: "s2" })))?.status).toBe(403);
+    expect((await guardWorkspaceRequest(request("survey-responses", "GET", survey)))?.status).toBe(403);
+    expect((await guardWorkspaceRequest(request("survey-responses", "POST", { ...survey, studentId: "s2", studentName: "Student" })))?.status).toBe(403);
+    expect((await guardWorkspaceRequest(request("survey-responses", "POST", { ...survey, studentId: "s1", studentName: "Someone else" })))?.status).toBe(403);
+  });
+  it("lets teachers read all survey responses but not submit one", async () => {
+    expect(await guardWorkspaceRequest(request("survey-responses", "GET", { surveyId: "survey-1" }))).toBeNull();
+    expect((await guardWorkspaceRequest(request("survey-responses", "POST", { surveyId: "survey-1", studentId: "s1", studentName: "Student" })))?.status).toBe(403);
+  });
   it("does not consume the request body needed by the original handler", async () => {
     const req = request("quiz-status", "POST");
     await guardWorkspaceRequest(req);
