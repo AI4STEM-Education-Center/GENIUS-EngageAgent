@@ -9,6 +9,7 @@ import {
   type SurveyResultSource,
 } from "@/lib/survey-results";
 import type { Survey, SurveyResponse } from "@/lib/types";
+import StudentInterestsPanel from "./StudentInterestsPanel";
 
 type Props = {
   classId: string;
@@ -170,6 +171,8 @@ export default function SurveyResultsSection({ classId, assignmentId }: Props) {
           )}
         </div>
       </div>
+
+      {source && <StudentInterestsPanel classId={classId} assignmentId={assignmentId} />}
 
       {loading && sources.length === 0 && <p className="mt-4 text-sm text-slate-500">Loading survey results…</p>}
       {!loading && sources.length === 0 && (

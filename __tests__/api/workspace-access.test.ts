@@ -52,6 +52,11 @@ describe("native class authorization", () => {
     vi.mocked(getQuizStatus).mockResolvedValue(null);
     expect((await guardWorkspaceRequest(request("student-answers", "POST", fields)))?.status).toBe(409);
   });
+  it("keeps the daily-experience survey analysis teacher-only (#114)", async () => {
+    expect(await guardWorkspaceRequest(request("survey-analysis"))).toBeNull();
+    vi.mocked(sessionUser).mockResolvedValue(student);
+    expect((await guardWorkspaceRequest(request("survey-analysis")))?.status).toBe(403);
+  });
   it("does not consume the request body needed by the original handler", async () => {
     const req = request("quiz-status", "POST");
     await guardWorkspaceRequest(req);
