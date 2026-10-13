@@ -137,6 +137,103 @@
         "C": "Not very confident",
         "D": "Just guessing"
       }
+    },
+    {
+      "item_id": "L5_S1",
+      "stem": "What is your favorite sport, hobby, or household chore that you do often?",
+      "example": "Examples: soccer, drawing, washing dishes, or gaming.",
+      "type": "experience",
+      "question_number": 5,
+      "options": {},
+      "response_fields": [
+        {
+          "field_id": "L5_S1_activity",
+          "label": "Your activity",
+          "response_type": "text",
+          "text_length": "short"
+        }
+      ]
+    },
+    {
+      "item_id": "L5_S1_confidence",
+      "type": "confidence_check",
+      "stem": "How confident are you that your response describes your experience?",
+      "options": {
+        "A": "Very confident",
+        "B": "Somewhat confident",
+        "C": "Not very confident",
+        "D": "Just guessing"
+      }
+    },
+    {
+      "item_id": "L5_S2",
+      "stem": "Think of a time in that activity when you felt a really strong hit or push, such as a fast ball, a hard bump, or a strong shove.",
+      "type": "experience",
+      "question_number": 6,
+      "options": {},
+      "response_fields": [
+        {
+          "field_id": "L5_S2_hit_source",
+          "label": "What hit you or your hands?",
+          "response_type": "text",
+          "text_length": "short"
+        },
+        {
+          "field_id": "L5_S2_body_location",
+          "label": "Where on your body did you feel it most?",
+          "response_type": "text",
+          "text_length": "short"
+        }
+      ]
+    },
+    {
+      "item_id": "L5_S2_confidence",
+      "type": "confidence_check",
+      "stem": "How confident are you that your response describes your experience?",
+      "options": {
+        "A": "Very confident",
+        "B": "Somewhat confident",
+        "C": "Not very confident",
+        "D": "Just guessing"
+      }
+    },
+    {
+      "item_id": "L5_S3",
+      "stem": "Think of one time you tried to stop or push something heavy and another time you tried to stop or push something light.",
+      "type": "experience",
+      "question_number": 7,
+      "options": {},
+      "response_fields": [
+        {
+          "field_id": "L5_S3_heavy_thing",
+          "label": "Heavy thing you pushed or stopped",
+          "response_type": "text",
+          "text_length": "short"
+        },
+        {
+          "field_id": "L5_S3_light_thing",
+          "label": "Light thing you pushed or stopped",
+          "response_type": "text",
+          "text_length": "short"
+        },
+        {
+          "field_id": "L5_S3_pushed_harder",
+          "label": "Which one pushed back on you harder? (Heavier / Lighter / About the same)",
+          "response_type": "text",
+          "text_length": "short"
+        }
+      ]
+    },
+    {
+      "item_id": "L5_S3_confidence",
+      "type": "confidence_check",
+      "stem": "How confident are you that your response describes your experience?",
+      "options": {
+        "A": "Very confident",
+        "B": "Somewhat confident",
+        "C": "Not very confident",
+        "D": "Just guessing"
+      }
     }
   ]
 }

@@ -16,6 +16,7 @@ import StudentInterestsPanel from "./StudentInterestsPanel";
 type Props = {
   classId: string;
   assignmentId: string;
+  hideWhenEmpty?: boolean;
 };
 
 const formatWhen = (iso?: string) => {
@@ -31,7 +32,7 @@ const formatWhen = (iso?: string) => {
  * One student at a time, with previous/next navigation, following the
  * layout in the issue's mockup.
  */
-export default function SurveyResultsSection({ classId, assignmentId }: Props) {
+export default function SurveyResultsSection({ classId, assignmentId, hideWhenEmpty = false }: Props) {
   const [sources, setSources] = useState<SurveyResultSource[]>([]);
   const [loading, setLoading] = useState(false);
   const [sourceId, setSourceId] = useState<string>("");
@@ -125,6 +126,8 @@ export default function SurveyResultsSection({ classId, assignmentId }: Props) {
   );
 
   const counts = entry && source ? countAnswered(source.questions, entry.answers) : null;
+
+  if (hideWhenEmpty && sources.length === 0) return null;
 
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">

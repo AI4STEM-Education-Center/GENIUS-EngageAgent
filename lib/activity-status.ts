@@ -10,6 +10,8 @@ import {
 
 import { getSurveyAvailability } from "./survey-response";
 import { pickTaskSurvey } from "./survey-schedule";
+import { getLesson } from "./quiz-data";
+import { getQuizItemsForVersion, isQuizComplete } from "./quiz-assessment";
 
 export type ActivityId = "assessment" | "content-review" | "content-rating";
 export type ActivityStatus = "locked" | "available" | "completed";
@@ -31,8 +33,13 @@ export const computeActivityStatuses = async (
     listPublishedContent(classId, assignmentId),
   ]);
 
-  const currentAnswer = answer && (!quiz || answer.lesson_number === quiz.lesson_number);
-  const survey = pickTaskSurvey((await listSurveys(classId, assignmentId)).filter(item => item.status !== "draft"));
+  const integratedQuiz = (quiz?.quiz_version ?? 1) >= 2;
+  const currentAnswer = answer && (!quiz || answer.lesson_number === quiz.lesson_number)
+    && (!integratedQuiz || isQuizComplete(
+      getQuizItemsForVersion(getLesson(quiz!.lesson_number)?.quiz_items ?? [], quiz!.quiz_version), answer.answers,
+    ));
+  // Version 2 collects experience questions in the same quiz submission.
+  const survey = integratedQuiz ? undefined : pickTaskSurvey((await listSurveys(classId, assignmentId)).filter(item => item.status !== "draft"));
   const surveyOpen = !!survey && getSurveyAvailability(survey).open;
   const responses = surveyOpen
     ? await listSurveyResponses(classId, assignmentId, survey.survey_id, studentId)
