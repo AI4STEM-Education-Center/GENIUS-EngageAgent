@@ -128,6 +128,60 @@
         "C": "Not very confident",
         "D": "Just guessing"
       }
+    },
+    {
+      "item_id": "L6_S1",
+      "stem": "Think of your favorite sport or activity. What is one piece of equipment or one rule that helps prevent damage during a collision?",
+      "example": "Examples: shin guards, helmets, driving speed limits, or phone cases.",
+      "type": "experience",
+      "question_number": 5,
+      "options": {},
+      "response_fields": [
+        {
+          "field_id": "L6_S1_protection",
+          "label": "Equipment or rule",
+          "response_type": "text",
+          "text_length": "short"
+        }
+      ]
+    },
+    {
+      "item_id": "L6_S1_confidence",
+      "type": "confidence_check",
+      "stem": "How confident are you that your response describes your experience?",
+      "options": {
+        "A": "Very confident",
+        "B": "Somewhat confident",
+        "C": "Not very confident",
+        "D": "Just guessing"
+      }
+    },
+    {
+      "item_id": "L6_S2",
+      "stem": "In that activity, when does damage or injury usually happen?",
+      "example": "For example, when players run too fast or when a ball is pumped too hard.",
+      "type": "experience",
+      "question_number": 6,
+      "options": {},
+      "response_fields": [
+        {
+          "field_id": "L6_S2_damage_conditions",
+          "label": "When damage or injury happens",
+          "response_type": "text",
+          "text_length": "long"
+        }
+      ]
+    },
+    {
+      "item_id": "L6_S2_confidence",
+      "type": "confidence_check",
+      "stem": "How confident are you that your response describes your experience?",
+      "options": {
+        "A": "Very confident",
+        "B": "Somewhat confident",
+        "C": "Not very confident",
+        "D": "Just guessing"
+      }
     }
   ]
 }

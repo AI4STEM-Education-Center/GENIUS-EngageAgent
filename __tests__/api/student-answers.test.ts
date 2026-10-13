@@ -4,10 +4,13 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // access and role isolation are exercised in workspace-access and embedded-workflow-access.
 vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null), workspaceRequestUser: vi.fn(async () => ({ role: "teacher" })) }));
 import { GET, POST } from "@/app/api/student-answers/route";
+import { getLesson } from "@/lib/quiz-data";
+import { getQuizStatus } from "@/lib/nosql";
 
 vi.mock("@/lib/nosql", () => {
   let answers: Array<Record<string, unknown>> = [];
   return {
+    getQuizStatus: vi.fn(async () => null),
     upsertStudentAnswer: vi.fn(async (input: Record<string, unknown>) => {
       const idx = answers.findIndex(
         (a) => a.class_id === input.class_id && a.assignment_id === input.assignment_id && a.student_id === input.student_id,
@@ -30,6 +33,51 @@ const { __resetStore } = await import("@/lib/nosql") as unknown as { __resetStor
 
 beforeEach(() => {
   __resetStore();
+  vi.mocked(getQuizStatus).mockReset().mockResolvedValue(null);
+});
+
+const combinedAnswers = () => Object.fromEntries(getLesson(2)!.quiz_items.flatMap(item =>
+  item.type === "experience"
+    ? (item.response_fields ?? []).map(field => [field.field_id, "Playing soccer with a ball"])
+    : [[item.item_id, Object.keys(item.options)[0]]],
+));
+const submitCombined = (answers: Record<string, string>, lessonNumber = 2) => POST(new Request("http://localhost:3000/api/student-answers", {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ classId: "c1", assignmentId: "a1", studentId: "s1", studentName: "Alice", lessonNumber, answers }),
+}));
+
+describe("combined lesson quiz submission", () => {
+  beforeEach(() => {
+    vi.mocked(getQuizStatus).mockResolvedValue({ class_id: "c1", assignment_id: "a1", lesson_number: 2, status: "published", quiz_version: 2, updated_at: "2026-10-13" });
+  });
+
+  it("stores written responses and confidence atomically and returns them to the teacher", async () => {
+    const answers = combinedAnswers();
+    const res = await submitCombined(answers);
+    expect(res.status).toBe(201);
+    expect((await res.json()).answer.answers).toEqual(answers);
+    const saved = await GET(new Request("http://localhost:3000/api/student-answers?classId=c1&assignmentId=a1&lessonNumber=2"));
+    expect((await saved.json()).answers[0].answers).toEqual(answers);
+  });
+
+  it.each(["missing text", "blank text", "missing confidence", "invalid confidence"])("rejects %s without saving a partial quiz", async scenario => {
+    const answers = combinedAnswers();
+    const experience = getLesson(2)!.quiz_items.find(item => item.type === "experience")!;
+    const field = experience.response_fields![0].field_id;
+    if (scenario === "missing text") delete answers[field];
+    if (scenario === "blank text") answers[field] = "   ";
+    if (scenario === "missing confidence") delete answers[`${experience.item_id}_confidence`];
+    if (scenario === "invalid confidence") answers[`${experience.item_id}_confidence`] = "E";
+    expect((await submitCombined(answers)).status).toBe(400);
+    const saved = await GET(new Request("http://localhost:3000/api/student-answers?classId=c1&assignmentId=a1"));
+    expect((await saved.json()).answers).toEqual([]);
+  });
+
+  it("rejects stale lesson and closed quiz submissions", async () => {
+    expect((await submitCombined(combinedAnswers(), 3)).status).toBe(409);
+    vi.mocked(getQuizStatus).mockResolvedValueOnce({ class_id: "c1", assignment_id: "a1", lesson_number: 2, status: "closed", quiz_version: 2, updated_at: "2026-10-13" });
+    expect((await submitCombined(combinedAnswers())).status).toBe(409);
+  });
 });
 
 describe("POST /api/student-answers", () => {

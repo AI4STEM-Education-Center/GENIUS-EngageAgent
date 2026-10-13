@@ -137,6 +137,102 @@
         "C": "Not very confident",
         "D": "Just guessing"
       }
+    },
+    {
+      "item_id": "L4_S1",
+      "stem": "Think of a time you used something springy or stretchy, such as a ball, rubber band, or bow. What was it, and what did you do to make it change shape?",
+      "type": "experience",
+      "question_number": 5,
+      "options": {},
+      "response_fields": [
+        {
+          "field_id": "L4_S1_object",
+          "label": "Object",
+          "response_type": "text",
+          "text_length": "short"
+        },
+        {
+          "field_id": "L4_S1_action",
+          "label": "What you did to it",
+          "response_type": "text",
+          "text_length": "long"
+        }
+      ]
+    },
+    {
+      "item_id": "L4_S1_confidence",
+      "type": "confidence_check",
+      "stem": "How confident are you that your response describes your experience?",
+      "options": {
+        "A": "Very confident",
+        "B": "Somewhat confident",
+        "C": "Not very confident",
+        "D": "Just guessing"
+      }
+    },
+    {
+      "item_id": "L4_S2",
+      "stem": "Think of a time you pushed, pulled, or stretched something and it went back to its original shape.",
+      "type": "experience",
+      "question_number": 6,
+      "options": {},
+      "response_fields": [
+        {
+          "field_id": "L4_S2_object",
+          "label": "Object",
+          "response_type": "text",
+          "text_length": "short"
+        },
+        {
+          "field_id": "L4_S2_action",
+          "label": "What you did to it",
+          "response_type": "text",
+          "text_length": "long"
+        }
+      ]
+    },
+    {
+      "item_id": "L4_S2_confidence",
+      "type": "confidence_check",
+      "stem": "How confident are you that your response describes your experience?",
+      "options": {
+        "A": "Very confident",
+        "B": "Somewhat confident",
+        "C": "Not very confident",
+        "D": "Just guessing"
+      }
+    },
+    {
+      "item_id": "L4_S3",
+      "stem": "Think of a time you bent or stretched something too far, so it stayed loose or bent without snapping or returning to its original shape.",
+      "type": "experience",
+      "question_number": 7,
+      "options": {},
+      "response_fields": [
+        {
+          "field_id": "L4_S3_object",
+          "label": "Object",
+          "response_type": "text",
+          "text_length": "short"
+        },
+        {
+          "field_id": "L4_S3_current_appearance",
+          "label": "How does it look now?",
+          "response_type": "text",
+          "text_length": "long"
+        }
+      ]
+    },
+    {
+      "item_id": "L4_S3_confidence",
+      "type": "confidence_check",
+      "stem": "How confident are you that your response describes your experience?",
+      "options": {
+        "A": "Very confident",
+        "B": "Somewhat confident",
+        "C": "Not very confident",
+        "D": "Just guessing"
+      }
     }
   ]
 }

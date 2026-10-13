@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { upsertStudentAnswer, listStudentAnswers, getStudentAnswer } from "@/lib/nosql";
+import { upsertStudentAnswer, listStudentAnswers, getStudentAnswer, getQuizStatus } from "@/lib/nosql";
+import { getLesson } from "@/lib/quiz-data";
+import { getQuizAnswerValidationError, getQuizItemsForVersion } from "@/lib/quiz-assessment";
 
 export async function GET(request: Request) {
   const denied = await guardWorkspaceRequest(request);
@@ -58,11 +60,22 @@ export async function POST(request: Request) {
     );
   }
 
-  if (typeof answers !== "object" || Object.keys(answers).length === 0) {
+  if (typeof answers !== "object" || Array.isArray(answers) || Object.keys(answers).length === 0
+    || Object.values(answers).some(value => typeof value !== "string")) {
     return NextResponse.json(
-      { error: "answers must be a non-empty object." },
+      { error: "answers must be a non-empty object of text values." },
       { status: 400 },
     );
+  }
+
+  const quiz = await getQuizStatus(classId, assignmentId);
+  if ((quiz?.quiz_version ?? 1) >= 2) {
+    const lesson = getLesson(lessonNumber);
+    if (!lesson || quiz?.status !== "published" || quiz.lesson_number !== lessonNumber) {
+      return NextResponse.json({ error: "This quiz is not open for responses." }, { status: 409 });
+    }
+    const error = getQuizAnswerValidationError(getQuizItemsForVersion(lesson.quiz_items, quiz.quiz_version), answers);
+    if (error) return NextResponse.json({ error }, { status: 400 });
   }
 
   const record = await upsertStudentAnswer({

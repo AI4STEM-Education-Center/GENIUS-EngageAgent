@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getQuizStatus, upsertQuizStatus } from "@/lib/nosql";
+import { getLesson } from "@/lib/quiz-data";
+import { CURRENT_QUIZ_VERSION } from "@/lib/quiz-assessment";
 
 function formatStorageError(error: unknown) {
   const message =
@@ -70,12 +72,23 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!Number.isInteger(lessonNumber) || !getLesson(lessonNumber)) {
+      return NextResponse.json({ error: "lessonNumber must be an available lesson (1–8)." }, { status: 400 });
+    }
+
+    // Closing a legacy quiz must not change the questions students completed.
+    const previous = status === "closed" ? await getQuizStatus(classId, assignmentId) : null;
+    const quizVersion = status === "closed" && previous && previous.lesson_number === lessonNumber
+      ? previous.quiz_version ?? 1
+      : CURRENT_QUIZ_VERSION;
+
     const record = await upsertQuizStatus(
       classId,
       assignmentId,
       lessonNumber,
       status,
       publishedBy,
+      quizVersion,
     );
     return NextResponse.json({ quizStatus: record });
   } catch (error) {

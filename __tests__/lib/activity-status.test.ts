@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const store = vi.hoisted(() => ({ getQuizStatus: vi.fn(), getStudentAnswer: vi.fn(), listPublishedContent: vi.fn(), listReviewQuestions: vi.fn(), listContentRatings: vi.fn(), listSurveys: vi.fn(), listSurveyResponses: vi.fn() }));
 vi.mock("@/lib/nosql", () => store);
 import { computeActivityStatuses } from "@/lib/activity-status";
+import { getLesson } from "@/lib/quiz-data";
 beforeEach(() => {
   vi.clearAllMocks();
   store.getQuizStatus.mockResolvedValue(null);
@@ -34,6 +35,18 @@ it("unlocks materials after the quiz is submitted and scopes every lookup to the
   expect(store.getStudentAnswer).toHaveBeenCalledWith("class", "task", "student");
   expect(store.listReviewQuestions).toHaveBeenCalledWith("class", "task", "student");
   expect(store.listContentRatings).toHaveBeenCalledWith("class", "task", "student");
+});
+it("requires the complete combined quiz and ignores the replaced separate survey", async () => {
+  store.getQuizStatus.mockResolvedValue({ status: "published", lesson_number: 2, quiz_version: 2 });
+  store.getStudentAnswer.mockResolvedValue({ lesson_number: 2, answers: { L2_Q1: "A" } });
+  store.listSurveys.mockResolvedValue([{ survey_id: "old-survey", status: "published" }]);
+  expect((await computeActivityStatuses("class", "task", "student")).assessment).toBe("available");
+  expect(store.listSurveys).not.toHaveBeenCalled();
+  const answers = Object.fromEntries(getLesson(2)!.quiz_items.flatMap(item => item.type === "experience"
+    ? item.response_fields!.map(field => [field.field_id, "Soccer"])
+    : [[item.item_id, Object.keys(item.options)[0]]]));
+  store.getStudentAnswer.mockResolvedValue({ lesson_number: 2, answers });
+  expect(await computeActivityStatuses("class", "task", "student")).toEqual({ assessment: "completed", "content-review": "completed", "content-rating": "completed" });
 });
 it("reopens material rating when a new publication has not yet been rated", async () => {
   store.listPublishedContent.mockResolvedValue([{ content_item_id: "deck-a" }, { content_item_id: "deck-b" }]);
