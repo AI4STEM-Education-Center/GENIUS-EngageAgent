@@ -1,12 +1,13 @@
 {
   "lesson_number": 8,
-  "lesson_title": "Lesson 8",
-  "learning_objective": "Students will construct comprehensive system models and annotate free-body diagrams to map the continuous transformation of energy and account for macroscopic energy dissipation via secondary contact forces.",
+  "lesson_title": "Lesson 8 - Camp Only Version",
+  "learning_objective": "Students will group drops of different materials by impact loudness and time in the air, test the groups with a prediction drop, and construct an argument from the grouped evidence about where the energy of the fall went, including what the evidence does not show.",
   "core_ideas": [
-    "The more force you apply to an object the more that object speeds up.",
-    "It takes more force to speed up a more massive object the same amount as a lower mass object.",
-    "Potential energy can be stored in some systems when you change the shape or arrangement of parts in that system (e.g., a spring).",
-    "Contact forces transfer energy between different objects or subsystems within the larger cart-launcher system."
+    "When the motion energy of an object changes, there is inevitably some other change in energy at the same time.",
+    "Every object starts with the same motion energy.",
+    "Time in the air shows how much is still motion energy after the hit.",
+    "Impact loudness shows some of the energy became sound.",
+    "A short time in the air with a quiet hit shows the energy went into deformation and heat."
   ],
   "misconceptions": {
     "1&2-a": "Force determines speed, not acceleration (constant force, constant speed).",
@@ -137,5 +138,7 @@
         "D": "Just guessing"
       }
     }
-  ]
+  ],
+  "topic": "Dropping a superball, a clay ball, and a steel ball: how different materials handle impact energy",
+  "target_concept": "Conservation of energy and energy transfer (PS3.B)"
 }
