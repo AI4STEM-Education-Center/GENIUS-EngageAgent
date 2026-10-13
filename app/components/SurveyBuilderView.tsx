@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Survey, SurveyItem } from "@/lib/types";
+import { resolveSurveyStatus, validateSchedule } from "@/lib/survey-schedule";
+import type { Survey, SurveyItem, SurveyStatus } from "@/lib/types";
 
 type Props = {
   classId: string;
@@ -28,6 +29,49 @@ const newId = () => {
   } catch {
     return `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
+};
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** Splits an ISO timestamp into the local date/time strings the inputs use. */
+const toLocalParts = (iso?: string) => {
+  if (!iso) return { date: "", time: "" };
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return { date: "", time: "" };
+  return {
+    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+  };
+};
+
+/** Combines the local date/time inputs back into an ISO timestamp. */
+const toIso = (date: string, time: string) => {
+  if (!date || !time) return "";
+  const d = new Date(`${date}T${time}`);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+};
+
+const STATUS_STYLES: Record<SurveyStatus, string> = {
+  draft: "bg-amber-100 text-amber-700",
+  scheduled: "bg-sky-100 text-sky-700",
+  published: "bg-emerald-100 text-emerald-700",
+  closed: "bg-slate-200 text-slate-600",
+};
+
+const formatWhen = (iso?: string) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString();
+};
+
+const emptyPublishForm = {
+  publishDate: "",
+  publishTime: "",
+  dueDate: "",
+  dueTime: "",
+  allowLate: false,
+  allowEditing: false,
+  showImmediately: true,
 };
 
 /**
@@ -102,6 +146,12 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
+
+  // Publish settings (UC-SV-03, #80)
+  const [publishTarget, setPublishTarget] = useState<Survey | null>(null);
+  const [publishForm, setPublishForm] = useState(emptyPublishForm);
+  const [publishing, setPublishing] = useState(false);
+  const [publishErrors, setPublishErrors] = useState<string[]>([]);
 
   const loadSurveys = useCallback(async () => {
     if (!hasContext) return;
@@ -275,6 +325,70 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
     }
   };
 
+  const openPublish = (survey: Survey) => {
+    const publishParts = toLocalParts(survey.schedule?.publish_at);
+    const dueParts = toLocalParts(survey.schedule?.due_at);
+    setPublishTarget(survey);
+    setPublishForm({
+      publishDate: publishParts.date,
+      publishTime: publishParts.time,
+      dueDate: dueParts.date,
+      dueTime: dueParts.time,
+      allowLate: survey.schedule?.allow_late_submissions ?? false,
+      allowEditing: survey.schedule?.allow_response_editing ?? false,
+      showImmediately: survey.schedule?.show_immediately ?? true,
+    });
+    setPublishErrors([]);
+    setSavedNotice(null);
+  };
+
+  const submitPublish = async () => {
+    if (!publishTarget) return;
+    const publishAt = toIso(publishForm.publishDate, publishForm.publishTime);
+    const dueAt = toIso(publishForm.dueDate, publishForm.dueTime);
+
+    const problems = validateSchedule({ publish_at: publishAt, due_at: dueAt });
+    setPublishErrors(problems);
+    if (problems.length > 0) return;
+
+    setPublishing(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/surveys/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          classId,
+          assignmentId,
+          surveyId: publishTarget.survey_id,
+          publishAt,
+          dueAt,
+          allowLateSubmissions: publishForm.allowLate,
+          allowResponseEditing: publishForm.allowEditing,
+          showImmediately: publishForm.showImmediately,
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          errors?: string[];
+        };
+        if (data.errors?.length) {
+          setPublishErrors(data.errors);
+          return;
+        }
+        throw new Error(data.error ?? `Publish failed (${res.status}).`);
+      }
+      setSavedNotice("Publish settings saved.");
+      await loadSurveys();
+      setPublishTarget(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Publish failed.");
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   if (!hasContext) {
     return (
       <p className="text-sm text-amber-700">
@@ -293,7 +407,7 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
       )}
 
       {/* ---------------- list ---------------- */}
-      {mode === "list" && (
+      {mode === "list" && !publishTarget && (
         <>
           <div className="flex items-center justify-between">
             <p className={labelClass}>Teacher-created surveys</p>
@@ -334,13 +448,9 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
                         {s.title}
                       </p>
                       <span
-                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase ${
-                          s.status === "published"
-                            ? "bg-emerald-100 text-emerald-700"
-                            : "bg-amber-100 text-amber-700"
-                        }`}
+                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase ${STATUS_STYLES[resolveSurveyStatus(s)]}`}
                       >
-                        {s.status}
+                        {resolveSurveyStatus(s)}
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
@@ -350,18 +460,215 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
                         ? ` · ${s.daily_experience_topic}`
                         : ""}
                     </p>
+                    {s.schedule && (
+                      <p className="mt-0.5 text-xs text-slate-400">
+                        Opens {formatWhen(s.schedule.publish_at)} · Due{" "}
+                        {formatWhen(s.schedule.due_at)}
+                        {s.schedule.allow_late_submissions ? " · late allowed" : ""}
+                      </p>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => startEdit(s)}
-                    className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
-                  >
-                    Edit
-                  </button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => startEdit(s)}
+                      className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openPublish(s)}
+                      className="rounded-full border border-[#BA0C2F] px-4 py-2 text-xs font-semibold text-[#BA0C2F] transition hover:bg-[#BA0C2F]/5"
+                    >
+                      {s.schedule ? "Publish settings" : "Publish"}
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
           )}
+        </>
+      )}
+
+      {/* ---------------- publish settings (UC-SV-03, #80) ---------------- */}
+      {publishTarget && (
+        <>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-slate-700">
+              {publishTarget.schedule ? "Edit publish settings" : "Publish survey"}
+            </p>
+            <button
+              type="button"
+              onClick={() => setPublishTarget(null)}
+              className="text-sm font-semibold text-slate-500 hover:text-slate-700"
+            >
+              Cancel
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-6">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-1">
+                <span className={labelClass}>
+                  Publish date <span className="text-[#BA0C2F]">*</span>
+                </span>
+                <input
+                  type="date"
+                  value={publishForm.publishDate}
+                  onChange={(e) =>
+                    setPublishForm((f) => ({ ...f, publishDate: e.target.value }))
+                  }
+                  className={inputClass}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className={labelClass}>
+                  Publish time <span className="text-[#BA0C2F]">*</span>
+                </span>
+                <input
+                  type="time"
+                  value={publishForm.publishTime}
+                  onChange={(e) =>
+                    setPublishForm((f) => ({ ...f, publishTime: e.target.value }))
+                  }
+                  className={inputClass}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className={labelClass}>
+                  Due date <span className="text-[#BA0C2F]">*</span>
+                </span>
+                <input
+                  type="date"
+                  value={publishForm.dueDate}
+                  onChange={(e) =>
+                    setPublishForm((f) => ({ ...f, dueDate: e.target.value }))
+                  }
+                  className={inputClass}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className={labelClass}>
+                  Due time <span className="text-[#BA0C2F]">*</span>
+                </span>
+                <input
+                  type="time"
+                  value={publishForm.dueTime}
+                  onChange={(e) =>
+                    setPublishForm((f) => ({ ...f, dueTime: e.target.value }))
+                  }
+                  className={inputClass}
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={publishForm.allowLate}
+                  onChange={(e) =>
+                    setPublishForm((f) => ({ ...f, allowLate: e.target.checked }))
+                  }
+                />
+                Allow late submissions
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={publishForm.allowEditing}
+                  onChange={(e) =>
+                    setPublishForm((f) => ({ ...f, allowEditing: e.target.checked }))
+                  }
+                />
+                Allow students to edit responses after submitting
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={publishForm.showImmediately}
+                  onChange={(e) =>
+                    setPublishForm((f) => ({
+                      ...f,
+                      showImmediately: e.target.checked,
+                    }))
+                  }
+                />
+                Show the survey immediately after the publish time
+              </label>
+            </div>
+          </div>
+
+          {/* Summary before publishing */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <p className={labelClass}>Summary</p>
+            <dl className="mt-2 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
+              <div>
+                <dt className="inline font-semibold text-slate-700">Survey: </dt>
+                <dd className="inline">{publishTarget.title}</dd>
+              </div>
+              <div>
+                <dt className="inline font-semibold text-slate-700">Class: </dt>
+                <dd className="inline">{classId}</dd>
+              </div>
+              <div>
+                <dt className="inline font-semibold text-slate-700">Opens: </dt>
+                <dd className="inline">
+                  {formatWhen(
+                    toIso(publishForm.publishDate, publishForm.publishTime),
+                  ) || "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="inline font-semibold text-slate-700">Due: </dt>
+                <dd className="inline">
+                  {formatWhen(toIso(publishForm.dueDate, publishForm.dueTime)) ||
+                    "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="inline font-semibold text-slate-700">Questions: </dt>
+                <dd className="inline">{publishTarget.questions.length}</dd>
+              </div>
+              <div>
+                <dt className="inline font-semibold text-slate-700">
+                  Late submissions:{" "}
+                </dt>
+                <dd className="inline">
+                  {publishForm.allowLate ? "Allowed" : "Not allowed"}
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          {publishErrors.length > 0 && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+              <p className="text-sm font-semibold text-red-700">
+                Please fix the following:
+              </p>
+              <ul className="mt-2 list-disc pl-5 text-sm text-red-700">
+                {publishErrors.map((err, i) => (
+                  <li key={i}>{err}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={submitPublish}
+              disabled={publishing}
+              className="inline-flex items-center justify-center rounded-xl bg-[#BA0C2F] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {publishing
+                ? "Saving…"
+                : publishTarget.schedule
+                  ? "Save publish settings"
+                  : "Publish"}
+            </button>
+          </div>
         </>
       )}
 
