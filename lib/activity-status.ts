@@ -32,21 +32,20 @@ export const computeActivityStatuses = async (
   ]);
 
   const currentAnswer = answer && (!quiz || answer.lesson_number === quiz.lesson_number);
-  let assessment: ActivityStatus = currentAnswer
+  const survey = pickTaskSurvey((await listSurveys(classId, assignmentId)).filter(item => item.status !== "draft"));
+  const surveyOpen = !!survey && getSurveyAvailability(survey).open;
+  const responses = surveyOpen
+    ? await listSurveyResponses(classId, assignmentId, survey.survey_id, studentId)
+    : [];
+  const surveyDone = responses.some(response => response.status === "submitted");
+  const quizOpen = quiz?.status === "published";
+  const assessmentDone = (quizOpen ? !!currentAnswer : !!currentAnswer || surveyOpen)
+    && (!surveyOpen || surveyDone);
+  const assessment: ActivityStatus = assessmentDone
     ? "completed"
-    : quiz?.status === "published"
+    : quizOpen || surveyOpen
       ? "available"
       : "locked";
-
-  // Quiz and the currently open task survey share one assessment submission.
-  // A saved quiz must not hide a failed/unsubmitted survey behind auto-advance.
-  if (currentAnswer && quiz?.status === "published") {
-    const survey = pickTaskSurvey((await listSurveys(classId, assignmentId)).filter(item => item.status !== "draft"));
-    if (survey && getSurveyAvailability(survey).open) {
-      const responses = await listSurveyResponses(classId, assignmentId, survey.survey_id, studentId);
-      if (!responses.some(response => response.status === "submitted")) assessment = "available";
-    }
-  }
 
   // Published pre-assessments precede exploration. A material-only task stays
   // available when the teacher has not published a quiz.
