@@ -20,9 +20,8 @@ beforeEach(() => {
   vi.mocked(getQuizStatus).mockResolvedValue({ class_id: "ea-class-1", assignment_id: "ea-task-1", lesson_number: 1, status: "published", updated_at: "" });
 });
 describe("native class authorization", () => {
-  it("preserves the legacy class API contract", async () => {
-    expect(await guardWorkspaceRequest(request("quiz-status", "GET", { classId: "legacy" }))).toBeNull();
-    expect(sessionUser).not.toHaveBeenCalled();
+  it("does not treat a non-native class ID as public", async () => {
+    expect((await guardWorkspaceRequest(request("quiz-status", "GET", { classId: "legacy" })))?.status).toBe(401);
   });
   it("requires authentication, including whitespace-normalized class IDs", async () => {
     vi.mocked(sessionUser).mockResolvedValue(null);

@@ -14,6 +14,7 @@ type Props = {
   publicationId: string;
   audience: "teacher" | "student";
   onQuestion?: () => void;
+  learnerId?: string;
 };
 
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-100 disabled:opacity-50";
@@ -30,13 +31,24 @@ function SlideText({ elements }: { elements: SlideElement[] }) {
   </section>;
 }
 
-function Reader({ classId, assignmentId, publicationId, audience, onQuestion }: Props) {
+function Reader({ classId, assignmentId, publicationId, audience, onQuestion, learnerId }: Props) {
+  const predictionKey = audience === "student" && learnerId
+    ? `engage:slide-prediction:${JSON.stringify([learnerId, classId, assignmentId, publicationId])}` : null;
+  const [initialPrediction] = useState(() => {
+    try {
+      const saved = predictionKey ? JSON.parse(sessionStorage.getItem(predictionKey) ?? "null") : null;
+      return {
+        draft: typeof saved?.draft === "string" ? saved.draft.slice(0, 2000) : "",
+        recorded: typeof saved?.recorded === "string" && /[\p{L}\p{N}]/u.test(saved.recorded) ? saved.recorded.slice(0, 2000) : "",
+      };
+    } catch { return { draft: "", recorded: "" }; }
+  });
   const [publication, setPublication] = useState<PublishedSlideResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [index, setIndex] = useState(0);
-  const [prediction, setPrediction] = useState("");
-  const [recordedPrediction, setRecordedPrediction] = useState("");
+  const [prediction, setPrediction] = useState(initialPrediction.draft);
+  const [recordedPrediction, setRecordedPrediction] = useState(initialPrediction.recorded);
   const [expanded, setExpanded] = useState(false);
   const predictionId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -45,6 +57,12 @@ function Reader({ classId, assignmentId, publicationId, audience, onQuestion }: 
   const questionRequested = useRef(false);
   const refresh = useRef<() => void>(() => {});
   const lastImageRefresh = useRef(-Infinity);
+
+  useEffect(() => {
+    if (!predictionKey) return;
+    try { sessionStorage.setItem(predictionKey, JSON.stringify({ draft: prediction, recorded: recordedPrediction })); }
+    catch { /* Reading still works when embedded storage is unavailable. */ }
+  }, [predictionKey, prediction, recordedPrediction]);
 
   useEffect(() => {
     let active = true;
@@ -181,5 +199,5 @@ function Reader({ classId, assignmentId, publicationId, audience, onQuestion }: 
 export default function PublishedSlidesReader(props: Props) {
   // Parent polling may replace item objects; only a different publication or
   // workspace resets a learner's position and recorded prediction.
-  return <Reader key={JSON.stringify([props.classId, props.assignmentId, props.publicationId, props.audience])} {...props} />;
+  return <Reader key={JSON.stringify([props.classId, props.assignmentId, props.publicationId, props.audience, props.learnerId])} {...props} />;
 }

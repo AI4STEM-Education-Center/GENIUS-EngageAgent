@@ -1186,8 +1186,12 @@ export const listAllMedia = async (options: {
   search?: string;
   limit?: number;
   cursor?: string;
+  scope?: { classIds: string[]; assignmentId?: string };
 }): Promise<GalleryPage> => {
-  const { mediaType = "image", search, limit = 30, cursor } = options;
+  const { mediaType = "image", search, limit = 30, cursor, scope } = options;
+  const visible = (record: MediaRecord) => !scope || (scope.classIds.includes(record.class_id.replace(/^CLASS#/u, ""))
+    && (scope.assignmentId === undefined || scope.assignmentId === record.assignment_id));
+  if (scope && !scope.classIds.length) return { items: [], nextCursor: null };
 
   if (useDynamoDb) {
     const client = getDynamoClient();
@@ -1229,13 +1233,14 @@ export const listAllMedia = async (options: {
     } while (exclusiveStartKey);
 
     // Case-insensitive search across multiple fields (matches local JSON path)
+    const scopedRecords = allRecords.filter(visible);
     const filtered = search
-      ? allRecords.filter((m) => {
+      ? scopedRecords.filter((m) => {
           const q = search.toLowerCase();
           const haystack = `${m.content_item_id} ${m.class_id} ${m.assignment_id} ${m.student_id}`.toLowerCase();
           return haystack.includes(q);
         })
-      : allRecords;
+      : scopedRecords;
 
     filtered.sort(sortByMostRecentMedia);
 
@@ -1264,6 +1269,7 @@ export const listAllMedia = async (options: {
   // Local JSON fallback
   const store = await loadStore();
   const records = store.media.filter((m) => {
+    if (!visible(m)) return false;
     if (mediaType && m.media_type !== mediaType) return false;
     if (search) {
       const q = search.toLowerCase();

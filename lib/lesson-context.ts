@@ -19,6 +19,18 @@ export type StrategyContext = {
   description: string;
 };
 
+/** Explicit curriculum metadata takes precedence over older numbered-lesson
+ * examples. A caller editing a different reference objective keeps its context. */
+export function configuredLessonFocus(lesson: LessonGenerationContext) {
+  const current = getLesson(lesson.lessonNumber);
+  if (!current?.topic?.trim() || !current.target_concept?.trim()
+    || current.learning_objective !== lesson.learningObjective) return null;
+  return {
+    topic: current.topic.trim(), target: current.target_concept.trim(),
+    guidance: "Use the explicit current curriculum topic, target concept and learning objective. Older numbered-lesson examples and quiz misconceptions are background evidence, not a replacement for this target. Choose one coherent authentic phenomenon aligned with this lesson. Do not invent observations or measurements, assume equal masses or energies without stated conditions, or supply the final explanation. Keep scientific claims conditional on the evidence and prompt students to ask their own question.",
+  };
+}
+
 export type ResolvedQuizEvidence = {
   itemId: string;
   questionNumber?: number;

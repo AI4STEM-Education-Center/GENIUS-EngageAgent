@@ -1,3 +1,4 @@
+import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import { findTestStudentByEmail } from "@/lib/test-students";
 
 type ExistingAnswer = {
@@ -48,11 +49,14 @@ export async function findExistingStudentAnswer({
   email,
   fetchImpl = fetch,
 }: LookupInput): Promise<LookupResult | null> {
-  const candidateIds = getCandidateStudentIds(userId, email);
+  const headers = scopedClientAuthHeaders({ classId, assignmentId });
+  const candidateIds = classId.startsWith("ea-class-") || headers.Authorization
+    ? [userId] : getCandidateStudentIds(userId, email);
 
   for (const studentId of candidateIds) {
     const response = await fetchImpl(
       buildAnswerUrl(classId, assignmentId, studentId, lessonNumber),
+      { headers, cache: "no-store" },
     );
     const data = await response.json().catch(() => ({}));
 

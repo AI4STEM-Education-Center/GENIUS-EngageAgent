@@ -5,8 +5,8 @@ import type { ActivityStatus } from "@/lib/activity-status";
 import type { UserContext } from "@/lib/auth";
 import type { StudentStepId } from "@/lib/student-progress";
 
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), completed: vi.fn() }));
-vi.mock("@/lib/genius-notify", () => ({ notifyTaskCompleted: mocks.completed }));
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), completed: vi.fn(), reopened: vi.fn() }));
+vi.mock("@/lib/genius-notify", () => ({ notifyTaskCompleted: mocks.completed, notifyTaskReopened: mocks.reopened }));
 vi.mock("@/app/components/StudentQuizView", () => ({ default: () => <section aria-label="Quiz content" /> }));
 vi.mock("@/app/components/StudentContentReviewView", () => ({ default: ({ ratingUnlocked }: { ratingUnlocked: boolean }) =>
   <section aria-label="Materials content" data-rating-unlocked={ratingUnlocked} /> }));
@@ -134,4 +134,20 @@ it("opens an already completed material-only task with a one-of-one progress cou
   await expectActive(materials);
   expect(screen.getByText("1 of 1 available activity completed")).toBeTruthy();
   expect(assessment().disabled).toBe(true);
+});
+
+it("reopens a completed material task when more material arrives and notifies again after rating it", async () => {
+  statuses = { assessment: "completed", "content-review": "completed", "content-rating": "completed" };
+  render(<StudentView user={student} />);
+  await screen.findByText("2 of 2 available activities completed");
+  expect(mocks.completed).toHaveBeenCalledOnce();
+  statuses["content-rating"] = "available";
+  refresh();
+  await screen.findByText("1 of 2 available activities completed");
+  expect(materials().textContent).toContain("In progress");
+  expect(mocks.reopened).toHaveBeenCalledExactlyOnceWith(student.classId, student.assignmentId, student.geniusId);
+  statuses["content-rating"] = "completed";
+  refresh();
+  await screen.findByText("2 of 2 available activities completed");
+  expect(mocks.completed).toHaveBeenCalledTimes(2);
 });

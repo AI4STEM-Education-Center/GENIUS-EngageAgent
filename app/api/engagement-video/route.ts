@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import type { ContentItem } from "@/lib/types";
 import { buildMaterialVideoInstructions } from "@/lib/material-video";
 import { parseMaterialActivity } from "@/lib/material-activities";
+import { saveMaterialVideoJob, validVideoRequestId, validVideoScopeId } from "@/lib/material-video-jobs";
+import { workspaceRequestUser } from "@/lib/workspace-access";
 
 const XAI_VIDEO_BASE = "https://api.x.ai/v1/videos";
 
@@ -33,10 +35,16 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { item, imageUrl } = (await request.json()) as {
+    const { item, imageUrl, classId, assignmentId, studentId } = (await request.json()) as {
       item: ContentItem;
       imageUrl: string;
+      classId: string;
+      assignmentId: string;
+      studentId: string;
     };
+    const user = await workspaceRequestUser(request);
+    if (user?.role !== "teacher" || !validVideoScopeId(user.geniusId)) return NextResponse.json({ error: "Teacher access required." }, { status: 403 });
+    if (![classId, assignmentId, studentId].every(validVideoScopeId)) return NextResponse.json({ error: "Open the material in its assigned class before generating a video." }, { status: 400 });
 
     if (typeof imageUrl !== "string" || !imageUrl.trim()) {
       return NextResponse.json(
@@ -44,7 +52,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    if (!item || typeof item !== "object" || typeof item.id !== "string") {
+    if (!item || typeof item !== "object" || !validVideoScopeId(item.id)) {
       return NextResponse.json({ error: "A content item is required." }, { status: 400 });
     }
     if ((item.strategy === "cognitive conflict" || item.strategy === "experience bridging") &&
@@ -77,15 +85,16 @@ export async function POST(request: Request) {
     if (!res.ok) {
       throw new Error(data?.error?.message ?? `x.ai API error: ${res.status}`);
     }
-    if (!data.request_id) {
+    if (!validVideoRequestId(data.request_id)) {
       throw new Error("x.ai did not return a request_id.");
     }
+    await saveMaterialVideoJob(data.request_id, { classId, assignmentId, studentId, contentItemId: item.id, ownerId: user.geniusId });
 
     return NextResponse.json({
       requestId: data.request_id,
       done: false,
       contentItemId: item.id,
-    });
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message =
       error instanceof Error

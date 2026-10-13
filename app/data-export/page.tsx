@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useAuth } from "../components/AuthContext";
+import { scopedClientAuthHeaders } from "@/lib/client-auth";
 
 type MonthSummary = {
   month: string;
@@ -20,6 +22,7 @@ const formatMonth = (monthKey: string) => {
 };
 
 export default function DataExportPage() {
+  const { user, loading: authLoading } = useAuth();
   const [months, setMonths] = useState<MonthSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,10 +30,15 @@ export default function DataExportPage() {
   const [downloading, setDownloading] = useState<string | null>(null);
 
   const loadSummary = useCallback(async () => {
+    if (authLoading) return;
+    if (user?.role !== "teacher") { setMonths([]); setLoading(false); setError("Sign in as a teacher to export your class data."); return; }
     setLoading(true);
+    setMonths([]);
     setError(null);
     try {
-      const res = await fetch("/api/data-export");
+      const params = new URLSearchParams();
+      if (user.classId && user.assignmentId) { params.set("classId", user.classId); params.set("assignmentId", user.assignmentId); }
+      const res = await fetch(`/api/data-export?${params}`, { headers: scopedClientAuthHeaders(user), cache: "no-store" });
       if (!res.ok) {
         throw new Error(`Failed to load data summary (${res.status})`);
       }
@@ -41,16 +49,19 @@ export default function DataExportPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authLoading, user]);
 
   useEffect(() => {
     void loadSummary();
   }, [loadSummary]);
 
   const handleDownload = async (month: string) => {
+    if (user?.role !== "teacher") return;
     setDownloading(month);
     try {
-      const res = await fetch(`/api/data-export?month=${month}&format=xlsx`);
+      const params = new URLSearchParams({ month, format: "xlsx" });
+      if (user.classId && user.assignmentId) { params.set("classId", user.classId); params.set("assignmentId", user.assignmentId); }
+      const res = await fetch(`/api/data-export?${params}`, { headers: scopedClientAuthHeaders(user), cache: "no-store" });
       if (!res.ok) {
         throw new Error("Download failed");
       }
@@ -104,9 +115,9 @@ export default function DataExportPage() {
                 Teacher Data Archive
               </h1>
               <p className="max-w-3xl text-sm text-slate-600">
-                Browse all data produced across classes and assignments, organized
-                by month. Click a month to view breakdowns, or download the full
-                dataset as an Excel file.
+                Browse data from your authorized classes, organized by month.
+                From GENIUS, this archive is limited to the current assignment.
+                Click a month to view breakdowns or download its Excel file.
               </p>
             </div>
           </div>

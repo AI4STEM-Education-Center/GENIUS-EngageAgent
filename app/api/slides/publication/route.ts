@@ -1,4 +1,4 @@
-import { readSlidePublication, writeSlidePublication, MAX_SLIDE_PUBLICATION_BYTES } from "@/lib/slides/publish-server";
+import { readSlidePublication, readSlidePublicationStatus, writeSlidePublication, MAX_SLIDE_PUBLICATION_BYTES } from "@/lib/slides/publish-server";
 import { readSlideBody, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
 import { WorkspaceError } from "@/lib/workspace";
 
@@ -14,6 +14,6 @@ export async function POST(request: Request) {
   catch (error) { return failure(error); }
 }
 export async function GET(request: Request) {
-  try { return slideJson(await readSlidePublication(request)); }
+  try { return slideJson(await (new URL(request.url).searchParams.has("deckId") ? readSlidePublicationStatus(request) : readSlidePublication(request))); }
   catch (error) { return failure(error); }
 }

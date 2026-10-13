@@ -3,13 +3,14 @@ import { NextResponse } from "next/server";
 import { conflictActivity, bridgingActivity } from "../fixtures/material-activities";
 import { buildMaterialVideoInstructions } from "@/lib/material-video";
 
-vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null) }));
+vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null), workspaceRequestUser: vi.fn(async () => ({ role: "teacher", geniusId: "teacher" })) }));
+vi.mock("@/lib/workspace-store", () => ({ workspacePut: vi.fn(async () => undefined) }));
 import { guardWorkspaceRequest } from "@/lib/workspace-access";
 import { POST } from "@/app/api/engagement-video/route";
 
 const fetchMock = vi.fn();
 const request = (body: unknown) => new Request("http://localhost/api/engagement-video", {
-  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ classId: "c1", assignmentId: "a1", studentId: "cohort", ...(body as object) }),
 });
 beforeEach(() => {
   vi.clearAllMocks();

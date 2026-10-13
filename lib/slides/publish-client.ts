@@ -1,6 +1,7 @@
 import type { SlideDeck } from "./model";
 import { scopedClientAuthHeaders } from "../client-auth";
 import { isPublishedSlideReference, isSlidePublicationId, type PublishedSlideReference } from "./publication";
+import { slideImageDigest } from "./publication-status";
 
 const REQUEST_TIMEOUT_MS = 25_000;
 // Match the publication endpoint's raw JSON cap, including context and asset metadata.
@@ -10,6 +11,14 @@ const endpoint = "/api/slides/publication";
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 
 export type SlidePublicationResult = { publicationId: string; contentItemId: string; slides: PublishedSlideReference };
+
+function confirmedResult(result: Record<string, unknown>, deck: SlideDeck, id: string): SlidePublicationResult {
+  if (result.publicationId !== id || result.contentItemId !== `slides-${deck.id}` || !isPublishedSlideReference(result.slides)
+    || result.slides.publicationId !== id || result.slides.lessonNumber !== deck.lessonNumber || result.slides.slideCount !== deck.draft.slides.length) {
+    throw new Error("The server did not confirm the published slides. Your draft is retained; try sending it again.");
+  }
+  return { publicationId: id, contentItemId: result.contentItemId, slides: result.slides };
+}
 
 async function post(body: object, signal: AbortSignal, headers: Record<string, string>): Promise<Record<string, unknown>> {
   signal.throwIfAborted();
@@ -55,15 +64,16 @@ export async function publishSlideDeck(deck: SlideDeck, scope: { classId: string
       throw new Error(`The ${visual.id} image is too large for online publishing. Regenerate this image, then try sending again. Your draft is unchanged.`);
     }
   }
-  const assets = Object.fromEntries(visuals.map(({ id }) => {
+  const assets = Object.fromEntries(await Promise.all(visuals.map(async ({ id }) => {
     const { width, height } = deck.assets[id];
-    return [id, { width, height }];
-  }));
+    return [id, { width, height, digest: await slideImageDigest(deck.assets[id].data) }];
+  })));
   onProgress?.("Preparing slides for students...");
   const started = await post({ ...scope, operation: "start", deckId: deck.id, lessonNumber: deck.lessonNumber,
     strategy: deck.strategy, draft: deck.draft, assets }, signal, headers);
   if (!isSlidePublicationId(started.publicationId)) throw new Error("The server did not prepare a slide publication. Please try again.");
   const id = started.publicationId;
+  if (started.alreadyPublished === true) return confirmedResult(started, deck, id);
   for (const [index, visual] of visuals.entries()) {
     onProgress?.(`Uploading slide image ${index + 1} of ${visuals.length}...`);
     const { data, width, height } = deck.assets[visual.id];
@@ -75,9 +85,5 @@ export async function publishSlideDeck(deck: SlideDeck, scope: { classId: string
   }
   onProgress?.("Making the slides available to students...");
   const result = await post({ ...scope, operation: "commit", publicationId: id }, signal, headers);
-  if (result.publicationId !== id || result.contentItemId !== `slides-${deck.id}` || !isPublishedSlideReference(result.slides)
-    || result.slides.publicationId !== id || result.slides.lessonNumber !== deck.lessonNumber || result.slides.slideCount !== deck.draft.slides.length) {
-    throw new Error("The server did not confirm the published slides. Your draft is retained; try sending it again.");
-  }
-  return { publicationId: id, contentItemId: result.contentItemId, slides: result.slides };
+  return confirmedResult(result, deck, id);
 }

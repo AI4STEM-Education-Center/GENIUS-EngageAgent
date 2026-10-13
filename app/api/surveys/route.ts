@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { upsertSurvey, getSurvey, listSurveys } from "@/lib/nosql";
-import { guardWorkspaceRequest } from "@/lib/workspace-access";
+import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";
 import type { Survey, SurveyItem, SurveyStatus } from "@/lib/types";
 
 const VALID_STATUSES: SurveyStatus[] = ["draft", "published"];
@@ -13,6 +13,8 @@ export async function GET(request: Request) {
   const classId = searchParams.get("classId");
   const assignmentId = searchParams.get("assignmentId");
   const surveyId = searchParams.get("surveyId");
+  const viewer = await workspaceRequestUser(request);
+  const student = viewer?.role === "student" || viewer?.role === "guest";
 
   if (!classId || !assignmentId) {
     return NextResponse.json(
@@ -23,14 +25,14 @@ export async function GET(request: Request) {
 
   if (surveyId) {
     const survey = await getSurvey(classId, assignmentId, surveyId);
-    if (!survey) {
+    if (!survey || (student && survey.status === "draft")) {
       return NextResponse.json({ error: "Survey not found." }, { status: 404 });
     }
     return NextResponse.json({ survey });
   }
 
   const surveys = await listSurveys(classId, assignmentId);
-  return NextResponse.json({ surveys });
+  return NextResponse.json({ surveys: student ? surveys.filter(survey => survey.status !== "draft") : surveys });
 }
 
 export async function POST(request: Request) {

@@ -10,6 +10,12 @@ export type StudentSlideManifest = PublishedSlideManifest;
 export type PublishedSlideResponse = { publicationId: string; manifest: PublishedSlideManifest; assets: Record<string, { url: string; width: number; height: number }> };
 export type SlideAssetDimensions = Record<string, { width: number; height: number }>;
 
+// DynamoDB may reorder object attributes. Slide and element array order still
+// determines what students see and must remain significant.
+const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+  : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value;
+export const publishedSlideManifestKey = (value: unknown) => JSON.stringify(canonical(value));
+
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const keys = (value: Record<string, unknown>, allowed: string[]) => Object.keys(value).every(key => allowed.includes(key));
 const string = (value: unknown, max: number) => typeof value === "string" && value.length > 0 && value.length <= max;

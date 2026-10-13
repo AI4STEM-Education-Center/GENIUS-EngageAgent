@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMedia, upsertMedia } from "@/lib/nosql";
+import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";
+import { matchesMaterialVideoJob, validVideoRequestId, validVideoScopeId } from "@/lib/material-video-jobs";
 
 export const maxDuration = 60; // Poll + return URL (no download in request)
 
@@ -7,6 +9,8 @@ const XAI_VIDEO_BASE = "https://api.x.ai/v1/videos";
 const XAI_TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 export async function GET(request: NextRequest) {
+  const denied = await guardWorkspaceRequest(request);
+  if (denied) return denied;
   const xaiKey = process.env.GROK_API_KEY;
   if (!xaiKey) {
     return NextResponse.json(
@@ -21,14 +25,20 @@ export async function GET(request: NextRequest) {
   const assignmentId = request.nextUrl.searchParams.get("assignmentId");
   const studentId = request.nextUrl.searchParams.get("studentId");
 
-  if (!requestId) {
+  if (!validVideoRequestId(requestId) || ![classId, assignmentId, studentId, contentItemId].every(validVideoScopeId)) {
     return NextResponse.json(
-      { error: "Missing requestId parameter." },
+      { error: "Open the video request in its assigned class and material." },
       { status: 400 },
     );
   }
 
   try {
+    const user = await workspaceRequestUser(request);
+    if (user?.role !== "teacher" || !validVideoScopeId(user.geniusId)) return NextResponse.json({ error: "Teacher access required." }, { status: 403 });
+    if (!await matchesMaterialVideoJob(requestId, { classId: classId!, assignmentId: assignmentId!, studentId: studentId!, contentItemId: contentItemId!, ownerId: user.geniusId })) {
+      return NextResponse.json({ error: "This video request does not belong to this material, or it has expired. Generate the video again." },
+        { status: 404, headers: { "Cache-Control": "no-store" } });
+    }
     const res = await fetch(`${XAI_VIDEO_BASE}/${requestId}`, {
       headers: {
         Authorization: `Bearer ${xaiKey}`,
@@ -149,7 +159,7 @@ export async function GET(request: NextRequest) {
       contentItemId,
       savedToDb,
       ...(saveError ? { saveError } : {}),
-    });
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message =
       error instanceof Error

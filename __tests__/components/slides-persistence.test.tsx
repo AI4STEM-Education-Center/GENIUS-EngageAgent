@@ -9,6 +9,7 @@ import { INITIAL_MODEL_CATALOG } from "@/lib/slides/models";
 const mocks = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), fetch: vi.fn(), download: vi.fn() }));
 vi.mock("@/lib/slides/draft-storage", async importOriginal => ({ ...await importOriginal<object>(), loadSlideDraft: mocks.load, saveSlideDraft: mocks.save }));
 vi.mock("@/lib/slides/export", () => ({ downloadPresentation: mocks.download, decodeSlideAsset: async (value: unknown) => value }));
+vi.mock("@/lib/slides/publication-status", async original => ({ ...await original<object>(), isSlideDeckPublished: vi.fn().mockResolvedValue(false) }));
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "@/app/components/SlidesWorkspace";
 
 const user: UserContext = { geniusId: "teacher-a", userId: "teacher-a", role: "teacher", name: "Teacher", email: null, classId: "ea-class-a", assignmentId: "ea-task-a" };

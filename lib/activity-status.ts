@@ -4,7 +4,12 @@ import {
   listPublishedContent,
   listReviewQuestions,
   listContentRatings,
+  listSurveys,
+  listSurveyResponses,
 } from "@/lib/nosql";
+
+import { getSurveyAvailability } from "./survey-response";
+import { pickTaskSurvey } from "./survey-schedule";
 
 export type ActivityId = "assessment" | "content-review" | "content-rating";
 export type ActivityStatus = "locked" | "available" | "completed";
@@ -26,13 +31,26 @@ export const computeActivityStatuses = async (
     listPublishedContent(classId, assignmentId),
   ]);
 
-  const assessment: ActivityStatus = answer
+  const currentAnswer = answer && (!quiz || answer.lesson_number === quiz.lesson_number);
+  let assessment: ActivityStatus = currentAnswer
     ? "completed"
     : quiz?.status === "published"
       ? "available"
       : "locked";
 
-  const contentAvailable = published.length > 0;
+  // Quiz and the currently open task survey share one assessment submission.
+  // A saved quiz must not hide a failed/unsubmitted survey behind auto-advance.
+  if (currentAnswer && quiz?.status === "published") {
+    const survey = pickTaskSurvey((await listSurveys(classId, assignmentId)).filter(item => item.status !== "draft"));
+    if (survey && getSurveyAvailability(survey).open) {
+      const responses = await listSurveyResponses(classId, assignmentId, survey.survey_id, studentId);
+      if (!responses.some(response => response.status === "submitted")) assessment = "available";
+    }
+  }
+
+  // Published pre-assessments precede exploration. A material-only task stays
+  // available when the teacher has not published a quiz.
+  const contentAvailable = published.length > 0 && assessment !== "available";
   const reviewQuestions = contentAvailable
     ? await listReviewQuestions(classId, assignmentId, studentId)
     : [];

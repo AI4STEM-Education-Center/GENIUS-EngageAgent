@@ -15,3 +15,10 @@ export const notifyTaskCompleted = (classId: string, assignmentId: string, geniu
     "*",
   );
 };
+
+// A later publication makes an already-completed assignment active again.
+// The hosting task validates the iframe window, origin and exact assignment.
+export const notifyTaskReopened = (classId: string, assignmentId: string, geniusId: string) => {
+  if (typeof window === "undefined" || window.parent === window) return;
+  window.parent.postMessage({ type: "engage-agent.activity-reopened", classId, assignmentId, geniusId }, "*");
+};

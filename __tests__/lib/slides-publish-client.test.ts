@@ -35,7 +35,7 @@ it("publishes a deck with advisory findings without a teacher note and keeps rev
   });
   expect(bodies.map(body => body.operation)).toEqual(["start", "asset", "asset", "asset", "commit"]);
   expect(bodies[0]).toEqual({ ...scope, operation: "start", deckId: value.id, lessonNumber: 8, strategy: "analogy", draft: value.draft,
-    assets: { analogue: { width: 1536, height: 1024 }, target: { width: 1536, height: 1024 }, variation: { width: 1536, height: 1024 } } });
+    assets: Object.fromEntries(["analogue", "target", "variation"].map(id => [id, { width: 1536, height: 1024, digest: expect.stringMatching(/^[a-f0-9]{64}$/u) }])) });
   for (let i = 1; i <= 3; i++) expect(bodies[i]).toEqual({ ...scope, operation: "asset", publicationId: id,
     visualId: value.draft.visuals[i - 1].id, asset: { data: value.assets.target.data, width: 1536, height: 1024 } });
   expect(bodies[4]).toEqual({ ...scope, operation: "commit", publicationId: id });
@@ -106,6 +106,7 @@ it("stops after a late response when its workspace is cancelled", async () => {
   const controller = new AbortController();
   const pending = publishSlideDeck(deck(), scope, controller.signal);
   const rejected = expect(pending).rejects.toThrow();
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
   controller.abort(); finish(reply({ publicationId: id }));
   await rejected;
   expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -117,8 +118,22 @@ it("bounds an unresponsive publishing request without retrying", async () => {
   fetchMock.mockImplementation((_path, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason))));
   const pending = publishSlideDeck(deck(), scope, new AbortController().signal);
   const rejected = expect(pending).rejects.toThrow("Publishing timed out");
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
   await vi.advanceTimersByTimeAsync(25_000); await rejected;
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it("reuses a server-confirmed identical publication after a lost acknowledgement without uploading again", async () => {
+  fetchMock.mockResolvedValueOnce(reply({ ...finished(), alreadyPublished: true }));
+  expect(await publishSlideDeck(deck(), scope, new AbortController().signal)).toEqual(finished());
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body).operation).toBe("start");
+});
+
+it("rejects an already-published acknowledgement for another deck", async () => {
+  fetchMock.mockResolvedValueOnce(reply({ ...finished(), contentItemId: "slides-other", alreadyPublished: true }));
+  await expect(publishSlideDeck(deck(), scope, new AbortController().signal)).rejects.toThrow("did not confirm");
+  expect(fetchMock).toHaveBeenCalledOnce();
 });
 
 afterEach(clearVerifiedClientAuth);
