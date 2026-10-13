@@ -28,12 +28,12 @@ it("hides both synthetic-answer controls and their description for independent c
   expect(screen.queryByText(/Generates stable random answers/)).toBeNull();
 });
 
-it("preserves the existing synthetic-answer controls for legacy embedded assignments", async () => {
+it("hides synthetic-answer controls and their description for GENIUS assignments", async () => {
   render(<TeacherView user={{ ...teacher, classId: "genius-class" }} />);
   await screen.findByRole("button", { name: /Lesson 1 0 questions/ });
   fireEvent.click(screen.getByRole("button", { name: /Strategy recommendation/ }));
-  expect(screen.getByRole("button", { name: "Auto-answer 5 test students" })).toBeTruthy();
-  expect(screen.getByText(/Generates stable random answers/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Auto-answer 5 test students" })).toBeNull();
+  expect(screen.queryByText(/Generates stable random answers/)).toBeNull();
 });
 
 it.each([true, false])("shows response loading failures without claiming zero submissions (initial failure: %s)", async initiallyFails => {

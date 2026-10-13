@@ -12,7 +12,6 @@ import { STRATEGIES as SLIDE_STRATEGIES, type SlideStrategy } from "@/lib/slides
 import { parseMaterialActivity } from "@/lib/material-activities";
 import { downloadStudentMaterial, type PreparedMaterialFile } from "@/lib/material-export";
 import type { UserContext } from "@/lib/auth";
-import { MOCK_USER_STORAGE_KEY, parseMockUserRole } from "@/lib/mock-auth";
 import { recommendWorkspaceCohort, workspaceQuizAnswers } from "@/lib/cohort-recommendation";
 import {
   engagementStrategies as strategies,
@@ -37,7 +36,6 @@ import {
 } from "@/lib/strategy-recommendation";
 
 const MAX_IMAGE_VERSIONS = 10;
-const SSO_TOKEN_STORAGE_KEY = "engage-sso-token";
 
 type Props = {
   user: UserContext;
@@ -302,7 +300,6 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
   const [studentAnswers, setStudentAnswers] = useState<StudentAnswer[]>([]);
   const [loadingAnswers, setLoadingAnswers] = useState(false);
   const [answersError, setAnswersError] = useState<string | null>(null);
-  const [autoAnsweringTestStudents, setAutoAnsweringTestStudents] = useState(false);
 
   // Plan
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -498,60 +495,6 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
       }
       return next;
     });
-  };
-
-  const autoAnswerTestStudents = async () => {
-    if (!classId || !assignmentId) {
-      setError("Missing class or assignment context.");
-      return;
-    }
-
-    setAutoAnsweringTestStudents(true);
-    setError(null);
-
-    try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-
-      if (typeof window !== "undefined") {
-        const token = window.sessionStorage.getItem(SSO_TOKEN_STORAGE_KEY);
-        if (token) {
-          headers.Authorization = `Bearer ${token}`;
-        }
-
-        const mockRole = parseMockUserRole(
-          window.sessionStorage.getItem(MOCK_USER_STORAGE_KEY),
-        );
-        if (mockRole) {
-          headers["x-engage-mock-user"] = mockRole;
-        }
-      }
-
-      const res = await scopedTaskFetch({ classId, assignmentId }, "/api/auto-answer-test-students", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ classId, assignmentId }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(
-          (data as { error?: string }).error ??
-            "Failed to auto-answer test students.",
-        );
-      }
-
-      await loadStudentAnswers();
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to auto-answer test students.",
-      );
-    } finally {
-      setAutoAnsweringTestStudents(false);
-    }
   };
 
   // Load lessons list
@@ -1853,20 +1796,6 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold uppercase text-slate-400">Student responses</p>
                   <div className="flex flex-wrap items-center gap-2">
-                    {!classId.startsWith("ea-class-") && <button
-                      type="button"
-                      onClick={() => void autoAnswerTestStudents()}
-                      disabled={
-                        autoAnsweringTestStudents ||
-                        quizStatus !== "published" ||
-                        !hasAssignmentContext
-                      }
-                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
-                    >
-                      {autoAnsweringTestStudents
-                        ? "Generating..."
-                        : "Auto-answer 5 test students"}
-                    </button>}
                     <button
                       type="button"
                       onClick={() => void loadStudentAnswers()}
@@ -1882,9 +1811,6 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                 </p>}
                 {(!answersError || studentAnswers.length > 0) && <p className="mt-2 text-sm text-slate-700">
                   <span className="font-semibold">{studentAnswers.length}</span> student{studentAnswers.length === 1 ? " has" : "s have"} answered so far.
-                </p>}
-                {!classId.startsWith("ea-class-") && <p className="mt-1 text-xs text-slate-500">
-                  Generates stable random answers for the five configured test students and overwrites their prior submissions for this assignment.
                 </p>}
                 {studentAnswers.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
