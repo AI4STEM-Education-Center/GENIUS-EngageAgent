@@ -38,11 +38,59 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-it.each(["timer", "focus", "button"])("loads a newly published quiz through %s without a page reload or replacing answers once open", async trigger => {
+it("keeps survey-only drafts through polling and quiz publication, then submits both parts", async () => {
   let published = false;
   const originalFetch = fetchMock.getMockImplementation()!;
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => url.startsWith("/api/quiz-status")
     ? reply({ quizStatus: published ? { lesson_number: 8, status: "published" } : null }) : originalFetch(url, init));
+  vi.useFakeTimers();
+  await act(async () => { render(<StudentQuizView user={user} />); });
+  const experience = screen.getByRole("textbox", { name: "Describe your experience" }) as HTMLTextAreaElement;
+  fireEvent.change(experience, { target: { value: "I pushed a cart." } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Where did you feel uncertain?" }), { target: { value: "Getting it moving." } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+  expect(experience.value).toBe("I pushed a cart.");
+  expect(screen.queryByRole("radiogroup")).toBeNull();
+  published = true;
+  await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+  expect(experience.value).toBe("I pushed a cart.");
+  for (const item of contentQuestions) fireEvent.click(within(screen.getByText(item.stem).parentElement!).getByRole("button", { name: `A${item.options.A}` }));
+  for (const group of screen.getAllByRole("radiogroup")) fireEvent.click(within(group).getByRole("radio", { name: "Very confident" }));
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Submit answers" })); });
+  expect(screen.getByRole("button", { name: "Submitted" })).toBeTruthy();
+  const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+  expect(posts.map(([url]) => url)).toEqual(["/api/student-answers", "/api/survey-responses"]);
+  expect(JSON.parse(posts[1][1].body).answers.experience).toBe("I pushed a cart.");
+});
+
+it("submits a survey without a quiz and retries a failure without claiming a quiz was saved", async () => {
+  let failOnce = true;
+  const originalFetch = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.startsWith("/api/quiz-status")) return reply({ quizStatus: null });
+    if (url === "/api/survey-responses" && init?.method === "POST" && failOnce) {
+      failOnce = false;
+      return { ok: false, json: async () => ({ error: "Temporary failure." }) };
+    }
+    return originalFetch(url, init);
+  });
+  render(<StudentQuizView user={user} />);
+  fireEvent.change(await screen.findByRole("textbox", { name: "Describe your experience" }), { target: { value: "Pushing a cart" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Where did you feel uncertain?" }), { target: { value: "Starting" } });
+  fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("Your survey answers didn't go through");
+  fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+  await screen.findByRole("button", { name: "Submitted" });
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([url]) => url))
+    .toEqual(["/api/survey-responses", "/api/survey-responses"]);
+});
+
+it.each(["timer", "focus", "button"])("loads a newly published quiz through %s without a page reload or replacing answers once open", async trigger => {
+  let published = false;
+  const originalFetch = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (url: string, init?: RequestInit) => url.startsWith("/api/quiz-status")
+    ? reply({ quizStatus: published ? { lesson_number: 8, status: "published" } : null })
+    : url.startsWith("/api/surveys?") && !published ? reply({ surveys: [] }) : originalFetch(url, init));
   vi.useFakeTimers();
   await act(async () => { render(<StudentQuizView user={user} />); });
   expect(screen.getByText("No quiz available yet")).toBeTruthy();

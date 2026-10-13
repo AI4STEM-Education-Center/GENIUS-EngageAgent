@@ -36,6 +36,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   // The learning task's survey is part of the same task as the quiz (#107, #111):
   // its questions follow the quiz questions and share one submit button.
   const [survey, setSurvey] = useState<Survey | null>(null);
+  const surveyDrafts = useRef<Record<string, Record<string, string>>>({});
   const [surveyAnswers, setSurveyAnswers] = useState<Record<string, string>>({});
   const [surveySubmitted, setSurveySubmitted] = useState(false);
   const [surveyNote, setSurveyNote] = useState<string | null>(null);
@@ -70,31 +71,29 @@ export default function StudentQuizView({ user, onProgress }: Props) {
 
       const qs = (statusData as { quizStatus?: QuizStatusData | null }).quizStatus ?? null;
 
-      if (!qs || qs.status !== "published") {
-        setQuizStatus(qs);
-        setLoading(false);
-        return;
-      }
-
       setQuizStatus(qs);
 
-      // Fetch quiz questions from lesson data
-      const lessonRes = await fetch(`/api/lessons/${qs.lesson_number}`);
-      const lessonData = await lessonRes.json();
-      if (!lessonRes.ok) throw new Error(lessonData.error ?? "Failed to load quiz questions.");
-      setQuestions(lessonData.quiz_items ?? []);
+      // Load quiz questions only when the quiz is published. The survey below is
+      // loaded either way: a teacher can publish a survey without a quiz (#111).
+      if (qs?.status === "published") {
+        // Fetch quiz questions from lesson data
+        const lessonRes = await fetch(`/api/lessons/${qs.lesson_number}`);
+        const lessonData = await lessonRes.json();
+        if (!lessonRes.ok) throw new Error(lessonData.error ?? "Failed to load quiz questions.");
+        setQuestions(lessonData.quiz_items ?? []);
 
-      const existingAnswer = await findExistingStudentAnswer({
-        classId,
-        assignmentId,
-        lessonNumber: qs.lesson_number,
-        userId: user.userId,
-        email: user.email,
-      });
-      if (existingAnswer) {
-        setExistingAnswers(existingAnswer.answer.answers);
-        setAnswers(existingAnswer.answer.answers);
-        setSubmitted(true);
+        const existingAnswer = await findExistingStudentAnswer({
+          classId,
+          assignmentId,
+          lessonNumber: qs.lesson_number,
+          userId: user.userId,
+          email: user.email,
+        });
+        if (existingAnswer) {
+          setExistingAnswers(existingAnswer.answer.answers);
+          setAnswers(existingAnswer.answer.answers);
+          setSubmitted(true);
+        }
       }
 
       // Load the learning task's survey, if the teacher published one.
@@ -118,7 +117,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
             setSurveySubmitted(true);
           } else if (availability.open) {
             setSurvey(taskSurvey);
-            setSurveyAnswers(own?.answers ?? {});
+            setSurveyAnswers({ ...own?.answers, ...surveyDrafts.current[taskSurvey.survey_id] });
           } else if (availability.reason !== "draft") {
             // Scheduled or closed: mention it, but don't hold up the quiz.
             setSurveyNote(availability.message);
@@ -157,9 +156,12 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   useEffect(() => {
     if (loading) return;
 
-    if (submitted && (!survey || surveySubmitted)) {
+    const quizOpen = quizStatus?.status === "published";
+    const quizDone = !quizOpen || submitted;
+    const surveyDone = !survey || surveySubmitted;
+    if ((quizOpen || survey) && quizDone && surveyDone) {
       onProgress?.({ kind: "completed" });
-    } else if (quizStatus?.status === "published") {
+    } else if (quizOpen || survey) {
       onProgress?.({ kind: "active" });
     } else {
       onProgress?.({ kind: "not-available" });
@@ -188,6 +190,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
 
   const handleSurveyAnswer = (fieldId: string, value: string) => {
     if (surveySubmitted) return;
+    if (survey) surveyDrafts.current[survey.survey_id] = { ...surveyDrafts.current[survey.survey_id], [fieldId]: value };
     setSurveyAnswers((prev) => ({ ...prev, [fieldId]: value }));
   };
 
@@ -195,13 +198,13 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   // part fails, the quiz answers stay saved and the student can retry just the
   // survey with the same button.
   const handleSubmit = async () => {
-    if (!classId || !assignmentId || !quizStatus) return;
+    if (!classId || !assignmentId) return;
 
     setSubmitting(true);
     setError(null);
 
     try {
-      if (!submitted) {
+      if (quizStatus?.status === "published" && !submitted) {
         const res = await fetch("/api/student-answers", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...scopedClientAuthHeaders({ classId, assignmentId }) },
@@ -243,7 +246,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(
-            `Your quiz answers were saved, but the survey answers didn't go through${
+            `${quizStatus?.status === "published" ? "Your quiz answers were saved, but the survey answers" : "Your survey answers"} didn't go through${
               data.error ? ` (${data.error})` : ""
             }. Please try again.`,
           );
@@ -278,7 +281,9 @@ export default function StudentQuizView({ user, onProgress }: Props) {
     );
   }
 
-  if (!quizStatus || quizStatus.status === "draft") {
+  const quizOpen = quizStatus?.status === "published";
+
+  if ((!quizStatus || quizStatus.status === "draft") && !survey) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
         <p className="text-lg font-semibold text-slate-700">No quiz available yet</p>
@@ -293,7 +298,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
     );
   }
 
-  if (quizStatus.status === "closed") {
+  if (quizStatus?.status === "closed" && !survey) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
         <p className="text-lg font-semibold text-slate-700">Quiz closed</p>
@@ -314,16 +319,20 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   const confidenceItems = questions.filter((q) => q.type === "confidence_check");
   const allConfidenceAnswered = confidenceItems.every((q) => answers[q.item_id]);
   const surveyComplete = !survey || findMissingAnswers(survey, surveyAnswers).length === 0;
-  const allDone = submitted && (!survey || surveySubmitted);
+  const allDone = (!quizOpen || submitted) && (!survey || surveySubmitted);
   const canSubmit =
-    !refreshing && !loadError && (submitted || (allAnswered && allConfidenceAnswered)) && surveyComplete && !allDone;
-  const questionCount = multipleChoiceQuestions.length;
+    !refreshing && !loadError && (!quizOpen || submitted || (allAnswered && allConfidenceAnswered)) &&
+    surveyComplete &&
+    !allDone;
+  const questionCount = quizOpen ? multipleChoiceQuestions.length : 0;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-          Lesson {quizStatus.lesson_number} {survey ? "Quiz and Survey" : "Quiz"}
+          {quizOpen && quizStatus
+            ? `Lesson ${quizStatus.lesson_number} ${survey ? "Quiz and Survey" : "Quiz"}`
+            : "Survey"}
         </p>
         <h2 className="mt-1 text-xl font-semibold text-slate-900">
           Answer the questions below
@@ -336,7 +345,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
         {surveyNote && !allDone && <p className="mt-2 text-sm text-slate-500">{surveyNote}</p>}
       </div>
 
-      {questions.map((item, index) => {
+      {quizOpen && questions.map((item, index) => {
         const isConfidence = item.type === "confidence_check";
         const selected = answers[item.item_id] ?? existingAnswers?.[item.item_id];
 
