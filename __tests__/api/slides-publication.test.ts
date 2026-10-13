@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { createHash } from "node:crypto";
 const mocks = vi.hoisted(() => ({ session: vi.fn(), context: vi.fn(), get: vi.fn(), put: vi.fn(), published: vi.fn(), upsert: vi.fn(), send: vi.fn(), sign: vi.fn(), destroy: vi.fn() }));
 vi.mock("@/lib/session", () => ({ sessionUser: mocks.session, sameOriginRequest: (request: Request) => request.headers.get("origin") === "https://engage.test" }));
 vi.mock("@/lib/workspace", async original => ({ ...await original<object>(), workspaceContext: mocks.context }));
@@ -21,6 +22,7 @@ const records = new Map<string, { value: Record<string, unknown>; expiresAt?: nu
 const content = new Map<string, ContentPublishRecord>();
 const request = (body: object, origin = "https://engage.test") => new Request("https://engage.test/api/slides/publication", { method: "POST", headers: { origin, "Content-Type": "application/json" }, body: JSON.stringify({ ...context, ...body }) });
 const read = (id: string, changes = {}) => GET(new Request(`https://engage.test/api/slides/publication?${new URLSearchParams({ ...context, publicationId: id, ...changes })}`));
+const status = (deckId = "stable-deck-id", changes = {}) => GET(new Request(`https://engage.test/api/slides/publication?${new URLSearchParams({ ...context, deckId, ...changes })}`));
 const startBody = () => {
   const deck = deckFixture("cognitive conflict");
   deck.draft.visuals[0].prompt = "PRIVATE_IMAGE_PROMPT"; deck.draft.slides[0].teacherNotes = ["PRIVATE_TEACHER_NOTES"];
@@ -57,6 +59,50 @@ it("stages only student projection and dimensional metadata, never private draft
   expect(JSON.stringify(saved)).not.toMatch(/PRIVATE_|teacherNotes|sourcePrompt|referenceData|checks|classroomContext|data:image/u);
   expect(mocks.send).not.toHaveBeenCalled(); expect(mocks.upsert).not.toHaveBeenCalled();
   expect((await read(id)).status).toBe(404);
+});
+
+it("recovers current publication status with hashes and no image URLs, including DynamoDB key formatting", async () => {
+  expect(await (await status()).json()).toEqual({ published: false });
+  const id = await published();
+  const row = content.get("slides-stable-deck-id")!;
+  content.set(row.content_item_id, { ...row, class_id: `CLASS#${context.classId}` });
+  const response = await status(); expect(response.status).toBe(200);
+  const result = await response.json();
+  expect(result).toMatchObject({ published: true, publicationId: id, contentItemId: "slides-stable-deck-id",
+    assets: { evidence: { width: 1, height: 1, digest: expect.stringMatching(/^[a-f0-9]{64}$/u) } } });
+  expect(JSON.stringify(result)).not.toMatch(/PRIVATE_|teacherNotes|sourcePrompt|data:image|https:/u);
+  expect(mocks.sign).not.toHaveBeenCalled();
+  content.set(row.content_item_id, { ...row, published: false });
+  expect(await (await status()).json()).toEqual({ published: false });
+});
+
+it("denies student or unauthenticated publication status and never matches another teacher or assignment", async () => {
+  await published();
+  mocks.session.mockResolvedValue(null); expect((await status()).status).toBe(401);
+  mocks.session.mockResolvedValue(student); expect((await status()).status).toBe(403);
+  mocks.session.mockResolvedValue({ ...teacher, geniusId: "other-teacher" });
+  expect(await (await status()).json()).toEqual({ published: false });
+  mocks.session.mockResolvedValue(teacher);
+  expect(await (await status("stable-deck-id", { assignmentId: "ea-task-other" })).json()).toEqual({ published: false });
+});
+
+it("reuses an identical published snapshot on retry while changed text or image bytes creates a new version", async () => {
+  const id = await published();
+  const body = startBody();
+  const retry = { ...body, assets: { evidence: { ...body.assets.evidence,
+    digest: createHash("sha256").update(Buffer.from(tinyImage.split(",")[1], "base64")).digest("hex") } } };
+  const count = records.size;
+  const result = await (await POST(request(retry))).json();
+  expect(result).toMatchObject({ alreadyPublished: true, publicationId: id, contentItemId: "slides-stable-deck-id" });
+  expect(records.size).toBe(count);
+  expect(mocks.upsert).toHaveBeenCalledOnce();
+  const revised = structuredClone(retry); revised.draft.slides[0].title = "Revised student text";
+  expect((await (await POST(request(revised))).json()).publicationId).not.toBe(id);
+  const changedImage = { ...retry, assets: { evidence: { ...retry.assets.evidence, digest: "a".repeat(64) } } };
+  expect((await (await POST(request(changedImage))).json()).publicationId).not.toBe(id);
+  const original = content.get("slides-stable-deck-id")!;
+  content.set(original.content_item_id, { ...original, published: false });
+  expect((await (await POST(request(retry))).json()).publicationId).not.toBe(id);
 });
 
 it("uploads exact private image bytes once, requires every asset, and publishes a stable safe content reference", async () => {

@@ -284,3 +284,23 @@ it("does not treat unverified URL context as a verified GENIUS session", async (
     expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("Authorization");
   } finally { window.history.replaceState({}, "", "/"); }
 });
+
+it("keeps a recorded prediction through refresh without sharing it with a different student or publication", async () => {
+  const learner = { ...props, learnerId: "prediction-learner" };
+  let view = render(<PublishedSlidesReader {...learner} />);
+  await screen.findByText("Slide 1 of 5");
+  next();
+  fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "It will travel the same distance each second." } });
+  next();
+  view.unmount();
+  view = render(<PublishedSlidesReader {...learner} />);
+  await screen.findByText("Slide 1 of 5");
+  next();
+  expect((screen.getByLabelText("Your prediction") as HTMLTextAreaElement).value).toBe("It will travel the same distance each second.");
+  expect((screen.getByLabelText("Your prediction") as HTMLTextAreaElement).readOnly).toBe(true);
+  view.rerender(<PublishedSlidesReader {...learner} learnerId="other-student" />);
+  await screen.findByText("Slide 1 of 5");
+  next();
+  expect((screen.getByLabelText("Your prediction") as HTMLTextAreaElement).value).toBe("");
+  expect((screen.getByRole("button", { name: "Next slide" }) as HTMLButtonElement).disabled).toBe(true);
+});

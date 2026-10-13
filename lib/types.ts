@@ -102,6 +102,8 @@ export type Lesson = {
   lesson_number: number;
   lesson_title: string;
   learning_objective: string;
+  topic?: string;
+  target_concept?: string;
   core_ideas: string[];
   misconceptions: Record<string, string>;
   quiz_items: QuizItem[];

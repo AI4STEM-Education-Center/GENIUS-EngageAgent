@@ -1,5 +1,7 @@
 "use client";
 
+import { scopedTaskFetch } from "@/lib/client-auth";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SurveyBuilderView from "./SurveyBuilderView";
@@ -526,7 +528,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
         }
       }
 
-      const res = await fetch("/api/auto-answer-test-students", {
+      const res = await scopedTaskFetch({ classId, assignmentId }, "/api/auto-answer-test-students", {
         method: "POST",
         headers,
         body: JSON.stringify({ classId, assignmentId }),
@@ -571,14 +573,14 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
   // Load quiz status on mount
   useEffect(() => {
     if (!classId || !assignmentId) return;
-    fetch(`/api/quiz-status?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`)
+    scopedTaskFetch({ classId, assignmentId }, `/api/quiz-status?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.quizStatus) {
           setSelectedLesson(data.quizStatus.lesson_number);
           setQuizStatus(data.quizStatus.status);
           // Load quiz items for this lesson
-          fetch(`/api/lessons/${data.quizStatus.lesson_number}`)
+          scopedTaskFetch({ classId, assignmentId }, `/api/lessons/${data.quizStatus.lesson_number}`)
             .then((r) => r.json())
             .then((lesson) => setQuizItems(lesson.quiz_items ?? []));
         }
@@ -728,8 +730,8 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     const restorePersistedStep3State = async () => {
       try {
         const [mediaRes, publishRes] = await Promise.all([
-          fetch(`/api/media?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=${COHORT_STUDENT_ID}`),
-          fetch(`/api/content-publish?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
+          scopedTaskFetch({ classId, assignmentId }, `/api/media?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=${COHORT_STUDENT_ID}`),
+          scopedTaskFetch({ classId, assignmentId }, `/api/content-publish?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
         ]);
 
         if (cancelled) return;
@@ -830,7 +832,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
 
     const restorePublishedStep3State = async () => {
       try {
-        const publishRes = await fetch(
+        const publishRes = await scopedTaskFetch({ classId, assignmentId },
           `/api/content-publish?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`,
         );
         if (!publishRes.ok) {
@@ -863,7 +865,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
         }
 
         const contentIds = new Set(restoredContent.map((item) => item.id));
-        const mediaRes = await fetch(
+        const mediaRes = await scopedTaskFetch({ classId, assignmentId },
           `/api/media?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=${COHORT_STUDENT_ID}`,
         );
 
@@ -959,7 +961,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
             assignmentId,
             studentId: COHORT_STUDENT_ID,
           });
-          const res = await fetch(`/api/engagement-video/status?${params}`);
+          const res = await scopedTaskFetch({ classId, assignmentId }, `/api/engagement-video/status?${params}`);
           const data = (await res.json()) as {
             done?: boolean;
             url?: string;
@@ -1044,12 +1046,12 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     setSelectedForPublish(new Set());
     setPublishedContentIds(new Set());
     setClassRecommendation(null);
-    const res = await fetch(`/api/lessons/${lessonNumber}`);
+    const res = await scopedTaskFetch({ classId, assignmentId }, `/api/lessons/${lessonNumber}`);
     const data = await res.json();
     setQuizItems(data.quiz_items ?? []);
     // Save as draft
     if (classId && assignmentId) {
-      await fetch("/api/quiz-status", {
+      await scopedTaskFetch({ classId, assignmentId }, "/api/quiz-status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ classId, assignmentId, lessonNumber, status: "draft", publishedBy: user.userId }),
@@ -1075,7 +1077,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
 
     setPublishingQuiz(true);
     try {
-      const response = await fetch("/api/quiz-status", {
+      const response = await scopedTaskFetch({ classId, assignmentId }, "/api/quiz-status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ classId, assignmentId, lessonNumber: selectedLesson, status: "published", publishedBy: user.userId }),
@@ -1106,7 +1108,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
       setLoadingAnswers(true);
     }
     try {
-      const res = await fetch(`/api/student-answers?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&lessonNumber=${encodeURIComponent(selectedLesson)}`);
+      const res = await scopedTaskFetch({ classId, assignmentId }, `/api/student-answers?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&lessonNumber=${encodeURIComponent(selectedLesson)}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to load student answers.");
       setStudentAnswers(workspaceQuizAnswers(data.answers ?? [], { classId, assignmentId, lessonNumber: selectedLesson }));
@@ -1186,7 +1188,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
       // Primary usually succeeds, so users almost never notice the retry;
       // on the rare failure they wait a bit longer but still get content.
       const callContent = (useFallback: boolean) =>
-        fetch("/api/engagement-content", {
+        scopedTaskFetch({ classId, assignmentId }, "/api/engagement-content", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1267,7 +1269,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     setAnnotationStatus("saving");
     setAnnotationError(null);
     try {
-      const res = await fetch("/api/teacher-annotation", {
+      const res = await scopedTaskFetch({ classId, assignmentId }, "/api/teacher-annotation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1331,7 +1333,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
           };
         });
 
-      const res = await fetch("/api/content-publish", {
+      const res = await scopedTaskFetch({ classId, assignmentId }, "/api/content-publish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ classId, assignmentId, contentItems: items, publishedBy: user.userId }),
@@ -1368,7 +1370,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
         let lastError: Error | null = null;
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
-            const res = await fetch("/api/engagement-image", {
+            const res = await scopedTaskFetch({ classId, assignmentId }, "/api/engagement-image", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ item, lessonNumber: selectedLesson, classId, assignmentId, studentId: COHORT_STUDENT_ID }),
@@ -1418,7 +1420,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
 
     setVideos((prev) => ({ ...prev, [item.id]: { status: "loading" } }));
     try {
-      const startRes = await fetch("/api/engagement-video", {
+      const startRes = await scopedTaskFetch({ classId, assignmentId }, "/api/engagement-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ item, plan, answers: {}, imageUrl, classId, assignmentId, lessonNumber: selectedLesson, studentId: COHORT_STUDENT_ID }),
@@ -1482,7 +1484,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     timers.set(itemId, setTimeout(async () => {
       timers.delete(itemId);
       try {
-        await fetch("/api/media", {
+        await scopedTaskFetch({ classId, assignmentId }, "/api/media", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1525,7 +1527,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     const imageUrl = images[refineTarget?.itemId ?? ""]?.url;
     if (!img || !imageUrl || !selectionRect || selectionRect.w < 5 || selectionRect.h < 5) return null;
 
-    const response = await fetch(imageUrl.startsWith("data:") ? imageUrl : `/api/download?url=${encodeURIComponent(imageUrl)}`);
+    const response = await scopedTaskFetch({ classId, assignmentId }, imageUrl.startsWith("data:") ? imageUrl : `/api/download?url=${encodeURIComponent(imageUrl)}`);
     if (!response.ok) return null;
     const blob = await response.blob();
     const bitmap = await createImageBitmap(blob);
@@ -1555,7 +1557,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     setRefineError(null);
 
     try {
-      const res = await fetch("/api/engagement-image", {
+      const res = await scopedTaskFetch({ classId, assignmentId }, "/api/engagement-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

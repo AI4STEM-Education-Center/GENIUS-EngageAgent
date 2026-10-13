@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { upsertContentRating, listContentRatings } from "@/lib/nosql";
+import { upsertContentRating, listContentRatings, listPublishedContent } from "@/lib/nosql";
 
 export async function GET(request: Request) {
   const denied = await guardWorkspaceRequest(request);
@@ -37,11 +37,16 @@ export async function POST(request: Request) {
     );
   }
 
-  if (typeof rating !== "number" || rating < 1 || rating > 5) {
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     return NextResponse.json(
-      { error: "rating must be a number between 1 and 5." },
+      { error: "rating must be a whole number between 1 and 5." },
       { status: 400 },
     );
+  }
+
+  const published = await listPublishedContent(classId, assignmentId);
+  if (!published.some(item => item.content_item_id === contentItemId)) {
+    return NextResponse.json({ error: "Choose material published in this assignment." }, { status: 404 });
   }
 
   const record = await upsertContentRating({

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
-import { sessionUser } from "@/lib/session";
-import { isWorkspaceClass, listWorkspaceClasses } from "@/lib/workspace";
+import { authorizeWorkspaceCollection, collectionContains } from "@/lib/workspace-collection-access";
 import {
   listAllTeacherAnnotations,
   listAllStudentAnswers,
@@ -33,6 +32,8 @@ function getMonthKey(isoDate: string): string | null {
 }
 
 export async function GET(request: NextRequest) {
+  const access = await authorizeWorkspaceCollection(request);
+  if ("response" in access) return access.response;
   const { searchParams } = request.nextUrl;
   const month = searchParams.get("month");
   const format = searchParams.get("format") ?? "json";
@@ -46,18 +47,13 @@ export async function GET(request: NextRequest) {
       listAllContentRatings(),
     ]);
 
-  // Legacy exports keep their existing behavior; independent classes are private to their teacher.
-  const user = await sessionUser();
-  const accessible = new Set(user?.role === "teacher" ? (await listWorkspaceClasses(user)).map(c => c.id) : []);
-  const visible = (raw: string | undefined) => {
-    const id = raw?.replace(/^CLASS#/, "");
-    return !isWorkspaceClass(id) || accessible.has(id);
-  };
-  const annotations = allAnnotations.filter(row => visible(row.workspace_class_id));
-  const studentAnswers = allStudentAnswers.filter(row => visible(row.class_id));
-  const plans = allPlans.filter(row => visible(row.class_id));
-  const published = allPublished.filter(row => visible(row.class_id));
-  const ratings = allRatings.filter(row => visible(row.class_id));
+  // Legacy annotations have no trusted assignment ID. Never infer ownership
+  // from their display label or include them in a scoped GENIUS export.
+  const annotations = allAnnotations.filter(row => access.assignmentId === undefined && collectionContains(access, row.workspace_class_id));
+  const studentAnswers = allStudentAnswers.filter(row => collectionContains(access, row.class_id, row.assignment_id));
+  const plans = allPlans.filter(row => collectionContains(access, row.class_id, row.assignment_id));
+  const published = allPublished.filter(row => collectionContains(access, row.class_id, row.assignment_id));
+  const ratings = allRatings.filter(row => collectionContains(access, row.class_id, row.assignment_id));
 
   if (!month) {
     const summaryMap = new Map<string, MonthSummary>();
@@ -103,7 +99,7 @@ export async function GET(request: NextRequest) {
       (a, b) => b.month.localeCompare(a.month),
     );
 
-    return NextResponse.json({ months });
+    return NextResponse.json({ months }, { headers: { "Cache-Control": "no-store" } });
   }
 
   // Filter data to the requested month
@@ -223,5 +219,5 @@ export async function GET(request: NextRequest) {
     strategyPlans: monthPlans,
     publishedContent: monthPublished,
     contentRatings: monthRatings,
-  });
+  }, { headers: { "Cache-Control": "no-store" } });
 }

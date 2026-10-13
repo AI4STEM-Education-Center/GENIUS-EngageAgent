@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useAuth } from "../components/AuthContext";
+import { scopedClientAuthHeaders } from "@/lib/client-auth";
 
 type GalleryItem = {
   media_id: string;
@@ -19,6 +21,7 @@ type GalleryItem = {
 const PAGE_SIZE = 12;
 
 export default function CommunityGallery() {
+  const { user, loading: authLoading } = useAuth();
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +36,10 @@ export default function CommunityGallery() {
 
   const fetchPage = useCallback(
     async (pageCursor: string | null, pageNumber: number) => {
+      if (authLoading) return;
+      if (user?.role !== "teacher") {
+        setItems([]); setHasMore(false); setLoading(false); setError("Sign in as a teacher to view your class materials."); return;
+      }
       setLoading(true);
       setError(null);
       try {
@@ -42,8 +49,9 @@ export default function CommunityGallery() {
         });
         if (search) params.set("search", search);
         if (pageCursor) params.set("cursor", pageCursor);
+        if (user.classId && user.assignmentId) { params.set("classId", user.classId); params.set("assignmentId", user.assignmentId); }
 
-        const res = await fetch(`/api/gallery?${params}`);
+        const res = await fetch(`/api/gallery?${params}`, { headers: scopedClientAuthHeaders(user), cache: "no-store" });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(
@@ -73,18 +81,19 @@ export default function CommunityGallery() {
         setLoading(false);
       }
     },
-    [search, mediaType],
+    [search, mediaType, authLoading, user],
   );
 
   // Reset and fetch page 1 whenever search or mediaType changes (including mount)
   useEffect(() => {
     setItems([]);
+    setFocusItem(null);
     setHasMore(true);
     setPage(1);
     setCursorHistory([null]);
     fetchPage(null, 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, mediaType]);
+  }, [search, mediaType, authLoading, user]);
 
   const goToPage = (targetPage: number) => {
     const pageCursor = cursorHistory[targetPage - 1] ?? null;
@@ -157,7 +166,7 @@ export default function CommunityGallery() {
           </Link>
           <div className="h-4 w-px bg-slate-200" />
           <h1 className="text-sm font-bold tracking-tight text-slate-900">
-            Community Gallery
+            Class Media Gallery
           </h1>
           <div className="ml-auto flex items-center gap-3">
             <Link

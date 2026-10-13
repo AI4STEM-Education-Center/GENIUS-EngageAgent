@@ -16,7 +16,8 @@ describe("Analogy source-aligned text and image", () => {
     }
     expect(prompt.user).toContain("NOT clay/playdough as the target");
     const energyPrompt = buildMaterialPrompt(getLessonGenerationContext(8)!, getStrategyContext("experience bridging"));
-    expect(energyPrompt.user).toContain("energy transfer rather than inertia alone");
+    expect(energyPrompt.user).toContain("Conservation of energy and energy transfer (PS3.B)");
+    expect(energyPrompt.user).toContain("Do not invent observations or measurements");
   });
   it("uses curriculum, explicit strategy sequence and a learner-written question", () => {
     const prompt = buildMaterialPrompt(getLessonGenerationContext(1)!, getStrategyContext("analogy"));

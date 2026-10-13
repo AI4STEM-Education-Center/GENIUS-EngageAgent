@@ -163,3 +163,62 @@ it("reads slide publications in the student reader and submits through the exist
   fireEvent.click(within(reader).getByRole("button", { name: "Write my slide question" }));
   expect(document.activeElement).toBe(screen.getByText("Your questions").parentElement);
 });
+
+it("refreshes submitted questions and ratings from another tab without discarding unsaved selections", async () => {
+  let questions: string[] = [];
+  fetchMock.mockImplementation(async (input: string) => {
+    if (input.startsWith("/api/content-publish")) return { ok: true, json: async () => ({ items: publishedItems }) };
+    if (input.startsWith("/api/content-rating")) return { ok: true, json: async () => ({ ratings: savedRatings }) };
+    if (input.startsWith("/api/review-questions")) return { ok: true, json: async () => ({ reviewQuestions: [{ questions }] }) };
+    return { ok: true, json: async () => ({}) };
+  });
+  render(<StudentContentReviewView user={student} ratingUnlocked />);
+  const card = await ratingCard();
+  fireEvent.click(ratingButtonsFor(card, "Material B")[3]);
+  questions = ["How could we test friction?"];
+  savedRatings = [{ content_item_id: "item-a", rating: 5 }];
+  fireEvent.focus(window);
+  await screen.findByText(questions[0]);
+  await waitFor(() => expect((ratingButtonsFor(card, "Material A")[4] as HTMLButtonElement).disabled).toBe(true));
+  expect(ratingButtonsFor(card, "Material B")[3].className).toContain("bg-[#BA0C2F]");
+  expect((within(card).getByRole("button", { name: "Submit" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("keeps successfully submitted ratings locked when an earlier history request returns late", async () => {
+  let releaseHistory!: (value: unknown) => void;
+  let ratingReads = 0;
+  const original = fetchMock.getMockImplementation() as (input: string, init?: RequestInit) => Promise<unknown>;
+  fetchMock.mockImplementation(async (input: string, init?: RequestInit) => {
+    if (input.startsWith("/api/content-rating") && !init?.method && ++ratingReads === 2) {
+      return { ok: true, json: () => new Promise(resolve => { releaseHistory = resolve; }) };
+    }
+    return original(input, init);
+  });
+  render(<StudentContentReviewView user={student} ratingUnlocked />);
+  const card = await ratingCard();
+  fireEvent.focus(window);
+  await waitFor(() => expect(releaseHistory).toBeTypeOf("function"));
+  fireEvent.click(ratingButtonsFor(card, "Material A")[3]);
+  fireEvent.click(ratingButtonsFor(card, "Material B")[3]);
+  fireEvent.click(within(card).getByRole("button", { name: "Submit" }));
+  await within(card).findByText(/Submitted - thanks for rating/);
+  releaseHistory({ ratings: [] });
+  await waitFor(() => expect(within(card).queryByRole("button", { name: "Submit" })).toBeNull());
+  expect((ratingButtonsFor(card, "Material A")[3] as HTMLButtonElement).disabled).toBe(true);
+});
+
+it("includes the verified assignment credential on student reads and feedback writes", async () => {
+  const { setVerifiedClientAuth, clearVerifiedClientAuth } = await import("@/lib/client-auth");
+  setVerifiedClientAuth("verified-test-token", student);
+  try {
+    render(<StudentContentReviewView user={student} ratingUnlocked />);
+    const card = await ratingCard();
+    fireEvent.change(screen.getByPlaceholderText("What are you wondering about this material?"), { target: { value: "How can we test this?" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Submit" })[0]);
+    fireEvent.click(ratingButtonsFor(card, "Material A")[3]);
+    fireEvent.click(ratingButtonsFor(card, "Material B")[3]);
+    fireEvent.click(within(card).getByRole("button", { name: "Submit" }));
+    await within(card).findByText(/Submitted - thanks for rating/);
+    for (const [, init] of fetchMock.mock.calls) expect(new Headers(init?.headers).get("authorization")).toBe("Bearer verified-test-token");
+  } finally { clearVerifiedClientAuth(); }
+});

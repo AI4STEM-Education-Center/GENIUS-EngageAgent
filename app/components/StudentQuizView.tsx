@@ -1,5 +1,7 @@
 "use client";
 
+import { scopedClientAuthHeaders } from "@/lib/client-auth";
+
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import type { UserContext } from "@/lib/auth";
 import { findExistingStudentAnswer } from "@/lib/student-answer-lookup";
@@ -56,6 +58,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
       // Fetch quiz status
       const statusRes = await fetch(
         `/api/quiz-status?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`,
+        { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" },
       );
       const statusData = await statusRes.json().catch(() => ({}));
 
@@ -96,17 +99,18 @@ export default function StudentQuizView({ user, onProgress }: Props) {
 
       // Load the learning task's survey, if the teacher published one.
       const query = `classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`;
-      const surveysRes = await fetch(`/api/surveys?${query}`);
+      const surveysRes = await fetch(`/api/surveys?${query}`, { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" });
+      if (!surveysRes.ok) throw new Error("Unable to load the task survey. Please retry loading the assessment.");
       if (surveysRes.ok) {
         const data = (await surveysRes.json()) as { surveys?: Survey[] };
         const taskSurvey = pickTaskSurvey(data.surveys ?? []);
         if (taskSurvey) {
           const responsesRes = await fetch(
             `/api/survey-responses?${query}&surveyId=${encodeURIComponent(taskSurvey.survey_id)}&studentId=${encodeURIComponent(user.userId)}`,
+            { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" },
           );
-          const own = responsesRes.ok
-            ? (((await responsesRes.json()) as { responses?: SurveyResponse[] }).responses ?? [])[0]
-            : undefined;
+          if (!responsesRes.ok) throw new Error("Unable to load your survey responses. Please retry loading the assessment.");
+          const own = (((await responsesRes.json()) as { responses?: SurveyResponse[] }).responses ?? [])[0];
           const availability = getSurveyAvailability(taskSurvey);
           if (own?.status === "submitted") {
             setSurvey(taskSurvey);
@@ -200,7 +204,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
       if (!submitted) {
         const res = await fetch("/api/student-answers", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...scopedClientAuthHeaders({ classId, assignmentId }) },
           body: JSON.stringify({
             classId,
             assignmentId,
@@ -225,7 +229,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
       if (survey && !surveySubmitted) {
         const res = await fetch("/api/survey-responses", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...scopedClientAuthHeaders({ classId, assignmentId }) },
           body: JSON.stringify({
             classId,
             assignmentId,

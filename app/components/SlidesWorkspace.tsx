@@ -15,6 +15,7 @@ import { analogyMappingIndex, resolveAnalogyMethod } from "@/lib/slides/analogy-
 import { loadSlideDraft, saveSlideDraft, slideDraftKey } from "@/lib/slides/draft-storage";
 import { postSlideRequest } from "@/lib/slides/client-transport";
 import { publishSlideDeck } from "@/lib/slides/publish-client";
+import { isSlideDeckPublished, slidePublicationContentKey } from "@/lib/slides/publication-status";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import { slideRevisionFeedback } from "@/lib/slides/revision";
 
@@ -59,7 +60,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const exportDeck = useRef<SlideDeck | null>(null);
   const publishJob = useRef<AbortController | null>(null);
   const publishingDeck = useRef<SlideDeck | null>(null);
-  const [publishedDeck, setPublishedDeck] = useState<SlideDeck | null>(null);
+  const [publishedContentKey, setPublishedContentKey] = useState("");
+  const [publicationWarning, setPublicationWarning] = useState("");
   const [feedback, setFeedback] = useState("");
   const [reload, setReload] = useState(0);
   const job = useRef<AbortController | null>(null);
@@ -74,6 +76,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const [restoredScope, setRestoredScope] = useState("");
   const [savedDeck, setSavedDeck] = useState<SlideDeck | null>(null);
   const [storageError, setStorageError] = useState("");
+  const contentKey = useMemo(() => deck ? slidePublicationContentKey(deck) : "", [deck]);
+  const published = !!contentKey && publishedContentKey === contentKey;
   const canGenerate = catalogLoaded && restoredScope === scopeKey && lessons.some(lesson => lesson.lessonNumber === lessonNumber)
     && models.text.some(model => model.id === selection.textModel) && models.image.some(model => model.id === selection.imageModel);
 
@@ -121,7 +125,20 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   // already interactive. Cancel only an operation owned by that previous deck.
   useEffect(() => () => { if (exportDeck.current === deck) { exportRequest.current++; exportJob.current?.abort(); } }, [deck]);
   useEffect(() => () => { if (publishingDeck.current === deck) publishJob.current?.abort(); }, [deck]);
-  useEffect(() => { if (publishedDeck && publishedDeck !== deck) setPublishedDeck(null); }, [deck, publishedDeck]);
+  useEffect(() => {
+    if (!deck || !contentKey || !classId || !assignmentId || busy || published
+      || deck.draft.visuals.some(visual => !isSlideAsset(deck.assets[visual.id]))) return;
+    const controller = new AbortController();
+    setPublicationWarning("");
+    void isSlideDeckPublished(deck, { classId, assignmentId }, controller.signal).then(matches => {
+      if (!controller.signal.aborted && matches) setPublishedContentKey(contentKey);
+    }).catch(() => {
+      if (!controller.signal.aborted) setPublicationWarning("Publication status could not be checked. Your draft is retained; sending this version again is safe.");
+    });
+    return () => controller.abort();
+    // Review metadata and teacher notes do not change the published projection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contentKey, classId, assignmentId, busy, published]);
   useEffect(() => () => { if (preparedDownload) URL.revokeObjectURL(preparedDownload.url); }, [preparedDownload]);
   useEffect(() => {
     if (preparedDownload && preparedDownload.deck !== deck) setPreparedDownload(null);
@@ -346,13 +363,13 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     finally { if (exportJob.current === controller) { exportJob.current = null; exportDeck.current = null; setBusy(false); } }
   }
   async function publish() {
-    if (!deck || !ready || busy || publishJob.current || publishedDeck === deck || !classId || !assignmentId) return;
+    if (!deck || !ready || busy || publishJob.current || published || !classId || !assignmentId) return;
     const controller = new AbortController(); publishJob.current = controller; publishingDeck.current = deck;
     setBusy(true); setError("");
     try {
       await publishSlideDeck(deck, { classId, assignmentId }, controller.signal, setStatus);
       if (controller.signal.aborted || publishJob.current !== controller) return;
-      setPublishedDeck(deck);
+      setPublishedContentKey(contentKey); setPublicationWarning("");
       setStatus("Slides published. Students can read them in Explore and ask.");
       onPublished?.();
     } catch (err) {
@@ -373,7 +390,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const reviewHelp = reviewBlock === "busy" ? "Finish the current operation before sending or downloading."
     : reviewBlock === "layout" ? "The slide layout or required content needs correction. Review the details below, then edit the draft or revise it with AI."
       : reviewBlock === "images" ? "Images are missing. Use Image recovery below to generate or retry them."
-        : publishedDeck === deck ? "This version is published. Students can read it in Explore and ask. You can also download the PowerPoint."
+        : published ? "This version is published. Students can read it in Explore and ask. You can also download the PowerPoint."
                 : reviewed ? "Review confirmed for this version. Download the PowerPoint or send the slides to students."
                   : "The slides and images are ready. You can send them to students or download now. Checking, confirming review, and refining are optional.";
 
@@ -453,6 +470,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       <section aria-label="Review and publish" className="mt-5 rounded-lg border border-teal-200 bg-teal-50/50 p-4">
         <h3 className="text-base font-semibold text-gray-900">Review and publish</h3>
         <p id={reviewHelpId} aria-live="polite" className="mt-2 text-sm leading-6 text-gray-700">{reviewHelp}</p>
+        {publicationWarning && <p role="status" className="mt-2 text-sm text-amber-900">{publicationWarning}</p>}
         {!busy && reviewBlock === "images" && <button type="button" className={`${button} mt-3`} onClick={() => { imageRecovery.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); imageRecovery.current?.focus({ preventScroll: true }); }}><ImagePlus size={16} />Go to image recovery</button>}
         <p className="mt-4 text-xs text-gray-500">Optional review record — not required to send or download.</p>
         <button id={reviewControlId} type="button" role="checkbox" aria-checked={reviewed} aria-describedby={reviewHelpId} disabled={!ready || busy}
@@ -463,7 +481,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         <div className="mt-3 flex flex-wrap gap-2">
           <button type="button" className={button} disabled={!ready || busy || reviewed} onClick={() => setReviewed(true)}><ScanEye size={16} />{reviewed ? "Review confirmed" : "Confirm review"}</button>
           <button type="button" className={button} disabled={busy || !ready} onClick={download}><Download size={17} />Download PPTX</button>
-          <button type="button" className={primaryButton} disabled={busy || !ready || !classId || !assignmentId || publishedDeck === deck} onClick={publish}><Send size={17} />{publishedDeck === deck ? "Published" : "Send to students"}</button>
+          <button type="button" className={primaryButton} disabled={busy || !ready || !classId || !assignmentId || published} onClick={publish}><Send size={17} />{published ? "Published" : "Send to students"}</button>
           {preparedDownload?.deck === deck && !busy && ready && <a className={button} href={preparedDownload.httpUrl || preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>}
         </div>
         {preparedDownload?.deck === deck && !busy && ready && preparedDownload.httpUrl && <p className="mt-2 text-xs text-gray-500">Save link expires in 10 minutes. Select Download PPTX again to refresh it.</p>}

@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Route behavior below assumes an authorized request. Signed native/GENIUS
+// access and role isolation are exercised in workspace-access and embedded-workflow-access.
+vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null), workspaceRequestUser: vi.fn(async () => ({ role: "teacher", geniusId: "teacher" })) }));
+vi.mock("@/lib/workspace-store", () => ({ workspaceGet: vi.fn(async () => ({ requestId: "req-1", classId: "c1", assignmentId: "a1", studentId: "cohort", contentItemId: "item-1", ownerId: "teacher", expiresAt: Math.floor(Date.now() / 1000) + 3600 })) }));
 import { NextRequest } from "next/server";
 
 const { upsertMedia, getMedia } = vi.hoisted(() => ({

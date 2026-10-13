@@ -1,5 +1,5 @@
 import { getLesson } from "./quiz-data";
-import { resolveQuizEvidence, type LessonGenerationContext, type StrategyContext } from "./lesson-context";
+import { configuredLessonFocus, resolveQuizEvidence, type LessonGenerationContext, type StrategyContext } from "./lesson-context";
 import type { Answers, ContentItem } from "./types";
 import { parseMaterialActivity, stageSequences } from "./material-activities";
 
@@ -151,7 +151,8 @@ export function buildMaterialPrompt(
   const curriculum = getLesson(lesson.lessonNumber);
   // Refine only the two updated inquiry strategies; the shared exported lesson
   // focus remains unchanged for established analogy generation and consumers.
-  const selectedLessonFocus = lesson.lessonNumber === 8 && ["cognitive conflict", "experience bridging"].includes(strategy.id)
+  const configured = configuredLessonFocus(lesson);
+  const selectedLessonFocus = configured ? `${configured.guidance} Topic: ${configured.topic}. Target: ${configured.target}.` : lesson.lessonNumber === 8 && ["cognitive conflict", "experience bridging"].includes(strategy.id)
     ? "Focus on stored energy being released and transferred within a recognizable real-world system. This opens the lesson's system-energy model; do not demand its complete explanation. The curriculum cart-launcher is an example, not a compulsory learner experience. Choose a familiar episode that preserves the stored-energy release and contact-transfer relationship, with any later slowing or thermal/sound/internal transfer treated consistently. Keep force distinct from energy; energy does not disappear. Do not substitute a generic braking/sliding story that omits stored-energy release. Emphasize energy transfer rather than inertia alone. For experience bridging, revisit the same recalled or imagined event before naming the concept. For cognitive conflict, choose one curriculum- or diagnostic-supported incomplete rule and evidence that can distinguish its prediction under the stated conditions; do not manufacture a wrong belief or claim a still image measures energy or speed."
     : lessonFocus[lesson.lessonNumber] ?? lesson.learningObjective;
   return {

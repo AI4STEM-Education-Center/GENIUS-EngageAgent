@@ -1,5 +1,7 @@
 "use client";
 
+import { scopedTaskFetch } from "@/lib/client-auth";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { pickTaskSurvey } from "@/lib/survey-schedule";
 import {
@@ -41,7 +43,7 @@ export default function SurveyResultsSection({ classId, assignmentId }: Props) {
     const q = `classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`;
     const json = async <T,>(url: string): Promise<T | null> => {
       try {
-        const res = await fetch(url);
+        const res = await scopedTaskFetch({ classId, assignmentId }, url);
         return res.ok ? ((await res.json()) as T) : null;
       } catch {
         return null;

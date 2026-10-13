@@ -1,5 +1,7 @@
 "use client";
 
+import { scopedTaskFetch } from "@/lib/client-auth";
+
 import { useCallback, useEffect, useState } from "react";
 import { pickTaskSurvey, resolveSurveyStatus, validateSchedule } from "@/lib/survey-schedule";
 import type { Survey, SurveyItem, SurveyStatus } from "@/lib/types";
@@ -154,7 +156,7 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
     setLoadingList(true);
     setError(null);
     try {
-      const res = await fetch(
+      const res = await scopedTaskFetch({ classId, assignmentId },
         `/api/surveys?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`,
       );
       if (!res.ok) throw new Error(`Failed to load surveys (${res.status}).`);
@@ -292,7 +294,7 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/surveys", {
+      const res = await scopedTaskFetch({ classId, assignmentId }, "/api/surveys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -350,7 +352,7 @@ export default function SurveyBuilderView({ classId, assignmentId }: Props) {
     setPublishing(true);
     setError(null);
     try {
-      const res = await fetch("/api/surveys/publish", {
+      const res = await scopedTaskFetch({ classId, assignmentId }, "/api/surveys/publish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

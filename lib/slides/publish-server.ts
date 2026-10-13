@@ -5,7 +5,7 @@ import { localMaterialStorageEnabled, localMaterialUrl, storeLocalMaterial } fro
 import { workspaceGet, workspacePut } from "../workspace-store";
 import { listPublishedContent, upsertContentPublish } from "../nosql";
 import { authorizeSlideAccess, authorizeSlides, requestDraft, slideContext, SlideRequestError } from "./server";
-import { isPublishedSlideManifest, isPublishedSlideReference, isSlidePublicationId, projectPublishedSlides,
+import { isPublishedSlideManifest, isPublishedSlideReference, isSlidePublicationId, projectPublishedSlides, publishedSlideManifestKey,
   type PublishedSlideManifest, type PublishedSlideResponse, type SlideAssetDimensions } from "./publication";
 
 export const MAX_SLIDE_PUBLICATION_BYTES = 4_400_000;
@@ -101,15 +101,29 @@ async function startPublication(context: Context, body: Record<string, unknown>,
   const draft = requestDraft(body.draft, strategy);
   if (!record(body.assets) || Object.keys(body.assets).length !== draft.visuals.length) throw new SlideRequestError("Provide dimensions for every current slide image.", 422);
   const dimensions: SlideAssetDimensions = {};
+  const digests: Record<string, string> = {};
   for (const visual of draft.visuals) {
     const asset = body.assets[visual.id];
-    if (!record(asset) || Object.keys(asset).some(key => !["width", "height"].includes(key)) || !dimension(asset.width) || !dimension(asset.height)) throw new SlideRequestError(`Generate the current ${visual.id} image before publishing.`, 422);
+    if (!record(asset) || Object.keys(asset).some(key => !["width", "height", "digest"].includes(key)) || !dimension(asset.width) || !dimension(asset.height)
+      || (asset.digest !== undefined && (typeof asset.digest !== "string" || !/^[a-f0-9]{64}$/u.test(asset.digest)))) throw new SlideRequestError(`Generate the current ${visual.id} image before publishing.`, 422);
     dimensions[visual.id] = { width: asset.width, height: asset.height };
+    if (typeof asset.digest === "string") digests[visual.id] = asset.digest;
   }
   let manifest: PublishedSlideManifest;
   try { manifest = projectPublishedSlides({ id: body.deckId, lessonNumber: Number(body.lessonNumber), strategy, draft,
     assets: Object.fromEntries(Object.entries(dimensions).map(([id, size]) => [id, { ...size, data: "" }])) }); }
   catch (error) { throw new SlideRequestError(error instanceof Error ? error.message : "Check the current slides before publishing.", 422); }
+  // A commit can succeed even when its HTTP acknowledgement is lost. Preserve
+  // that publication ID on a manual retry so student progress is not reset.
+  if (Object.keys(digests).length === draft.visuals.length) {
+    const current = await publicationStatus(context, body.deckId, ownerId);
+    if (current.published && publishedSlideManifestKey(current.manifest) === publishedSlideManifestKey(manifest)
+      && Object.keys(current.assets).length === draft.visuals.length
+      && draft.visuals.every(({ id }) => current.assets[id]?.digest === digests[id]
+        && current.assets[id].width === dimensions[id].width && current.assets[id].height === dimensions[id].height)) {
+      return { alreadyPublished: true, publicationId: current.publicationId, contentItemId: current.contentItemId, slides: current.slides };
+    }
+  }
   // Fail before creating a staging ticket if durable image storage is absent.
   if (!localMaterialStorageEnabled()) { const { client } = storage(); client.destroy(); }
   const id = randomUUID();
@@ -192,6 +206,36 @@ export async function writeSlidePublication(request: Request, body: Record<strin
   if (body.operation === "asset") return storeAsset(request, context, body, context.userId);
   if (body.operation === "commit") return commitPublication(context, body, context.userId);
   throw new SlideRequestError("Choose a slide publication operation.");
+}
+
+/** Teacher-only status for recovering publication state after a refresh. The
+ * response contains student-facing content and hashes, never original prompts. */
+export async function readSlidePublicationStatus(request: Request) {
+  const query = new URL(request.url).searchParams;
+  const context = await authorizeSlides(request, { classId: query.get("classId"), assignmentId: query.get("assignmentId") });
+  const deckId = query.get("deckId");
+  if (!deckId || !/^[A-Za-z0-9_-]{1,160}$/u.test(deckId)) throw new SlideRequestError("Choose a valid slide draft.");
+  return publicationStatus(context, deckId, context.userId);
+}
+
+async function publicationStatus(context: Context, deckId: string, ownerId: string) {
+  const items = await listPublishedContent(context.classId, context.assignmentId);
+  for (const item of items) {
+    if (!item.published || ![context.classId, `CLASS#${context.classId}`].includes(item.class_id)
+      || item.assignment_id !== context.assignmentId || item.content_item_id !== `slides-${deckId}`) continue;
+    let content: unknown;
+    try { content = JSON.parse(item.content_json); } catch { continue; }
+    if (!record(content) || content.type !== "Slides" || !isPublishedSlideReference(content.slides)) continue;
+    const publication = await workspaceGet<Publication>(partition(context.classId), publicationKey(content.slides.publicationId));
+    if (!publication || publication.ownerId !== ownerId || publication.classId !== context.classId
+      || publication.assignmentId !== context.assignmentId || publication.deckId !== deckId
+      || !["ready", "published"].includes(publication.state) || !isPublishedSlideManifest(publication.manifest)
+      || content.slides.slideCount !== publication.manifest.pages.length || content.slides.lessonNumber !== publication.manifest.lessonNumber) continue;
+    const assets = await publicationAssets(publication);
+    return { published: true as const, ...committed(publication), manifest: publication.manifest,
+      assets: Object.fromEntries(assets.map(asset => [asset.visualId, { width: asset.width, height: asset.height, digest: asset.digest }])) };
+  }
+  return { published: false as const };
 }
 
 export async function readSlidePublication(request: Request): Promise<PublishedSlideResponse> {

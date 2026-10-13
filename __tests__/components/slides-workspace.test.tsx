@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({ fetch: vi.fn(), download: vi.fn(), decode: vi.
 vi.mock("@/lib/slides/export", () => ({ downloadPresentation: mocks.download, decodeSlideAsset: mocks.decode }));
 vi.mock("@/lib/slides/draft-storage", async importOriginal => ({ ...await importOriginal<object>(), loadSlideDraft: mocks.load, saveSlideDraft: mocks.save }));
 vi.mock("@/lib/slides/publish-client", () => ({ publishSlideDeck: mocks.publish }));
+vi.mock("@/lib/slides/publication-status", async original => ({ ...await original<object>(), isSlideDeckPublished: vi.fn().mockResolvedValue(false) }));
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "@/app/components/SlidesWorkspace";
 const user: UserContext = { geniusId: "teacher", userId: "teacher", name: "Teacher", email: null, role: "teacher", classId: "ea-class-a", assignmentId: "ea-task-a" };
 const reply = (data: unknown, ok = true) => ({ ok, json: async () => data });
@@ -92,6 +93,8 @@ it("keeps the published deck identity through AI revision and creates a new item
   fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
   await screen.findByRole("button", { name: "Published" });
   const originalId = mocks.publish.mock.calls[0][0].id;
+  const revised = slideFixture("analogy"); revised.slides[0].title = "A clearer opening";
+  mocks.fetch.mockResolvedValueOnce(reply({ draft: revised }));
   fireEvent.change(screen.getByLabelText("Revision request"), { target: { value: "Clarify the opening." } });
   fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
   await screen.findByText("5 slides ready to send.");

@@ -52,3 +52,14 @@ describe("resolveQuizEvidence", () => {
     });
   });
 });
+
+describe("current curriculum slide focus", () => {
+  it.each(["analogy", "cognitive conflict", "experience bridging"] as const)("keeps %s on the current camp topic instead of a numbered lesson's old example", async strategy => {
+    const { slidePrompt } = await import("@/lib/slides/prompts");
+    const context = JSON.parse(slidePrompt(getLessonGenerationContext(8)!, strategy).user);
+    expect(context.referenceVariables.TOPIC).toContain("superball, a clay ball, and a steel ball");
+    expect(context.referenceVariables.TARGET_CONCEPT).toBe("Conservation of energy and energy transfer (PS3.B)");
+    expect(context.lessonFocus).not.toContain("cart-launcher");
+    expect(context.lessonFocus).toContain("Do not invent observations or measurements");
+  });
+});

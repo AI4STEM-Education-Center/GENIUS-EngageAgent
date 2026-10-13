@@ -1,5 +1,7 @@
 "use client";
 
+import { scopedTaskFetch } from "@/lib/client-auth";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SurveyResultsSection from "./SurveyResultsSection";
 import Link from "next/link";
@@ -126,13 +128,13 @@ export default function TeacherDashboardView({ user }: Props) {
 
     try {
       const [quizResult, answersResult, cacheResult, publishedResult, ratingsResult, mediaResult, reviewQuestionsResult] = await Promise.allSettled([
-        fetch(`/api/quiz-status?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
-        fetch(`/api/student-answers?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
-        fetch(`/api/strategy-cache?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
-        fetch(`/api/content-publish?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
-        fetch(`/api/content-rating?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
-        fetch(`/api/media?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=cohort`),
-        fetch(`/api/review-questions?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
+        scopedTaskFetch({ classId, assignmentId }, `/api/quiz-status?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
+        scopedTaskFetch({ classId, assignmentId }, `/api/student-answers?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
+        scopedTaskFetch({ classId, assignmentId }, `/api/strategy-cache?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
+        scopedTaskFetch({ classId, assignmentId }, `/api/content-publish?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
+        scopedTaskFetch({ classId, assignmentId }, `/api/content-rating?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
+        scopedTaskFetch({ classId, assignmentId }, `/api/media?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=cohort`),
+        scopedTaskFetch({ classId, assignmentId }, `/api/review-questions?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`),
       ]);
 
       // A failed refresh must not turn previously received feedback into zero

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as quizData from "@/lib/quiz-data";
 import { getLessonGenerationContext, getStrategyContext } from "@/lib/lesson-context";
 import { buildMaterialImageInstructions, buildMaterialPrompt, MATERIAL_REVIEW_INSTRUCTIONS, MATERIAL_CONTACT_PLAUSIBILITY_CHECKS, MATERIAL_STRATEGY_REVISION, materialReviewInstructions } from "@/lib/material-prompts";
 import { materialOutputFormat } from "@/lib/material-output-schema";
@@ -10,14 +11,31 @@ const strategies = ["cognitive conflict", "experience bridging"] as const;
 const prompt = (strategy: string) => buildMaterialPrompt(getLessonGenerationContext(3)!, getStrategyContext(strategy));
 
 describe("CC/EB student inquiry refinement", () => {
-  it("leaves the existing analogy generation, schema and image prompt byte-identical", () => {
+  it("keeps the analogy prompt contract byte-identical for its fixed reference curriculum", () => {
     // Snapshot taken immediately before this scoped CC/EB change. All eight
     // curricula are included so a shared-constant edit cannot silently leak in.
+    // Lesson 8's live curriculum changed for camp on 2026-10-13. This prompt
+    // regression uses its original reference context, not a mutable curriculum.
+    const referenceContexts = Array.from({ length: 8 }, (_, index) => getLessonGenerationContext(index + 1)!);
+    referenceContexts[7] = {
+      lessonNumber: 8,
+      lessonTitle: "Lesson 8",
+      learningObjective: "Students will construct comprehensive system models and annotate free-body diagrams to map the continuous transformation of energy and account for macroscopic energy dissipation via secondary contact forces.",
+    };
+    const originalGetLesson = quizData.getLesson;
+    const curriculum = vi.spyOn(quizData, "getLesson").mockImplementation(number => {
+      const value = originalGetLesson(number);
+      return number !== 8 || !value ? value : { ...value, topic: undefined, target_concept: undefined,
+        learning_objective: referenceContexts[7].learningObjective,
+        core_ideas: ["The more force you apply to an object the more that object speeds up.", "It takes more force to speed up a more massive object the same amount as a lower mass object.", "Potential energy can be stored in some systems when you change the shape or arrangement of parts in that system (e.g., a spring).", "Contact forces transfer energy between different objects or subsystems within the larger cart-launcher system."],
+      };
+    });
     const analogySnapshot = {
-      prompts: Array.from({ length: 8 }, (_, index) => buildMaterialPrompt(getLessonGenerationContext(index + 1)!, getStrategyContext("analogy"))),
+      prompts: referenceContexts.map(lesson => buildMaterialPrompt(lesson, getStrategyContext("analogy"))),
       schema: materialOutputFormat("analogy"),
       image: buildMaterialImageInstructions({ strategy: "analogy", activity: analogyActivity }),
     };
+    curriculum.mockRestore();
     expect(createHash("sha256").update(JSON.stringify(analogySnapshot)).digest("hex")).toBe("a245895f0a2867a14b02a3e547c259b5eb4e1a75fdbaa263791adbb6360327a6");
   });
 
@@ -88,11 +106,11 @@ describe("CC/EB student inquiry refinement", () => {
     expect(item.activity.required).toEqual(strategy === "cognitive conflict" ? ["version", "observedOutcome", "stages", "image"] : ["version", "stages", "image"]);
   });
 
-  it.each(strategies)("preserves Lesson 8 energy-system meaning without forcing unfamiliar apparatus for %s", strategy => {
+  it.each(strategies)("uses the current Lesson 8 camp target instead of obsolete apparatus for %s", strategy => {
     const generation = buildMaterialPrompt(getLessonGenerationContext(8)!, getStrategyContext(strategy));
-    expect(generation.user).toContain("stored energy being released and transferred");
-    expect(generation.user).toContain("cart-launcher is an example, not a compulsory learner experience");
-    expect(generation.user).toContain("Do not substitute a generic braking/sliding story that omits stored-energy release");
+    expect(generation.user).toContain("superball, a clay ball, and a steel ball");
+    expect(generation.user).toContain("Conservation of energy and energy transfer (PS3.B)");
+    expect(generation.user).toContain("Older numbered-lesson examples and quiz misconceptions are background evidence");
     expect(generation.user).not.toContain("Focus on the FULL cart-launcher system");
   });
 

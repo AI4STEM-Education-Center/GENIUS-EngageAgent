@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import type { UserContext } from "@/lib/auth";
 import StudentQuizView from "./StudentQuizView";
 import StudentContentReviewView from "./StudentContentReviewView";
@@ -13,19 +14,13 @@ import {
   type StudentViewStepId,
 } from "@/lib/student-progress";
 import type { ActivityStatus } from "@/lib/activity-status";
-import { notifyTaskCompleted } from "@/lib/genius-notify";
+import { notifyTaskCompleted, notifyTaskReopened } from "@/lib/genius-notify";
 
 type Props = {
   user: UserContext;
 };
 
 const STATUS_POLL_MS = 15000;
-
-const INITIAL_PROGRESS: Record<StudentStepId, StepProgress> = {
-  assessment: { kind: "not-available" },
-  "content-review": { kind: "not-available" },
-  "content-rating": { kind: "not-available" },
-};
 
 const INITIAL_SERVER_STATUS: Record<StudentStepId, ActivityStatus> = {
   assessment: "locked",
@@ -35,10 +30,8 @@ const INITIAL_SERVER_STATUS: Record<StudentStepId, ActivityStatus> = {
 
 // The server (`/api/activity-status`, backed by `lib/activity-status.ts`) is
 // the source of truth for whether a step is locked, since it alone knows the
-// real cross-step dependencies (e.g. content-rating requires content-review
-// to be complete). Child self-reports via `onProgress` are only trusted to
-// flip an already-unlocked step to "completed" instantly, without waiting on
-// a server round trip.
+// real cross-step dependencies and newly published material. Child progress
+// reports request an immediate refresh; they never override newer server status.
 //
 // The stepper only shows two steps to students -- Content Review and
 // Material Rating are grouped into one "Explore and ask" step (Material
@@ -50,11 +43,10 @@ const INITIAL_SERVER_STATUS: Record<StudentStepId, ActivityStatus> = {
 // and must not re-lock the whole step once content-review itself is open.
 function buildDisplayStates(
   serverStatus: Record<StudentStepId, ActivityStatus>,
-  progress: Record<StudentStepId, StepProgress>,
 ): Record<StudentViewStepId, StepDisplayState> {
   const activityStatusFor = (id: StudentStepId) => {
     if (serverStatus[id] === "locked") return "locked" as const;
-    if (serverStatus[id] === "completed" || progress[id].kind === "completed") return "completed" as const;
+    if (serverStatus[id] === "completed") return "completed" as const;
     return "active" as const;
   };
 
@@ -77,9 +69,8 @@ function buildDisplayStates(
   return result;
 }
 
-export default function StudentView({ user }: Props) {
+function StudentWorkspace({ user }: Props) {
   const [activeStep, setActiveStep] = useState<StudentViewStepId>("assessment");
-  const [progress, setProgress] = useState<Record<StudentStepId, StepProgress>>(INITIAL_PROGRESS);
   const [serverStatus, setServerStatus] = useState<Record<StudentStepId, ActivityStatus>>(INITIAL_SERVER_STATUS);
   const activeStepRef = useRef(activeStep);
   useEffect(() => {
@@ -120,8 +111,8 @@ export default function StudentView({ user }: Props) {
   // The previous poll's statuses (null before the first one), so auto-advance
   // can tell a step that *just* unlocked from one that was already open.
   const prevServerStatusRef = useRef<Record<StudentStepId, ActivityStatus> | null>(null);
-  // Status is polled, so only report completion to GENIUS once per page load.
-  const notifiedCompletionRef = useRef(false);
+  // Notify once per completion transition; a new publication can reopen work.
+  const notifiedCompletionRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     if (!classId || !assignmentId || !studentId) return;
@@ -131,6 +122,7 @@ export default function StudentView({ user }: Props) {
       try {
         const res = await fetch(
           `/api/activity-status?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=${encodeURIComponent(studentId)}`,
+          { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" },
         );
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as { activities?: { id: StudentStepId; status: ActivityStatus }[] };
@@ -146,6 +138,10 @@ export default function StudentView({ user }: Props) {
 
         // The last real job is Material Rating -- report task completion to
         // GENIUS once it's done, not at quiz submission (#98).
+        if (next["content-rating"] !== "completed" && notifiedCompletionRef.current !== false) {
+          notifiedCompletionRef.current = false;
+          notifyTaskReopened(classId, assignmentId, user.geniusId);
+        }
         if (next["content-rating"] === "completed" && !notifiedCompletionRef.current) {
           notifiedCompletionRef.current = true;
           notifyTaskCompleted(classId, assignmentId, user.geniusId);
@@ -177,7 +173,7 @@ export default function StudentView({ user }: Props) {
           }
         }
       } catch {
-        // Best-effort -- children's own onProgress callbacks still drive same-session UI.
+        // Leave the last verified status in place and retry on the next poll/focus.
       }
     })();
 
@@ -200,14 +196,13 @@ export default function StudentView({ user }: Props) {
   const reportProgress = useCallback((step: StudentStepId, next: StepProgress) => {
     if (lastReportedKindRef.current[step] === next.kind) return;
     lastReportedKindRef.current[step] = next.kind;
-    setProgress((prev) => ({ ...prev, [step]: next }));
     // Any transition (e.g. content-review seeing newly published material, or
     // a step completing) is a hint the server status changed -- re-poll now
     // rather than waiting for the next tick.
     setStatusRefreshToken((token) => token + 1);
   }, []);
 
-  const displayStates = buildDisplayStates(serverStatus, progress);
+  const displayStates = buildDisplayStates(serverStatus);
   const availableSteps = STUDENT_VIEW_STEPS.filter((step) => displayStates[step.id].status !== "locked");
 
   return (
@@ -255,4 +250,8 @@ export default function StudentView({ user }: Props) {
       </div>
     </div>
   );
+}
+
+export default function StudentView(props: Props) {
+  return <StudentWorkspace key={JSON.stringify([props.user.geniusId, props.user.classId, props.user.assignmentId])} {...props} />;
 }

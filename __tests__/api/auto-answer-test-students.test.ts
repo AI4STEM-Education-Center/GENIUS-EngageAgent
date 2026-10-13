@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// Route behavior below assumes an authorized request. Signed native/GENIUS
+// access and role isolation are exercised in workspace-access and embedded-workflow-access.
+vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null), workspaceRequestUser: vi.fn(async () => ({ role: "teacher" })) }));
+
 import { POST } from "@/app/api/auto-answer-test-students/route";
 import type { Lesson } from "@/lib/types";
 

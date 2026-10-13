@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import MaterialActivityView from "./MaterialActivityView";
 import PublishedSlidesReader from "./PublishedSlidesReader";
 import type { UserContext } from "@/lib/auth";
@@ -39,7 +40,7 @@ const getContentModeLabels = (item: ContentItem) => {
   return item.type ? [item.type] : [];
 };
 
-export default function StudentContentReviewView({
+function ContentReview({
   user,
   onProgress,
   ratingUnlocked = false,
@@ -48,6 +49,7 @@ export default function StudentContentReviewView({
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [media, setMedia] = useState<Record<string, SharedContentMedia>>({});
   const [loading, setLoading] = useState(true);
+  const contentRequest = useRef(0);
   const [error, setError] = useState<string | null>(null);
 
   const [submittedQuestions, setSubmittedQuestions] = useState<string[] | null>(null);
@@ -81,14 +83,17 @@ export default function StudentContentReviewView({
     if (!silent) {
       setLoading(true);
     }
+    const requestNumber = ++contentRequest.current;
 
     try {
       const [pubRes, mediaRes] = await Promise.all([
         fetch(
           `/api/content-publish?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`,
+          { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" },
         ),
         fetch(
           `/api/media?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=cohort`,
+          { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" },
         ),
       ]);
 
@@ -105,15 +110,14 @@ export default function StudentContentReviewView({
         mediaData.results ?? [],
       );
 
+      if (requestNumber !== contentRequest.current) return;
       setContentItems(publishedState.contentItems);
       setMedia(publishedState.mediaByItemId);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load content.");
+      if (requestNumber === contentRequest.current) setError(err instanceof Error ? err.message : "Failed to load content.");
     } finally {
-      if (!silent) {
-        setLoading(false);
-      }
+      if (requestNumber === contentRequest.current) setLoading(false);
     }
   }, [assignmentId, classId]);
 
@@ -123,6 +127,7 @@ export default function StudentContentReviewView({
     try {
       const res = await fetch(
         `/api/review-questions?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=${encodeURIComponent(user.userId)}`,
+        { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" },
       );
       if (!res.ok) return;
       const data = (await res.json()) as { reviewQuestions?: { questions?: string[] }[] };
@@ -141,6 +146,7 @@ export default function StudentContentReviewView({
     try {
       const res = await fetch(
         `/api/content-rating?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&studentId=${encodeURIComponent(user.userId)}`,
+        { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" },
       );
       if (!res.ok) return;
       const data = (await res.json()) as { ratings?: { content_item_id: string; rating: number }[] };
@@ -148,8 +154,8 @@ export default function StudentContentReviewView({
       for (const r of data.ratings ?? []) {
         existing[r.content_item_id] = r.rating;
       }
-      setRatings(existing);
-      setSavedRatings(existing);
+      setRatings((current) => ({ ...current, ...existing }));
+      setSavedRatings((current) => ({ ...current, ...existing }));
     } catch {
       // Rating history is best-effort and should not block content rendering.
     }
@@ -168,6 +174,8 @@ export default function StudentContentReviewView({
 
     const refreshContent = () => {
       void loadPublishedContent(true);
+      void loadOwnQuestions();
+      void loadRatings();
     };
 
     const intervalId = window.setInterval(refreshContent, 15000);
@@ -185,7 +193,7 @@ export default function StudentContentReviewView({
       window.removeEventListener("focus", refreshContent);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [assignmentId, classId, loadPublishedContent]);
+  }, [assignmentId, classId, loadPublishedContent, loadOwnQuestions, loadRatings]);
 
   // Reviewing this step is complete once the student has submitted at
   // least one question about the material (per team decision, 2026-09-18 —
@@ -242,7 +250,7 @@ export default function StudentContentReviewView({
     try {
       const res = await fetch("/api/review-questions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...scopedClientAuthHeaders({ classId, assignmentId }) },
         body: JSON.stringify({
           classId,
           assignmentId,
@@ -289,7 +297,7 @@ export default function StudentContentReviewView({
         try {
           const res = await fetch("/api/content-rating", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...scopedClientAuthHeaders({ classId, assignmentId }) },
             body: JSON.stringify({
               classId,
               assignmentId,
@@ -411,7 +419,7 @@ export default function StudentContentReviewView({
                 </div>
                 <p className="mt-3 text-base font-semibold text-slate-900">{item.title}</p>
                 {item.slides && classId && assignmentId ? (
-                  <PublishedSlidesReader classId={classId} assignmentId={assignmentId} publicationId={item.slides.publicationId} audience="student" onQuestion={focusQuestions} />
+                  <PublishedSlidesReader classId={classId} assignmentId={assignmentId} publicationId={item.slides.publicationId} audience="student" learnerId={user.geniusId} onQuestion={focusQuestions} />
                 ) : item.activity ? (
                   <MaterialActivityView activity={item.activity} media={itemMedia} questionInput={false} />
                 ) : <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600">{item.body}</p>}
@@ -572,4 +580,8 @@ export default function StudentContentReviewView({
       </div>
     </div>
   );
+}
+
+export default function StudentContentReviewView(props: Props) {
+  return <ContentReview key={JSON.stringify([props.user.geniusId, props.user.classId, props.user.assignmentId])} {...props} />;
 }

@@ -8,6 +8,7 @@ import { sixStepDeck, sixStepDraft, tinyJpeg } from "../fixtures/analogy-six-ste
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), decode: vi.fn(), download: vi.fn(), load: vi.fn(), save: vi.fn() }));
 vi.mock("@/lib/slides/draft-storage", async importOriginal => ({ ...await importOriginal<object>(), loadSlideDraft: mocks.load, saveSlideDraft: mocks.save }));
 vi.mock("@/lib/slides/export", () => ({ downloadPresentation: mocks.download, decodeSlideAsset: mocks.decode }));
+vi.mock("@/lib/slides/publication-status", async original => ({ ...await original<object>(), isSlideDeckPublished: vi.fn().mockResolvedValue(false) }));
 import SlidesWorkspace from "@/app/components/SlidesWorkspace";
 
 const user: UserContext = { geniusId: "teacher", userId: "teacher", name: "Teacher", email: null, role: "teacher", classId: "ea-class-a", assignmentId: "ea-task-a" };
