@@ -36,6 +36,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
   // The learning task's survey is part of the same task as the quiz (#107, #111):
   // its questions follow the quiz questions and share one submit button.
   const [survey, setSurvey] = useState<Survey | null>(null);
+  const surveyDrafts = useRef<Record<string, Record<string, string>>>({});
   const [surveyAnswers, setSurveyAnswers] = useState<Record<string, string>>({});
   const [surveySubmitted, setSurveySubmitted] = useState(false);
   const [surveyNote, setSurveyNote] = useState<string | null>(null);
@@ -116,7 +117,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
             setSurveySubmitted(true);
           } else if (availability.open) {
             setSurvey(taskSurvey);
-            setSurveyAnswers(own?.answers ?? {});
+            setSurveyAnswers({ ...own?.answers, ...surveyDrafts.current[taskSurvey.survey_id] });
           } else if (availability.reason !== "draft") {
             // Scheduled or closed: mention it, but don't hold up the quiz.
             setSurveyNote(availability.message);
@@ -189,6 +190,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
 
   const handleSurveyAnswer = (fieldId: string, value: string) => {
     if (surveySubmitted) return;
+    if (survey) surveyDrafts.current[survey.survey_id] = { ...surveyDrafts.current[survey.survey_id], [fieldId]: value };
     setSurveyAnswers((prev) => ({ ...prev, [fieldId]: value }));
   };
 
@@ -244,7 +246,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(
-            `Your quiz answers were saved, but the survey answers didn't go through${
+            `${quizStatus?.status === "published" ? "Your quiz answers were saved, but the survey answers" : "Your survey answers"} didn't go through${
               data.error ? ` (${data.error})` : ""
             }. Please try again.`,
           );

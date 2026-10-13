@@ -15,6 +15,12 @@ beforeEach(() => {
 it("keeps published materials-only assignments available without manufacturing a quiz requirement", async () => {
   expect(await computeActivityStatuses("class", "task", "student")).toEqual({ assessment: "locked", "content-review": "completed", "content-rating": "completed" });
 });
+it("requires an open survey-only assessment before exploration and completes it after submission", async () => {
+  store.listSurveys.mockResolvedValue([{ survey_id: "survey-a", status: "published", updated_at: "2026-10-13" }]);
+  expect(await computeActivityStatuses("class", "task", "student")).toEqual({ assessment: "available", "content-review": "locked", "content-rating": "locked" });
+  store.listSurveyResponses.mockResolvedValue([{ status: "submitted" }]);
+  expect(await computeActivityStatuses("class", "task", "student")).toEqual({ assessment: "completed", "content-review": "completed", "content-rating": "completed" });
+});
 it("requires a published pre-assessment before materials, even when old questions and ratings exist", async () => {
   store.getQuizStatus.mockResolvedValue({ status: "published", lesson_number: 8 });
   expect(await computeActivityStatuses("class", "task", "student")).toEqual({ assessment: "available", "content-review": "locked", "content-rating": "locked" });
