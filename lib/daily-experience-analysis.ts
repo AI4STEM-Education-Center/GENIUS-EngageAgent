@@ -1,11 +1,9 @@
-import type { SurveyResponse } from "./types";
-
 /**
  * Daily-experience analysis of survey responses (#114).
  *
- * Pipeline: anonymize submitted responses -> LLM extracts each student's
- * activities -> LLM groups the free-text labels into categories -> the code
- * here counts and ranks them. Counting is deliberately done in code, not by
+ * Pipeline: LLM extracts each student's activities (from their answers only,
+ * with no name or id) -> LLM groups the free-text labels into categories ->
+ * the code here counts and ranks them. Counting is deliberately done in code, not by
  * the LLM, so the numbers teachers see are exact and testable.
  */
 
@@ -63,27 +61,6 @@ export type DailyExperienceSummary = {
 export const MIN_RESPONSES = 3;
 const MAX_OBJECTS = 5;
 const MAX_INCIDENTS = 3;
-
-export type AnonymizedResponse = { student: string; answers: Record<string, string> };
-
-/**
- * Keeps only submitted responses to the given survey and replaces student
- * identities with "S1", "S2", ... before anything is sent to the LLM. The
- * returned `idMap` (anonymous id -> student_id) stays on the server.
- */
-export const anonymizeResponses = (responses: SurveyResponse[], surveyId: string) => {
-  const submitted = responses
-    .filter((r) => r.survey_id === surveyId && r.status === "submitted")
-    .sort((a, b) => a.student_id.localeCompare(b.student_id));
-
-  const idMap: Record<string, string> = {};
-  const anonymized: AnonymizedResponse[] = submitted.map((r, i) => {
-    const student = `S${i + 1}`;
-    idMap[student] = r.student_id;
-    return { student, answers: r.answers };
-  });
-  return { anonymized, idMap };
-};
 
 /** Lowercases, trims, and strips punctuation so "Soccer!" and " soccer" match. */
 export const normalizeLabel = (value: string) =>
@@ -202,6 +179,11 @@ export type StudentAnalysis = {
  * by student_id for that reuse and is never returned to the browser.
  */
 export type SurveyAnalysisRecord = {
+  /**
+   * Version of the analysis pipeline that produced it. Records from an older
+   * version are re-analyzed from scratch (missing on records before v2).
+   */
+  analysis_version?: number;
   class_id: string;
   assignment_id: string;
   survey_id: string;

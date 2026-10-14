@@ -1,30 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateDailyExperiences,
-  anonymizeResponses,
   normalizeLabel,
   type StudentExtraction,
 } from "@/lib/daily-experience-analysis";
 import {
-  dailyExperienceResponses,
-  dailyExperienceSurvey,
   expectedExtractions,
   expectedGrouping,
 } from "../fixtures/daily-experience";
-
-describe("anonymizeResponses", () => {
-  it("keeps only submitted responses to the survey and replaces identities", () => {
-    const { anonymized, idMap } = anonymizeResponses(dailyExperienceResponses, dailyExperienceSurvey.survey_id);
-
-    expect(anonymized).toHaveLength(20);
-    expect(anonymized[0].student).toBe("S1");
-    expect(idMap.S1).toBe("student-01");
-    expect(idMap.S20).toBe("student-20");
-    expect(Object.values(idMap)).not.toContain("student-21"); // draft
-    expect(Object.values(idMap)).not.toContain("student-22"); // other survey
-    expect(JSON.stringify(anonymized)).not.toMatch(/student-\d|Student \d/);
-  });
-});
 
 describe("normalizeLabel", () => {
   it("ignores case, punctuation and extra spaces", () => {

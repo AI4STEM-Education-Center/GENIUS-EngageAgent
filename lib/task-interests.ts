@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { RankedActivity, SurveyAnalysisRecord } from "./daily-experience-analysis";
 import {
+  ANALYSIS_VERSION,
   DEFAULT_ANALYSIS_MODEL,
   isAnalysisStale,
   updateDailyExperienceAnalysis,
@@ -122,7 +123,11 @@ export const getTaskInterests = async (
       listSurveyResponses(classId, assignmentId, survey.survey_id),
       getSurveyAnalysis(classId, assignmentId, survey.survey_id),
     ]);
-    const current = previous?.daily_experience_topic === survey.daily_experience_topic ? previous : null;
+    const current =
+      previous?.daily_experience_topic === survey.daily_experience_topic &&
+      previous.analysis_version === ANALYSIS_VERSION
+        ? previous
+        : null;
     if (!isAnalysisStale(responses, survey.survey_id, current)) {
       return current ? toTaskInterests(current) : null;
     }
