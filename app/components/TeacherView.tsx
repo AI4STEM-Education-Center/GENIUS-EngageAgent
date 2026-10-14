@@ -5,6 +5,7 @@ import { scopedTaskFetch } from "@/lib/client-auth";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SurveyBuilderView from "./SurveyBuilderView";
+import ActivityContextSuggestion from "./ActivityContextSuggestion";
 import MaterialActivityView from "./MaterialActivityView";
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "./SlidesWorkspace";
 import PublishedSlidesList from "./PublishedSlidesList";
@@ -2003,6 +2004,17 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                 </div>
                 <p className="text-sm text-slate-600">{materialFormats.find((format) => format.id === materialFormat)?.description}</p>
               </fieldset>
+
+              {currentStep === 3 && isHydrated && hasAssignmentContext && (
+                <ActivityContextSuggestion
+                  key={materialWorkspace}
+                  classId={classId}
+                  assignmentId={assignmentId}
+                  context={classroomContext}
+                  onChange={setClassroomContext}
+                  disabled={generationBusy}
+                />
+              )}
 
               <label className="grid gap-2 text-sm font-semibold text-slate-700">
                 Classroom context (optional)
