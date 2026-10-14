@@ -57,7 +57,7 @@ it("loads the scoped suggestion without selecting it or changing teacher text", 
 it("appends factual context only on opt-in, prevents duplicates, and allows removal and re-adding", async () => {
   const initial = "  Grade 8; preserve my spacing.\n";
   render(<Controlled initialContext={initial} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Use top activity" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Use top activity (optional)" }));
   const context = screen.getByRole("textbox") as HTMLTextAreaElement;
   expect(context.value.startsWith(`${initial}\n\nSurvey context:`)).toBe(true);
   expect(context.value).toContain('this task\'s survey on "Sports and hobbies"');
@@ -70,7 +70,7 @@ it("appends factual context only on opt-in, prevents duplicates, and allows remo
   fireEvent.click(added);
   expect(onChange).toHaveBeenCalledTimes(1);
   fireEvent.change(context, { target: { value: initial } });
-  const useAgain = screen.getByRole("button", { name: "Use top activity" }) as HTMLButtonElement;
+  const useAgain = screen.getByRole("button", { name: "Use top activity (optional)" }) as HTMLButtonElement;
   expect(useAgain.disabled).toBe(false);
   fireEvent.click(useAgain);
   expect(onChange).toHaveBeenCalledTimes(2);
@@ -80,7 +80,7 @@ it("appends factual context only on opt-in, prevents duplicates, and allows remo
 it("does not truncate teacher input when the appended paragraph would exceed 1200 characters", async () => {
   const initial = "A".repeat(1150);
   render(<Controlled initialContext={initial} />);
-  const button = await screen.findByRole("button", { name: "Use top activity" }) as HTMLButtonElement;
+  const button = await screen.findByRole("button", { name: "Use top activity (optional)" }) as HTMLButtonElement;
   expect(button.disabled).toBe(true);
   expect(screen.getByRole("status").textContent).toContain("not enough space");
   fireEvent.click(button);
@@ -103,7 +103,7 @@ it("ignores an old task's delayed response and aborts its request when task scop
   expect(oldSignal.aborted).toBe(true);
   await act(async () => { resolveOld(reply({ interests })); });
   expect(screen.queryByText("Soccer")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Use top activity" }));
+  fireEvent.click(screen.getByRole("button", { name: "Use top activity (optional)" }));
   expect(onChange.mock.calls[0][0]).toContain("mentioned Cooking");
   expect(onChange.mock.calls[0][0]).not.toContain("Soccer");
 });
@@ -116,7 +116,7 @@ it.each([
   fetchMock.mockResolvedValueOnce(reply({ interests: result }));
   render(<Controlled />);
   expect(await screen.findByText(new RegExp(message))).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Use top activity" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Use top activity (optional)" })).toBeNull();
   expect(screen.getByRole("button", { name: "Refresh suggestion" })).toBeTruthy();
   expect(onChange).not.toHaveBeenCalled();
 });
@@ -135,7 +135,7 @@ it("labels stale analysis in both the suggestion and the context selected by the
   fetchMock.mockResolvedValueOnce(reply({ interests: { ...interests, stale: true } }));
   render(<Controlled />);
   expect(await screen.findByText(/Last available analysis: newer responses/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Use top activity" }));
+  fireEvent.click(screen.getByRole("button", { name: "Use top activity (optional)" }));
   expect(onChange.mock.calls[0][0]).toContain("Survey context (last available analysis)");
 });
 
@@ -153,7 +153,7 @@ it.each([false, true])("keeps an opted-in activity added after updated counts an
   fetchMock.mockResolvedValueOnce(reply({ interests: { ...interests, stale } }));
   const manualContext = "Grade 8. Students may mention Soccer.";
   render(<Controlled initialContext={manualContext} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Use top activity" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Use top activity (optional)" }));
   const context = screen.getByRole("textbox") as HTMLTextAreaElement;
   const original = context.value;
 
@@ -172,7 +172,7 @@ it.each([false, true])("keeps an opted-in activity added after updated counts an
   // Removing the generated paragraph allows an explicit choice of the new
   // analysis. A teacher's ordinary mention of the same activity is not a match.
   fireEvent.change(context, { target: { value: manualContext } });
-  const useAgain = screen.getByRole("button", { name: "Use top activity" }) as HTMLButtonElement;
+  const useAgain = screen.getByRole("button", { name: "Use top activity (optional)" }) as HTMLButtonElement;
   expect(useAgain.disabled).toBe(false);
   fireEvent.click(useAgain);
   expect(onChange).toHaveBeenCalledTimes(2);
@@ -198,7 +198,7 @@ it("recognizes a previously saved selection with literal punctuation after a new
 
 it("honors the disabled state and cancels an unfinished request on unmount", async () => {
   const { unmount } = render(<Controlled disabled />);
-  const useButton = await screen.findByRole("button", { name: "Use top activity" }) as HTMLButtonElement;
+  const useButton = await screen.findByRole("button", { name: "Use top activity (optional)" }) as HTMLButtonElement;
   expect(useButton.disabled).toBe(true);
   expect((screen.getByRole("button", { name: "Refresh suggestion" }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(useButton);

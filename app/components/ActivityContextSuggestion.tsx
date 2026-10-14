@@ -69,8 +69,8 @@ export default function ActivityContextSuggestion({ classId, assignmentId, conte
     <section aria-label="Survey activity suggestion" className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-900">Use this activity in your next generation?</h3>
-          <p className="mt-1 text-sm text-slate-600">Use top activity adds survey details to the editable Classroom context below. They will be used the next time you select Generate materials.</p>
+          <h3 className="text-sm font-semibold text-slate-900">Use this activity in your next generation? (optional)</h3>
+          <p className="mt-1 text-sm text-slate-600">Use top activity adds survey details to the editable Classroom context below. They will be used the next time you select Generate materials. You can generate materials without adding this activity.</p>
         </div>
         {hasScope && !error && <button type="button" onClick={() => void load()} disabled={loading || disabled}
           className="shrink-0 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 disabled:opacity-50">
@@ -99,7 +99,7 @@ export default function ActivityContextSuggestion({ classId, assignmentId, conte
         <button type="button" disabled={disabled || added || nextContext === null}
           onClick={() => { if (!disabled && !added && nextContext !== null) onChange(nextContext); }}
           className="rounded-full bg-[#BA0C2F] px-4 py-2 text-sm font-semibold text-white hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-300">
-          {added ? "Activity added" : "Use top activity"}
+          {added ? "Activity added" : "Use top activity (optional)"}
         </button>
         {added && <p className="text-xs text-slate-500">You can edit or remove the added paragraph in Classroom context below.</p>}
         {!added && nextContext === null && <p role="status" className="text-sm text-amber-700">There is not enough space to add this suggestion: it needs {paragraph.length} characters and {remaining} remain. Shorten the classroom context or add the relevant details yourself. Your existing text will be preserved.</p>}
