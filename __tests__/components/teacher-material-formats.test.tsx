@@ -336,6 +336,54 @@ it("preserves teacher-supplied experience context for this task and sends it for
   expect(JSON.parse(postCalls("/api/engagement-content")[0][1].body).classroomContext).toBe(context);
 });
 
+it("uses the survey's top activity only after teacher opt-in, preserving it for both material formats and reload", async () => {
+  const manualContext = "Grade 8; keep the language accessible.";
+  seedDraft({ currentStep: 2, selectedStrategies: ["experience bridging"], classroomContext: manualContext });
+  const originalFetch = mocks.fetch.getMockImplementation()!;
+  mocks.fetch.mockImplementation(async (input: string, init?: RequestInit) => input.startsWith("/api/survey-analysis?") ? reply({ interests: {
+    classId: user.classId, assignmentId: user.assignmentId, surveyId: "survey-soccer",
+    dailyExperienceTopic: "Collisions in familiar activities", analyzedAt: "2026-10-14T12:00:00Z",
+    responseCount: 5, unclassifiedCount: 0, enoughResponses: true, stale: false,
+    top: [{ activity: "Soccer", category: "Sports", studentCount: 4, doCount: 3, watchedCount: 1, objects: ["ball", "goal"], incidents: ["A ball bounced off a goalpost."] }],
+    activities: [],
+  } }) : originalFetch(input, init));
+
+  const view = render(<TeacherView user={user} />);
+  const continueButton = await screen.findByRole("button", { name: "Continue to material generation" });
+  expect(mocks.fetch.mock.calls.some(([input]) => input.startsWith("/api/survey-analysis?"))).toBe(false);
+  fireEvent.click(continueButton);
+  const useActivity = await screen.findByRole("button", { name: "Use top activity" });
+  const contextField = screen.getByRole("textbox", { name: "Classroom context (optional)" });
+  expect(contextField).toHaveValue(manualContext);
+  const generate = await ready();
+  await waitFor(() => expect(generate).toBeEnabled());
+  fireEvent.click(generate);
+  expect(mocks.generate).toHaveBeenLastCalledWith(expect.objectContaining({ classroomContext: manualContext }));
+
+  fireEvent.click(useActivity);
+  const selectedContext = (contextField as HTMLTextAreaElement).value;
+  expect(selectedContext.startsWith(manualContext)).toBe(true);
+  expect(selectedContext).toContain("Soccer");
+  expect(selectedContext).toContain("ball");
+  expect(selectedContext.length).toBeLessThanOrEqual(1200);
+  // Filling a suggestion never starts a generation by itself.
+  expect(mocks.generate).toHaveBeenCalledTimes(1);
+  expect(postCalls()).toHaveLength(0);
+  await waitFor(() => expect(JSON.parse(localStorage.getItem(draftKey)!).classroomContext).toBe(selectedContext));
+
+  fireEvent.click(generate);
+  expect(mocks.generate).toHaveBeenLastCalledWith(expect.objectContaining({ classroomContext: selectedContext }));
+  fireEvent.click(screen.getByRole("radio", { name: "Video" }));
+  fireEvent.click(generate);
+  await waitFor(() => expect(postCalls("/api/engagement-content")).toHaveLength(1));
+  expect(JSON.parse(postCalls("/api/engagement-content")[0][1].body).classroomContext).toBe(selectedContext);
+
+  await waitFor(() => expect(postCalls("/api/engagement-video")).toHaveLength(1));
+  view.unmount();
+  render(<TeacherView user={user} />);
+  expect(await screen.findByRole("textbox", { name: "Classroom context (optional)" })).toHaveValue(selectedContext);
+});
+
 it("starts video generation only after an explicit shared Generate action and does not restart it on format switches", async () => {
   seedDraft({ materialFormat: "video" });
   render(<TeacherView user={user} />);
