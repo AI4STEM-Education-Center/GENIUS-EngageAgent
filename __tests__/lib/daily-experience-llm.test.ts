@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ANALYSIS_VERSION,
   isAnalysisStale,
   parseExtraction,
   parseGrouping,
@@ -14,8 +15,12 @@ import {
   fakeAnalysisModel,
 } from "../fixtures/daily-experience";
 
-const update = (responses: SurveyResponse[], previous: SurveyAnalysisRecord | null = null) => {
-  const model = fakeAnalysisModel();
+const update = (
+  responses: SurveyResponse[],
+  previous: SurveyAnalysisRecord | null = null,
+  options: Parameters<typeof fakeAnalysisModel>[0] = {},
+) => {
+  const model = fakeAnalysisModel(options);
   const run = updateDailyExperienceAnalysis({
     client: model.client as ChatClient,
     survey: dailyExperienceSurvey,
@@ -26,44 +31,56 @@ const update = (responses: SurveyResponse[], previous: SurveyAnalysisRecord | nu
   return { run, calls: model.calls };
 };
 
-const extractedStudents = (calls: ReturnType<typeof fakeAnalysisModel>["calls"]) =>
-  calls.filter((c) => c.name === "daily_experience_extraction")
-    .flatMap((c) => (c.user as { students: unknown[] }).students);
+const extractionCalls = (calls: ReturnType<typeof fakeAnalysisModel>["calls"]) =>
+  calls.filter((c) => c.name === "daily_experience_extraction");
+const groupingCalls = (calls: ReturnType<typeof fakeAnalysisModel>["calls"]) =>
+  calls.filter((c) => c.name === "daily_experience_grouping");
+const ranking = (record: SurveyAnalysisRecord) =>
+  record.summary.activities.map((a) => [a.activity, a.studentCount]);
 
 const submitted = dailyExperienceResponses.filter((r) => r.survey_id === dailyExperienceSurvey.survey_id && r.status === "submitted");
+const cookingDinner = (answers: Record<string, string>) => answers.Q1 === "Cooking dinner";
 
 describe("updateDailyExperienceAnalysis", () => {
-  it("analyzes every submitted response the first time, and ranks the activities", async () => {
+  it("analyzes every submitted response the first time, one student per call, and ranks the activities", async () => {
     const { run, calls } = update(dailyExperienceResponses);
     const record = await run;
 
-    expect(calls.filter((c) => c.name === "daily_experience_extraction")).toHaveLength(2); // 20 students / 10 per batch
-    expect(calls.filter((c) => c.name === "daily_experience_grouping")).toHaveLength(1);
-    expect(record.summary.top.map((a) => [a.activity, a.studentCount])).toEqual([["Soccer", 10], ["Basketball", 7]]);
-    expect(record.summary.responseCount).toBe(20);
+    // 20 students, minus the fully blank one, which is never sent.
+    expect(extractionCalls(calls)).toHaveLength(19);
+    expect(groupingCalls(calls)).toHaveLength(1);
+    expect(ranking(record)).toEqual([
+      ["Soccer", 10], ["Basketball", 7], ["Cooking", 3], ["Video games", 3], ["Skateboarding", 3], ["Swimming", 2],
+    ]);
+    expect(record.summary).toMatchObject({ responseCount: 20, unclassifiedCount: 2 });
     expect(Object.keys(record.students)).toHaveLength(20);
+    expect(record.students["student-19"].activities).toEqual([]);
     expect(record.students["student-01"].response_updated_at).toBe(submitted[0].updated_at);
-    expect(record).toMatchObject({ class_id: "class", assignment_id: "assignment", survey_id: "survey-daily", analyzed_at: "2026-10-06T12:00:00.000Z" });
+    expect(record).toMatchObject({
+      analysis_version: ANALYSIS_VERSION, class_id: "class", assignment_id: "assignment",
+      survey_id: "survey-daily", analyzed_at: "2026-10-06T12:00:00.000Z",
+    });
   });
 
-  it("only sends new responses, and only new labels with the activities already in use", async () => {
+  it("only extracts new responses, and regroups the full label list only when a label is new", async () => {
     const first = await update(submitted.slice(0, 18)).run;
     const { run, calls } = update(dailyExperienceResponses, first);
     const record = await run;
 
-    // Students 19 and 20 are new; both are blank/off-topic.
-    expect(extractedStudents(calls)).toHaveLength(2);
-    expect(calls.filter((c) => c.name === "daily_experience_grouping")).toHaveLength(0);
+    // Students 19 (blank, not sent) and 20 ("idk") are new; no new labels.
+    expect(extractionCalls(calls)).toHaveLength(1);
+    expect(groupingCalls(calls)).toHaveLength(0);
     expect(record.summary).toMatchObject({ responseCount: 20, unclassifiedCount: 2 });
-    expect(record.summary.top.map((a) => [a.activity, a.studentCount])).toEqual([["Soccer", 10], ["Basketball", 7]]);
+    expect(ranking(record)).toEqual(ranking(await update(dailyExperienceResponses).run));
 
-    // A brand-new label is grouped alongside the existing activities.
+    // A brand-new label regroups every label, not just the new one.
     const withoutMinecraft = await update(submitted.filter((r) => r.student_id !== "student-15")).run;
+    expect(withoutMinecraft.grouping.minecraft).toBeUndefined();
     const regroup = update(dailyExperienceResponses, withoutMinecraft);
     await regroup.run;
-    const grouping = regroup.calls.find((c) => c.name === "daily_experience_grouping")!;
-    expect((grouping.user as { labels: string[] }).labels).toEqual(["minecraft"]);
-    expect(grouping.system).toContain("- Games / Video games");
+    const labels = (groupingCalls(regroup.calls)[0].user as { labels: string[] }).labels;
+    expect(labels).toEqual(["baking", "basketball", "bball", "cooking", "futbol", "hoops", "minecraft", "skateboard",
+      "skateboarding", "soccer", "socer", "swimming", "video games"]);
   });
 
   it("re-analyzes a response that changed and drops students without a submitted response", async () => {
@@ -74,23 +91,47 @@ describe("updateDailyExperienceAnalysis", () => {
     const { run, calls } = update(edited, first);
     const record = await run;
 
-    expect(extractedStudents(calls)).toHaveLength(1);
+    expect(extractionCalls(calls)).toHaveLength(1);
     expect(record.students["student-20"]).toBeUndefined();
     expect(record.students["student-02"].response_updated_at).toBe("2026-10-03T00:00:00.000Z");
     expect(record.summary.responseCount).toBe(19);
   });
 
-  it("sends the topic and questions but never student names or ids", async () => {
+  it("doesn't save a student whose extraction failed, and retries them on the next update", async () => {
+    const { run } = update(dailyExperienceResponses, null, { cutOff: cookingDinner });
+    const partial = await run;
+
+    expect(partial.students["student-13"]).toBeUndefined();
+    expect(Object.keys(partial.students)).toHaveLength(19);
+    expect(partial.summary.activities.find((a) => a.activity === "Cooking")?.studentCount).toBe(2);
+    expect(partial.summary.unclassifiedCount).toBe(2); // not counted as having no activity
+    expect(isAnalysisStale(dailyExperienceResponses, "survey-daily", partial)).toBe(true);
+
+    const retry = update(dailyExperienceResponses, partial);
+    const record = await retry.run;
+    expect(extractionCalls(retry.calls).map((c) => (c.user as { answers: Record<string, string> }).answers.Q1))
+      .toEqual(["Cooking dinner"]);
+    expect(record.summary.activities.find((a) => a.activity === "Cooking")?.studentCount).toBe(3);
+  });
+
+  it("throws when every extraction fails, so the last good analysis is kept", async () => {
+    await expect(update(dailyExperienceResponses, null, { cutOff: () => true }).run)
+      .rejects.toThrow("The extraction step's output was cut off.");
+  });
+
+  it("sends one student's answers with the topic and questions, but never names or ids", async () => {
     const { run, calls } = update(dailyExperienceResponses);
     await run;
 
-    const extraction = calls.find((c) => c.name === "daily_experience_extraction")!;
+    const extraction = extractionCalls(calls)[0];
     expect(extraction.system).toContain(dailyExperienceSurvey.daily_experience_topic);
     expect(extraction.system).toContain("Q4 (familiarity): What is a second activity");
     expect(extraction.temperature).toBe(0);
-    for (const c of calls) expect(c.system + JSON.stringify(c.user)).not.toMatch(/student-\d|Student \d/);
+    expect(extraction.max_completion_tokens).toBeGreaterThan(0);
+    expect(Object.keys(extraction.user as object)).toEqual(["answers"]);
+    for (const c of calls) expect(c.system + JSON.stringify(c.user)).not.toMatch(/student-\d|Student \d|S\d+/);
 
-    const labels = (calls.find((c) => c.name === "daily_experience_grouping")!.user as { labels: string[] }).labels;
+    const labels = (groupingCalls(calls)[0].user as { labels: string[] }).labels;
     expect(labels).toEqual([...new Set(labels)]);
     expect(labels.every((l) => l === normalizeLabel(l))).toBe(true);
   });
@@ -125,25 +166,24 @@ describe("isAnalysisStale", () => {
 });
 
 describe("parseExtraction", () => {
-  it("fills skipped students, ignores unknown or duplicate ids, and cleans fields", () => {
-    const raw = { students: [
-      { student: "S1", activities: [
-        { label: "Soccer", involvement: "watched", objects: ["ball", 3], incident: "" },
-        { label: "", involvement: "do", objects: [], incident: "" },
-        { label: "chess", involvement: "something", objects: [], incident: "Lost a piece" },
-        { label: "tennis", involvement: "do", objects: [], incident: "" },
-      ] },
-      { student: "S1", activities: [{ label: "duplicate", involvement: "do", objects: [], incident: "" }] },
-      { student: "S99", activities: [{ label: "intruder", involvement: "do", objects: [], incident: "" }] },
+  it("keeps at most two activities and cleans fields", () => {
+    const raw = { activities: [
+      { label: "Soccer", involvement: "watched", objects: ["ball", 3], incident: "" },
+      { label: "", involvement: "do", objects: [], incident: "" },
+      { label: "chess", involvement: "something", objects: [], incident: "Lost a piece" },
+      { label: "tennis", involvement: "do", objects: [], incident: "" },
     ] };
 
-    expect(parseExtraction(raw, ["S1", "S2"])).toEqual([
-      { student: "S1", activities: [
-        { label: "Soccer", involvement: "watched", objects: ["ball"], incident: undefined },
-        { label: "chess", involvement: "do", objects: [], incident: "Lost a piece" },
-      ] },
-      { student: "S2", activities: [] },
+    expect(parseExtraction(raw)).toEqual([
+      { label: "Soccer", involvement: "watched", objects: ["ball"], incident: undefined },
+      { label: "chess", involvement: "do", objects: [], incident: "Lost a piece" },
     ]);
+    expect(parseExtraction({ activities: [] })).toEqual([]);
+  });
+
+  it("throws when there's no activities list, rather than treating the student as having none", () => {
+    expect(() => parseExtraction({ students: [] })).toThrow("no activities list");
+    expect(() => parseExtraction(null)).toThrow("no activities list");
   });
 });
 
