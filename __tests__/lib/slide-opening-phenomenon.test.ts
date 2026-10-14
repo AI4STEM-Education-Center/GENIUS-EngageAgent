@@ -106,6 +106,17 @@ describe("illustrated phenomenon openings", () => {
     expect(exportErrors(missingAsset, measure)).toContain("Image phenomenon: generate an image before downloading.");
   });
 
+  it("fits the required prediction and observation labels with a concise real-model comparison", () => {
+    const deck = illustratedConflict();
+    deck.draft.slides[3].body = "Your prediction: revisit your written idea.\nWhat we observed in the activity: the illustrated ball flattened during contact and was round afterward.";
+    expect(draftErrors(deck.draft, deck.strategy)).toEqual([]);
+    expect(exportErrors(deck, measure)).toEqual([]);
+    const elements = slideElements(deck, 3);
+    const body = elements.find(element => element.id === "body")!;
+    const task = elements.find(element => element.id === "task")!;
+    expect(body.frame.top + body.frame.height).toBeLessThan(task.frame.top);
+  });
+
   it("invalidates result images and reviews when their starting scene changes", () => {
     const deck = illustratedConflict();
     expect(imageReferenceId(deck.draft, "evidence")).toBe("phenomenon");
