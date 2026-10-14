@@ -5,7 +5,6 @@ import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import type { UserContext } from "@/lib/auth";
 import { findExistingStudentAnswer } from "@/lib/student-answer-lookup";
-import { CURRENT_QUIZ_VERSION, MAX_QUIZ_TEXT_LENGTH, getQuizItemsForVersion, isQuizComplete } from "@/lib/quiz-assessment";
 import { findMissingAnswers, getSurveyAvailability } from "@/lib/survey-response";
 import { pickTaskSurvey } from "@/lib/survey-schedule";
 import type { QuizItem, Survey, SurveyResponse } from "@/lib/types";
@@ -19,10 +18,9 @@ type Props = {
 type QuizStatusData = {
   lesson_number: number;
   status: "draft" | "published" | "closed";
-  quiz_version?: number;
 };
 
-function StudentQuizAssessment({ user, onProgress }: Props) {
+export default function StudentQuizView({ user, onProgress }: Props) {
   const questionLabelId = useId();
   const [quizStatus, setQuizStatus] = useState<QuizStatusData | null>(null);
   const [questions, setQuestions] = useState<QuizItem[]>([]);
@@ -32,13 +30,11 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const quizLoadInFlight = useRef(false);
-  const loadedQuizStatus = useRef<QuizStatusData | null>(null);
-  const assessmentLoaded = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Preserve previously published custom surveys for legacy assessments. New
-  // quizzes include lesson experience questions in their own answer record.
+  // The learning task's survey is part of the same task as the quiz (#107, #111):
+  // its questions follow the quiz questions and share one submit button.
   const [survey, setSurvey] = useState<Survey | null>(null);
   const surveyDrafts = useRef<Record<string, Record<string, string>>>({});
   const [surveyAnswers, setSurveyAnswers] = useState<Record<string, string>>({});
@@ -48,7 +44,7 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
   const classId = user.classId;
   const assignmentId = user.assignmentId;
 
-  const loadQuiz = useCallback(async (statusOnly = false) => {
+  const loadQuiz = useCallback(async () => {
     if (!classId || !assignmentId) {
       setLoadError("Missing class or assignment context.");
       setLoading(false);
@@ -56,13 +52,8 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
     }
     if (quizLoadInFlight.current) return;
     quizLoadInFlight.current = true;
-    const previousQuiz = loadedQuizStatus.current;
-    const backgroundCheck = statusOnly && assessmentLoaded.current && previousQuiz?.status === "published";
-    let assessmentChanged = false;
-    if (!backgroundCheck) {
-      setRefreshing(true);
-      setLoadError(null);
-    }
+    setRefreshing(true);
+    setLoadError(null);
 
     try {
       // Fetch quiz status
@@ -80,21 +71,7 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
 
       const qs = (statusData as { quizStatus?: QuizStatusData | null }).quizStatus ?? null;
 
-      const sameLesson = previousQuiz?.lesson_number === qs?.lesson_number;
-      const sameAssessment = sameLesson && previousQuiz?.status === qs?.status
-        && (previousQuiz?.quiz_version ?? 1) === (qs?.quiz_version ?? 1);
-      // Published forms check status without reloading answers. A changed lesson
-      // or quiz version does need new questions, including appended experiences.
-      if (statusOnly && assessmentLoaded.current && sameAssessment && qs?.status === "published") return;
-      assessmentChanged = !sameAssessment;
-      setRefreshing(true);
-      setLoadError(null);
       setQuizStatus(qs);
-      if (!sameLesson) {
-        setAnswers({});
-        setExistingAnswers(null);
-        setSubmitted(false);
-      }
 
       // Load quiz questions only when the quiz is published. The survey below is
       // loaded either way: a teacher can publish a survey without a quiz (#111).
@@ -103,8 +80,7 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
         const lessonRes = await fetch(`/api/lessons/${qs.lesson_number}`);
         const lessonData = await lessonRes.json();
         if (!lessonRes.ok) throw new Error(lessonData.error ?? "Failed to load quiz questions.");
-        const quizItems = getQuizItemsForVersion(lessonData.quiz_items ?? [], qs.quiz_version);
-        setQuestions(quizItems);
+        setQuestions(lessonData.quiz_items ?? []);
 
         const existingAnswer = await findExistingStudentAnswer({
           classId,
@@ -115,26 +91,9 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
         });
         if (existingAnswer) {
           setExistingAnswers(existingAnswer.answer.answers);
-          setAnswers((draft) => sameLesson
-            ? { ...existingAnswer.answer.answers, ...draft }
-            : existingAnswer.answer.answers);
-          setSubmitted((qs.quiz_version ?? 1) >= CURRENT_QUIZ_VERSION
-            ? isQuizComplete(quizItems, existingAnswer.answer.answers)
-            : true);
-        } else {
-          setExistingAnswers(null);
-          setSubmitted(false);
+          setAnswers(existingAnswer.answer.answers);
+          setSubmitted(true);
         }
-      }
-
-      if ((qs?.quiz_version ?? 1) >= CURRENT_QUIZ_VERSION) {
-        setSurvey(null);
-        setSurveyAnswers({});
-        setSurveySubmitted(false);
-        setSurveyNote(null);
-        loadedQuizStatus.current = qs;
-        assessmentLoaded.current = true;
-        return;
       }
 
       // Load the learning task's survey, if the teacher published one.
@@ -165,12 +124,8 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
           }
         }
       }
-      loadedQuizStatus.current = qs;
-      assessmentLoaded.current = true;
     } catch (err) {
-      if (!backgroundCheck || assessmentChanged) {
-        setLoadError(err instanceof Error ? err.message : "Failed to load quiz.");
-      }
+      setLoadError(err instanceof Error ? err.message : "Failed to load quiz.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -182,11 +137,11 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
     loadQuiz();
   }, [loadQuiz]);
 
-  // Discover publications and quiz upgrades without replacing in-progress
-  // answers when the published assessment itself is unchanged.
+  // A student may open the task before the teacher publishes its quiz.
+  // Stop refreshing once it opens, so in-progress answers are never replaced.
   useEffect(() => {
-    if (loading) return;
-    const refresh = () => { void loadQuiz(true); };
+    if (loading || quizStatus?.status === "published") return;
+    const refresh = () => { void loadQuiz(); };
     const onVisibility = () => { if (document.visibilityState === "visible") refresh(); };
     const interval = window.setInterval(refresh, 15000);
     window.addEventListener("focus", refresh);
@@ -214,12 +169,12 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
   }, [loading, submitted, survey, surveySubmitted, quizStatus, onProgress]);
 
   const handleSelect = (itemId: string, option: string) => {
-    if (submitted || submitting) return;
+    if (submitted) return;
     setAnswers((prev) => ({ ...prev, [itemId]: option }));
   };
 
   const handleConfidenceKey = (event: KeyboardEvent<HTMLButtonElement>, item: QuizItem, current: string) => {
-    if (submitted || submitting) return;
+    if (submitted) return;
     const options = Object.keys(item.options);
     const index = options.indexOf(current);
     let next: number;
@@ -234,7 +189,7 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
   };
 
   const handleSurveyAnswer = (fieldId: string, value: string) => {
-    if (surveySubmitted || submitting) return;
+    if (surveySubmitted) return;
     if (survey) surveyDrafts.current[survey.survey_id] = { ...surveyDrafts.current[survey.survey_id], [fieldId]: value };
     setSurveyAnswers((prev) => ({ ...prev, [fieldId]: value }));
   };
@@ -358,14 +313,18 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
     );
   }
 
-  const quizComplete = isQuizComplete(questions, answers);
+  const multipleChoiceQuestions = questions.filter((q) => q.type === "multiple_choice");
+  const allAnswered = multipleChoiceQuestions.every((q) => answers[q.item_id]);
+  // Check confidence items too
+  const confidenceItems = questions.filter((q) => q.type === "confidence_check");
+  const allConfidenceAnswered = confidenceItems.every((q) => answers[q.item_id]);
   const surveyComplete = !survey || findMissingAnswers(survey, surveyAnswers).length === 0;
   const allDone = (!quizOpen || submitted) && (!survey || surveySubmitted);
   const canSubmit =
-    !refreshing && !loadError && (!quizOpen || submitted || quizComplete) &&
+    !refreshing && !loadError && (!quizOpen || submitted || (allAnswered && allConfidenceAnswered)) &&
     surveyComplete &&
     !allDone;
-  const questionCount = quizOpen ? questions.filter((q) => q.type !== "confidence_check").length : 0;
+  const questionCount = quizOpen ? multipleChoiceQuestions.length : 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -429,47 +388,11 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
                   {Object.entries(item.options).map(([key, value], optionIndex) => (
                     <button key={key} type="button" role="radio" aria-checked={selected === key}
                       tabIndex={selected === key || (!selected && optionIndex === 0) ? 0 : -1}
-                      disabled={submitted || submitting} onClick={() => handleSelect(item.item_id, key)} onKeyDown={event => handleConfidenceKey(event, item, key)}
+                      disabled={submitted} onClick={() => handleSelect(item.item_id, key)} onKeyDown={event => handleConfidenceKey(event, item, key)}
                       className={`min-h-12 min-w-0 break-words border-r border-slate-300 px-1 py-3 text-center text-xs font-medium leading-snug last:border-r-0 focus-visible:relative focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#BA0C2F] disabled:cursor-default sm:px-3 sm:text-sm ${selected === key ? "bg-[#BA0C2F] text-white" : "bg-white text-slate-600 enabled:hover:bg-slate-50"}`}>
                       {value}
                     </button>
                   ))}
-                </div> : item.type === "experience" ? <div className="mt-3 grid gap-3">
-                  {item.example && <p className="text-xs text-slate-500">{item.example}</p>}
-                  {(item.response_fields ?? []).map((field) => {
-                    const fieldId = `${questionLabelId}-${field.field_id}`;
-                    const value = answers[field.field_id] ?? "";
-                    const cls = "w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 focus:border-[#BA0C2F] focus:outline-none disabled:bg-slate-50 disabled:text-slate-600";
-                    return <div key={field.field_id} className="grid gap-1.5">
-                      <label htmlFor={fieldId} className="text-sm font-medium text-slate-700">{field.label}</label>
-                      {field.response_type === "choice" ? <select
-                        id={fieldId}
-                        value={value}
-                        disabled={submitted || submitting}
-                        onChange={(event) => handleSelect(field.field_id, event.target.value)}
-                        className={cls}
-                      >
-                        <option value="">Choose an answer</option>
-                        {(field.options ?? []).map((option) => <option key={option} value={option}>{option}</option>)}
-                      </select> : field.text_length === "long" ? <textarea
-                        id={fieldId}
-                        rows={3}
-                        maxLength={MAX_QUIZ_TEXT_LENGTH}
-                        value={value}
-                        disabled={submitted || submitting}
-                        onChange={(event) => handleSelect(field.field_id, event.target.value)}
-                        className={cls}
-                      /> : <input
-                        id={fieldId}
-                        type="text"
-                        maxLength={MAX_QUIZ_TEXT_LENGTH}
-                        value={value}
-                        disabled={submitted || submitting}
-                        onChange={(event) => handleSelect(field.field_id, event.target.value)}
-                        className={cls}
-                      />}
-                    </div>;
-                  })}
                 </div> : <div className="mt-3 grid gap-2">
                   {Object.entries(item.options).map(([key, value]) => {
                     const isSelected = selected === key;
@@ -478,7 +401,7 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
                         key={key}
                         type="button"
                         onClick={() => handleSelect(item.item_id, key)}
-                        disabled={submitted || submitting}
+                        disabled={submitted}
                         className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm transition ${
                           isSelected
                             ? "border-[#BA0C2F] bg-[#BA0C2F]/5 text-slate-900"
@@ -526,7 +449,7 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
                         aria-label={field.label}
                         rows={4}
                         value={value}
-                        disabled={surveySubmitted || submitting}
+                        disabled={surveySubmitted}
                         onChange={(e) => handleSurveyAnswer(field.field_id, e.target.value)}
                         className={cls}
                       />
@@ -535,7 +458,7 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
                         key={field.field_id}
                         aria-label={field.label}
                         value={value}
-                        disabled={surveySubmitted || submitting}
+                        disabled={surveySubmitted}
                         onChange={(e) => handleSurveyAnswer(field.field_id, e.target.value)}
                         className={cls}
                       />
@@ -569,14 +492,4 @@ function StudentQuizAssessment({ user, onProgress }: Props) {
       </div>
     </div>
   );
-}
-
-
-export default function StudentQuizView(props: Props) {
-  // Isolate answers and in-flight loads even if this component is reused outside
-  // StudentView, whose workspace also remounts when the class or task changes.
-  return <StudentQuizAssessment
-    key={JSON.stringify([props.user.geniusId, props.user.userId, props.user.classId, props.user.assignmentId])}
-    {...props}
-  />;
 }

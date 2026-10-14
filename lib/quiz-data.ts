@@ -1,4 +1,4 @@
-import type { Lesson, QuizItem, SurveyResponseField } from "./types";
+import type { Lesson, QuizItem } from "./types";
 
 import lesson1 from "@/data/lesson1.json";
 import lesson2 from "@/data/lesson2.json";
@@ -9,13 +9,8 @@ import lesson6 from "@/data/lesson6.json";
 import lesson7 from "@/data/lesson7.json";
 import lesson8 from "@/data/lesson8.json";
 
-type RawQuizItem = Omit<QuizItem, "type" | "response_fields" | "options"> & {
+type RawQuizItem = Omit<QuizItem, "type"> & {
   type: string;
-  options: Record<string, string | undefined>;
-  response_fields?: Array<Omit<SurveyResponseField, "response_type" | "text_length"> & {
-    response_type: string;
-    text_length?: string;
-  }>;
 };
 
 type RawLesson = Omit<Lesson, "misconceptions" | "quiz_items"> & {
@@ -24,7 +19,7 @@ type RawLesson = Omit<Lesson, "misconceptions" | "quiz_items"> & {
 };
 
 function normalizeQuizItemType(type: string): QuizItem["type"] {
-  if (type === "multiple_choice" || type === "confidence_check" || type === "experience") {
+  if (type === "multiple_choice" || type === "confidence_check") {
     return type;
   }
 
@@ -32,28 +27,9 @@ function normalizeQuizItemType(type: string): QuizItem["type"] {
 }
 
 function normalizeQuizItem(rawItem: RawQuizItem): QuizItem {
-  const { response_fields, ...item } = rawItem;
   return {
-    ...item,
+    ...rawItem,
     type: normalizeQuizItemType(rawItem.type),
-    options: Object.fromEntries(
-      Object.entries(item.options).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-    ),
-    ...(response_fields ? {
-      response_fields: response_fields.map((field) => {
-        if (field.response_type !== "text" && field.response_type !== "choice") {
-          throw new Error(`Unsupported response field type: ${field.response_type}`);
-        }
-        if (field.text_length && field.text_length !== "short" && field.text_length !== "long") {
-          throw new Error(`Unsupported response text length: ${field.text_length}`);
-        }
-        return {
-          ...field,
-          response_type: field.response_type,
-          text_length: field.text_length as SurveyResponseField["text_length"],
-        };
-      }),
-    } : {}),
   };
 }
 

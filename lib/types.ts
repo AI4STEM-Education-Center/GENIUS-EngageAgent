@@ -57,13 +57,10 @@ export type StudentStrategyResult = {
 
 export type QuizItem = {
   item_id: string;
-  type: "multiple_choice" | "confidence_check" | "experience";
+  type: "multiple_choice" | "confidence_check";
   question_number?: number;
   stem: string;
   image?: string;
-  /** Ungraded, written answers about the student's own experiences. */
-  response_fields?: SurveyResponseField[];
-  example?: string;
   options: Record<string, string>;
   correct_answer?: string;
   matched_misconception?: string;

@@ -12,8 +12,8 @@ vi.mock("@/lib/nosql", () => {
     getQuizStatus: vi.fn(async (classId: string, assignmentId: string) => {
       return store[`${classId}:${assignmentId}`] ?? null;
     }),
-    upsertQuizStatus: vi.fn(async (classId: string, assignmentId: string, lessonNumber: number, status: string, publishedBy?: string, quizVersion?: number) => {
-      const record = { class_id: classId, assignment_id: assignmentId, lesson_number: lessonNumber, status, published_by: publishedBy, quiz_version: quizVersion, updated_at: new Date().toISOString() };
+    upsertQuizStatus: vi.fn(async (classId: string, assignmentId: string, lessonNumber: number, status: string, publishedBy?: string) => {
+      const record = { class_id: classId, assignment_id: assignmentId, lesson_number: lessonNumber, status, published_by: publishedBy, updated_at: new Date().toISOString() };
       store[`${classId}:${assignmentId}`] = record;
       return record;
     }),
@@ -93,25 +93,6 @@ describe("POST /api/quiz-status", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.quizStatus.status).toBe("published");
-    expect(data.quizStatus.quiz_version).toBe(2);
-  });
-
-  it("preserves the question version when closing an existing quiz", async () => {
-    const { getQuizStatus } = await import("@/lib/nosql");
-    vi.mocked(getQuizStatus).mockResolvedValueOnce({ class_id: "c1", assignment_id: "a1", lesson_number: 3, status: "published", updated_at: "2026-10-01" });
-    const res = await POST(new Request("http://localhost:3000/api/quiz-status", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ classId: "c1", assignmentId: "a1", lessonNumber: 3, status: "closed" }),
-    }));
-    expect((await res.json()).quizStatus.quiz_version).toBe(1);
-  });
-
-  it.each([0, 9, 1.5, "2"])("rejects an unavailable lesson %s", async lessonNumber => {
-    const res = await POST(new Request("http://localhost:3000/api/quiz-status", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ classId: "c1", assignmentId: "a1", lessonNumber, status: "published" }),
-    }));
-    expect(res.status).toBe(400);
   });
 
   it("should reject invalid status", async () => {

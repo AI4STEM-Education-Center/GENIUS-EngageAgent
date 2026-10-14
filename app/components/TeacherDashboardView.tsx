@@ -4,13 +4,10 @@ import { scopedTaskFetch } from "@/lib/client-auth";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SurveyResultsSection from "./SurveyResultsSection";
-import ExperienceQuizResults from "./ExperienceQuizResults";
 import Link from "next/link";
 import type { UserContext } from "@/lib/auth";
 import { isPublishedSlideReference } from "@/lib/slides/publication";
 import { recommendWorkspaceCohort } from "@/lib/cohort-recommendation";
-import { getLesson } from "@/lib/quiz-data";
-import { CURRENT_QUIZ_VERSION, getQuizItemsForVersion, isQuizComplete } from "@/lib/quiz-assessment";
 import { buildTeacherSummary, type StrategyRecommendation } from "@/lib/strategy-recommendation";
 import {
   engagementStrategies,
@@ -45,8 +42,6 @@ type DashboardStudentRow = {
   id: string;
   name: string;
   submittedAt: string;
-  quizComplete: boolean;
-  currentLesson: boolean;
   strategy?: string;
   tldr?: string;
 };
@@ -61,7 +56,6 @@ const emptyDashboardSource = (classId: string, assignmentId: string) => ({
   classId, assignmentId,
   lesson: null as number | null,
   quizStatus: "draft" as QuizStatus,
-  quizVersion: 1,
   answers: [] as StudentAnswer[],
   published: [] as DashboardPublishedRecord[],
   ratings: [] as ContentRatingRecord[],
@@ -98,7 +92,6 @@ export default function TeacherDashboardView({ user }: Props) {
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [dashboardUpdatedAt, setDashboardUpdatedAt] = useState<string | null>(null);
   const [dashboardStudents, setDashboardStudents] = useState<DashboardStudentRow[]>([]);
-  const [dashboardQuizAnswers, setDashboardQuizAnswers] = useState<StudentAnswer[]>([]);
   const [dashboardStrategyDistribution, setDashboardStrategyDistribution] = useState<Record<string, number>>({});
   const [cohortRecommendation, setCohortRecommendation] = useState<StrategyRecommendation | null>(null);
   const [dashboardPublishedRecords, setDashboardPublishedRecords] = useState<DashboardPublishedRecord[]>([]);
@@ -106,7 +99,6 @@ export default function TeacherDashboardView({ user }: Props) {
   const [dashboardReviewQuestions, setDashboardReviewQuestions] = useState<DashboardReviewQuestionRow[]>([]);
   const [dashboardMedia, setDashboardMedia] = useState<Record<string, { image: boolean; video: boolean }>>({});
   const [quizStatus, setQuizStatus] = useState<QuizStatus>("draft");
-  const [quizVersion, setQuizVersion] = useState(1);
   const [selectedLesson, setSelectedLesson] = useState<number | null>(null);
   const dashboardSource = useRef(emptyDashboardSource(classId, assignmentId));
   const refreshVersion = useRef(0);
@@ -116,7 +108,6 @@ export default function TeacherDashboardView({ user }: Props) {
     if (!classId || !assignmentId) {
       dashboardSource.current = emptyDashboardSource(classId, assignmentId);
       setDashboardStudents([]);
-      setDashboardQuizAnswers([]);
       setDashboardStrategyDistribution({});
       setCohortRecommendation(null);
       setDashboardPublishedRecords([]);
@@ -126,7 +117,6 @@ export default function TeacherDashboardView({ user }: Props) {
       setDashboardUpdatedAt(null);
       setSelectedLesson(null);
       setQuizStatus("draft");
-      setQuizVersion(1);
       return;
     }
 
@@ -154,7 +144,6 @@ export default function TeacherDashboardView({ user }: Props) {
       let partialFailure = false;
       let fetchedLesson = previous.lesson;
       let fetchedQuizStatus = previous.quizStatus;
-      let fetchedQuizVersion = previous.quizVersion;
       let fetchedAnswers = previous.answers;
       let fetchedPublished = previous.published;
       let fetchedRatings = previous.ratings;
@@ -164,11 +153,10 @@ export default function TeacherDashboardView({ user }: Props) {
 
       if (quizResult.status === "fulfilled" && quizResult.value.ok) {
         const quizData = (await quizResult.value.json()) as {
-          quizStatus?: { lesson_number?: number; status?: QuizStatus; quiz_version?: number };
+          quizStatus?: { lesson_number?: number; status?: QuizStatus };
         };
         fetchedLesson = quizData.quizStatus?.lesson_number ?? null;
         fetchedQuizStatus = quizData.quizStatus?.status ?? "draft";
-        fetchedQuizVersion = quizData.quizStatus?.quiz_version ?? 1;
       } else if (quizResult.status === "fulfilled" || quizResult.status === "rejected") {
         partialFailure = true;
       }
@@ -226,7 +214,7 @@ export default function TeacherDashboardView({ user }: Props) {
       }
 
       if (version !== refreshVersion.current) return;
-      dashboardSource.current = { classId, assignmentId, lesson: fetchedLesson, quizStatus: fetchedQuizStatus, quizVersion: fetchedQuizVersion,
+      dashboardSource.current = { classId, assignmentId, lesson: fetchedLesson, quizStatus: fetchedQuizStatus,
         answers: fetchedAnswers, published: fetchedPublished, ratings: fetchedRatings, media: fetchedMedia,
         strategies: fetchedStrategyResults, questions: fetchedReviewQuestions };
       const strategyDistribution: Record<string, number> = {};
@@ -263,15 +251,11 @@ export default function TeacherDashboardView({ user }: Props) {
         }
       }
 
-      const currentQuizItems = getQuizItemsForVersion(fetchedLesson ? getLesson(fetchedLesson)?.quiz_items ?? [] : [], fetchedQuizVersion);
       const studentRows = fetchedAnswers
         .map((answer) => ({
           id: answer.student_id,
           name: answer.student_name,
           submittedAt: answer.submitted_at,
-          currentLesson: answer.lesson_number === fetchedLesson,
-          quizComplete: answer.lesson_number === fetchedLesson && (fetchedQuizVersion < CURRENT_QUIZ_VERSION
-            || isQuizComplete(currentQuizItems, answer.answers)),
           strategy: strategyByStudent.get(answer.student_id)?.strategy,
           tldr: strategyByStudent.get(answer.student_id)?.tldr,
         }))
@@ -289,10 +273,8 @@ export default function TeacherDashboardView({ user }: Props) {
         }));
 
       setDashboardStudents(studentRows);
-      setDashboardQuizAnswers(fetchedAnswers);
       setSelectedLesson(fetchedLesson);
       setQuizStatus(fetchedQuizStatus);
-      setQuizVersion(fetchedQuizVersion);
       setDashboardStrategyDistribution(strategyDistribution);
       setCohortRecommendation(recommendation);
       setDashboardPublishedRecords(fetchedPublished);
@@ -318,7 +300,6 @@ export default function TeacherDashboardView({ user }: Props) {
   useEffect(() => {
     if (!hasAssignmentContext) {
       setDashboardStudents([]);
-      setDashboardQuizAnswers([]);
       setDashboardStrategyDistribution({});
       setCohortRecommendation(null);
       setDashboardPublishedRecords([]);
@@ -427,11 +408,6 @@ export default function TeacherDashboardView({ user }: Props) {
     [dashboardRatings],
   );
 
-  const completeQuizCount = dashboardStudents.filter((student) => student.quizComplete).length;
-  const pendingExperienceCount = quizVersion >= CURRENT_QUIZ_VERSION
-    ? dashboardStudents.filter((student) => student.currentLesson && !student.quizComplete).length
-    : 0;
-
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto flex max-w-6xl flex-col gap-8 px-6 py-12">
@@ -514,9 +490,8 @@ export default function TeacherDashboardView({ user }: Props) {
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <p className="text-xs font-semibold uppercase text-slate-400">Responses</p>
-                <p className="mt-2 text-xl font-semibold text-slate-900">{completeQuizCount}</p>
-                <p className="mt-1 text-xs text-slate-500">Students who completed the current quiz</p>
-                {pendingExperienceCount > 0 && <p className="mt-1 text-xs text-amber-800">{pendingExperienceCount} awaiting experience responses</p>}
+                <p className="mt-2 text-xl font-semibold text-slate-900">{dashboardStudents.length}</p>
+                <p className="mt-1 text-xs text-slate-500">Students who submitted the quiz</p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <p className="text-xs font-semibold uppercase text-slate-400">Cohort recommendation</p>
@@ -667,8 +642,7 @@ export default function TeacherDashboardView({ user }: Props) {
                       <thead className="sticky top-0 bg-white">
                         <tr className="border-b border-slate-200 text-xs uppercase text-slate-400">
                           <th className="pb-3 pr-4 font-semibold">Student</th>
-                          <th className="pb-3 pr-4 font-semibold">Last response</th>
-                          {quizVersion >= CURRENT_QUIZ_VERSION && <th className="pb-3 pr-4 font-semibold">Quiz completion</th>}
+                          <th className="pb-3 pr-4 font-semibold">Submitted</th>
                           {strategyChartRows.analyzedStudentTotal > 0 && <th className="pb-3 pr-4 font-semibold">Individual strategy</th>}
                           <th className="pb-3 font-semibold">Ratings</th>
                         </tr>
@@ -681,9 +655,6 @@ export default function TeacherDashboardView({ user }: Props) {
                               {row.tldr && <p className="mt-1 text-xs text-slate-500">{row.tldr}</p>}
                             </td>
                             <td className="py-3 pr-4 text-slate-600">{formatDate(row.submittedAt)}</td>
-                            {quizVersion >= CURRENT_QUIZ_VERSION && <td className="py-3 pr-4 text-slate-600">
-                              {row.quizComplete ? "Completed" : row.currentLesson ? "Awaiting experience responses" : "Earlier lesson"}
-                            </td>}
                             {strategyChartRows.analyzedStudentTotal > 0 && <td className="py-3 pr-4 text-slate-600">{row.strategy ? getEngagementStrategyLabel(row.strategy) : "No individual record"}</td>}
                             <td className="py-3 text-slate-600">{ratingsByStudent[row.id] ?? 0}</td>
                           </tr>
@@ -723,8 +694,7 @@ export default function TeacherDashboardView({ user }: Props) {
               )}
             </div>
 
-            <ExperienceQuizResults lessonNumber={selectedLesson} answers={dashboardQuizAnswers} />
-            <SurveyResultsSection classId={classId} assignmentId={assignmentId} hideWhenEmpty />
+            <SurveyResultsSection classId={classId} assignmentId={assignmentId} />
           </section>
         )}
       </div>

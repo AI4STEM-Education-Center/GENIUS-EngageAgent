@@ -55,7 +55,6 @@ type QuizStatusRecord = {
   lesson_number: number;
   status: "draft" | "published" | "closed";
   published_by?: string;
-  quiz_version?: number;
   updated_at: string;
 };
 
@@ -1337,7 +1336,6 @@ export const getQuizStatus = async (
       lesson_number: (result.Item.lesson_number as number) ?? 0,
       status: (result.Item.status as QuizStatusRecord["status"]) ?? "draft",
       published_by: result.Item.published_by as string | undefined,
-      quiz_version: result.Item.quiz_version as number | undefined,
       updated_at: (result.Item.updated_at as string) ?? "",
     };
   }
@@ -1356,7 +1354,6 @@ export const upsertQuizStatus = async (
   lessonNumber: number,
   status: QuizStatusRecord["status"],
   publishedBy?: string,
-  quizVersion?: number,
 ): Promise<QuizStatusRecord> => {
   const updatedAt = new Date().toISOString();
   const record: QuizStatusRecord = {
@@ -1365,7 +1362,6 @@ export const upsertQuizStatus = async (
     lesson_number: lessonNumber,
     status,
     published_by: publishedBy,
-    quiz_version: quizVersion,
     updated_at: updatedAt,
   };
 
@@ -1382,7 +1378,6 @@ export const upsertQuizStatus = async (
             lesson_number: lessonNumber,
             status,
             published_by: publishedBy,
-            quiz_version: quizVersion,
             updated_at: updatedAt,
           },
         }),

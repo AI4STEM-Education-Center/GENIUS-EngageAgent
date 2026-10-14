@@ -16,55 +16,10 @@ describe("getAllLessons", () => {
     }
   });
 
-  it("keeps experience questions in the quiz rather than a separate survey", () => {
+  it("does not include the removed built-in lesson surveys", () => {
     for (const lesson of getAllLessons()) {
       expect(lesson).not.toHaveProperty("survey_items");
     }
-  });
-
-  it("appends all 21 lesson-specific experience questions after the four scored questions", () => {
-    const counts = [3, 3, 3, 3, 3, 2, 2, 2];
-    for (const lesson of getAllLessons()) {
-      const experiences = lesson.quiz_items.filter((item) => item.type === "experience");
-      expect(experiences).toHaveLength(counts[lesson.lesson_number - 1]);
-      expect(lesson.quiz_items.slice(0, 8).every((item) => item.type !== "experience")).toBe(true);
-      experiences.forEach((item, index) => {
-        expect(item.item_id).toBe(`L${lesson.lesson_number}_S${index + 1}`);
-        expect(item.question_number).toBe(index + 5);
-        expect(item.correct_answer).toBeUndefined();
-        expect(item.options).toEqual({});
-        expect(item.response_fields?.length).toBeGreaterThan(0);
-        expect(item.response_fields?.every((field) => field.response_type === "text")).toBe(true);
-        const next = lesson.quiz_items[lesson.quiz_items.indexOf(item) + 1];
-        expect(next.item_id).toBe(`${item.item_id}_confidence`);
-        expect(next.type).toBe("confidence_check");
-        expect(next.stem).toContain("your experience");
-        expect(Object.keys(next.options)).toEqual(["A", "B", "C", "D"]);
-      });
-    }
-  });
-
-  it("preserves the supplied lesson contexts and original response IDs", () => {
-    const distinctiveTopics = [
-      [1, "L1_S3", "fell or crashed"],
-      [2, "L2_S2", "moving fast hit something slower"],
-      [3, "L3_S1", "sting or buzzing vibration"],
-      [4, "L4_S3", "stayed loose or bent"],
-      [5, "L5_S3", "stop or push something heavy"],
-      [6, "L6_S1", "prevent damage during a collision"],
-      [7, "L7_S2", "harder to stop"],
-      [8, "L8_S1", "store energy before releasing"],
-    ] as const;
-    for (const [number, id, phrase] of distinctiveTopics) {
-      const item = getLessonQuizItems(number).find((question) => question.item_id === id)!;
-      expect(item.stem).toContain(phrase);
-      expect(item.response_fields!.every((field) => field.field_id.startsWith(`${id}_`))).toBe(true);
-    }
-    expect(JSON.stringify(getAllLessons())).not.toContain("XXX");
-    expect(getLessonQuizItems(2).find((item) => item.item_id === "L2_S3")?.response_fields)
-      .toContainEqual(expect.objectContaining({ field_id: "L2_S3_changed_more", response_type: "text" }));
-    expect(getLessonQuizItems(8).find((item) => item.item_id === "L8_S2")?.response_fields)
-      .toContainEqual(expect.objectContaining({ label: expect.stringContaining("warmth") }));
   });
 
   it("each lesson should have quiz items", () => {
