@@ -3,7 +3,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import TeacherDashboardView from "@/app/components/TeacherDashboardView";
 import type { UserContext } from "@/lib/auth";
-import { getLesson } from "@/lib/quiz-data";
 
 vi.mock("@/app/components/SurveyResultsSection", () => ({ default: () => null }));
 const teacher: UserContext = { geniusId: "teacher", userId: "teacher", name: "Teacher", email: null, role: "teacher", classId: "ea-class-1", assignmentId: "ea-task-1" };
@@ -15,14 +14,12 @@ let failureMode: "http" | "network";
 let questionText: string;
 let rating: number;
 let quizLesson: number;
-let quizVersion: number | undefined;
 let answers: object[];
 let strategies: object[];
 beforeEach(() => {
   failedEndpoints = new Set(); failureMode = "http";
   questionText = "How could we test this idea?"; rating = 4;
   quizLesson = 8;
-  quizVersion = undefined;
   answers = [{ student_id: "s1", student_name: "Student One", class_id: teacher.classId,
     assignment_id: teacher.assignmentId, lesson_number: 8, submitted_at: "2026-10-07T00:00:00Z",
     answers: { L8_Q1: "C", L8_Q2: "C", L8_Q3: "C", L8_Q4: "B" } }];
@@ -35,7 +32,7 @@ beforeEach(() => {
     }
     return { ok: true, json: async () => {
     if (input.startsWith("/api/content-publish")) return { items: published };
-    if (input.startsWith("/api/quiz-status")) return { quizStatus: { lesson_number: quizLesson, status: "published", quiz_version: quizVersion } };
+    if (input.startsWith("/api/quiz-status")) return { quizStatus: { lesson_number: quizLesson, status: "published" } };
     if (input.startsWith("/api/student-answers")) return { answers };
     if (input.startsWith("/api/strategy-cache")) return { results: strategies };
     if (input.startsWith("/api/content-rating")) return { ratings: [{ student_id: "s1", content_item_id: slides.id, rating }] };
@@ -57,54 +54,6 @@ it("shows the quiz-based cohort result without requiring a separate individual a
   expect(screen.queryByText("No individual record")).toBeNull();
   expect(screen.queryByText(/Not analyzed|0 analyzed|Cohort strategy distribution/)).toBeNull();
   expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
-});
-
-it("shows written experience responses and confidence beside quiz results without adding them to the score", async () => {
-  answers = [{ ...answers[0], answers: {
-    L8_Q1: "C", L8_Q2: "C", L8_Q3: "C", L8_Q4: "B",
-    L8_S1_object: "A wind-up toy", L8_S1_action: "I turn its key", L8_S1_confidence: "A",
-  } }];
-  render(<TeacherDashboardView user={teacher} />);
-  const cohort = screen.getByRole("region", { name: "Quiz-based cohort recommendation" });
-  expect(await within(cohort).findByText(/Correct answers: 2 of 4 \(50\.0%\)/)).toBeTruthy();
-  const experience = await screen.findByRole("region", { name: "Experience responses" });
-  expect(within(experience).getByText("A wind-up toy")).toBeTruthy();
-  expect(within(experience).getByText("I turn its key")).toBeTruthy();
-  expect(within(experience).getByText(/Very confident/)).toBeTruthy();
-  answers = [{ ...answers[0], answers: {
-    L8_Q1: "C", L8_Q2: "C", L8_Q3: "C", L8_Q4: "B",
-    L8_S1_object: "A stretched rubber band", L8_S1_action: "I pull it back", L8_S1_confidence: "B",
-  } }];
-  fireEvent.click(screen.getByRole("button", { name: "Refresh dashboard" }));
-  expect(await within(experience).findByText("A stretched rubber band")).toBeTruthy();
-  expect(within(experience).queryByText("A wind-up toy")).toBeNull();
-  expect(within(experience).getByText(/Somewhat confident/)).toBeTruthy();
-});
-
-it("counts an upgraded legacy submission as awaiting experience responses until the full quiz is saved", async () => {
-  quizVersion = 2;
-  render(<TeacherDashboardView user={teacher} />);
-  expect(await screen.findByText("1 awaiting experience responses")).toBeTruthy();
-  const responseCard = screen.getByText("Students who completed the current quiz").closest("div")!;
-  expect(within(responseCard).getByText("0")).toBeTruthy();
-  const row = screen.getAllByText("Student One").find((node) => node.closest("tr"))!.closest("tr")!;
-  expect(within(row).getByText("Awaiting experience responses")).toBeTruthy();
-  const cohort = screen.getByRole("region", { name: "Quiz-based cohort recommendation" });
-  expect(within(cohort).getByText(/Correct answers: 2 of 4 \(50\.0%\)/)).toBeTruthy();
-
-  const complete: Record<string, string> = {};
-  for (const item of getLesson(8)!.quiz_items) {
-    if (item.type === "experience") {
-      for (const field of item.response_fields ?? []) complete[field.field_id] = "A remembered experience";
-    } else complete[item.item_id] = item.correct_answer ?? "A";
-  }
-  answers = [{ ...answers[0], answers: complete }];
-  // A failed status refresh must retain version 2 for the completion check.
-  failedEndpoints.add("/api/quiz-status");
-  fireEvent.click(screen.getByRole("button", { name: "Refresh dashboard" }));
-  expect(await within(row).findByText("Completed")).toBeTruthy();
-  expect(within(responseCard).getByText("1")).toBeTruthy();
-  expect(screen.queryByText("1 awaiting experience responses")).toBeNull();
 });
 
 it("keeps individual recommendations separate and ignores a legacy cohort cache entry", async () => {

@@ -4,7 +4,7 @@ import { scopedTaskFetch } from "@/lib/client-auth";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import ExperienceQuizResults from "./ExperienceQuizResults";
+import SurveyBuilderView from "./SurveyBuilderView";
 import MaterialActivityView from "./MaterialActivityView";
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "./SlidesWorkspace";
 import PublishedSlidesList from "./PublishedSlidesList";
@@ -13,7 +13,6 @@ import { parseMaterialActivity } from "@/lib/material-activities";
 import { downloadStudentMaterial, type PreparedMaterialFile } from "@/lib/material-export";
 import type { UserContext } from "@/lib/auth";
 import { recommendWorkspaceCohort, workspaceQuizAnswers } from "@/lib/cohort-recommendation";
-import { CURRENT_QUIZ_VERSION, getQuizItemsForVersion, isQuizComplete } from "@/lib/quiz-assessment";
 import {
   engagementStrategies as strategies,
   getEngagementStrategyDescription,
@@ -293,8 +292,9 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
   const [selectedLesson, setSelectedLesson] = useState<number | null>(null);
   const [quizItems, setQuizItems] = useState<QuizItem[]>([]);
   const [quizStatus, setQuizStatus] = useState<"draft" | "published" | "closed">("draft");
-  const [quizVersion, setQuizVersion] = useState(1);
   const [publishingQuiz, setPublishingQuiz] = useState(false);
+  // Assessment step sub-tabs (quiz vs survey), mirrors the tab pattern in StudentView.
+  const [assessmentTab, setAssessmentTab] = useState<"quiz" | "survey">("quiz");
 
   // Student answers
   const [studentAnswers, setStudentAnswers] = useState<StudentAnswer[]>([]);
@@ -522,14 +522,10 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
         if (data.quizStatus) {
           setSelectedLesson(data.quizStatus.lesson_number);
           setQuizStatus(data.quizStatus.status);
-          setQuizVersion(data.quizStatus.quiz_version ?? 1);
           // Load quiz items for this lesson
           scopedTaskFetch({ classId, assignmentId }, `/api/lessons/${data.quizStatus.lesson_number}`)
             .then((r) => r.json())
-            .then((lesson) => setQuizItems(getQuizItemsForVersion(
-              lesson.quiz_items ?? [],
-              data.quizStatus.status === "draft" ? CURRENT_QUIZ_VERSION : data.quizStatus.quiz_version,
-            )));
+            .then((lesson) => setQuizItems(lesson.quiz_items ?? []));
         }
       })
       .catch(() => {});
@@ -1004,7 +1000,6 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
         body: JSON.stringify({ classId, assignmentId, lessonNumber, status: "draft", publishedBy: user.userId }),
       });
       setQuizStatus("draft");
-      setQuizVersion(CURRENT_QUIZ_VERSION);
     }
   };
 
@@ -1040,7 +1035,6 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
       }
 
       setQuizStatus("published");
-      setQuizVersion(data.quizStatus?.quiz_version ?? CURRENT_QUIZ_VERSION);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to publish quiz.",
@@ -1565,11 +1559,6 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
 
   const selectedLessonData =
     lessons.find((lesson) => lesson.lesson_number === selectedLesson) ?? null;
-  const currentQuizAnswers = studentAnswers.filter((answer) => answer.lesson_number === selectedLesson);
-  const completeQuizAnswers = currentQuizAnswers.filter((answer) => quizVersion < CURRENT_QUIZ_VERSION
-    || isQuizComplete(getQuizItemsForVersion(quizItems, quizVersion), answer.answers));
-  const completeStudentIds = new Set(completeQuizAnswers.map((answer) => answer.student_id));
-  const pendingExperienceCount = currentQuizAnswers.length - completeQuizAnswers.length;
 
   const slidesAvailable = Boolean(classId && assignmentId);
   const slideStrategies = selectedStrategies.filter((strategy): strategy is SlideStrategy => SLIDE_STRATEGIES.includes(strategy as SlideStrategy));
@@ -1661,8 +1650,32 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 1</p>
                 <h2 className="text-2xl font-semibold text-slate-900">Assessment</h2>
-                <p className="mt-1 text-sm text-slate-500">Publish one quiz with knowledge questions followed by questions about students&apos; experiences. Every question includes a confidence check.</p>
+                <p className="mt-1 text-sm text-slate-500">Give students a quiz, a survey, or both for this learning task.</p>
               </div>
+
+              {/* Quiz / Survey tabs sit at the top of the Assessment step. Lessons are ready-made quizzes, so the lesson picker lives in the Quiz tab. */}
+              <div className="flex gap-2">
+                {([
+                  { id: "quiz", label: "Quiz" },
+                  { id: "survey", label: "Survey" },
+                ] as const).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setAssessmentTab(tab.id)}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                      assessmentTab === tab.id
+                        ? "bg-[#BA0C2F] text-white"
+                        : "border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {assessmentTab === "quiz" && (
+                <>
                 {selectedLessonData && (
                   <div className="rounded-2xl border border-[#BA0C2F]/15 bg-[#BA0C2F]/5 p-5">
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#BA0C2F]">Learning objective</p>
@@ -1681,17 +1694,21 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                         className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${selectedLesson === lesson.lesson_number ? "border-[#BA0C2F] bg-[#BA0C2F]/5 ring-2 ring-[#BA0C2F]" : "border-slate-200 hover:border-slate-300"}`}>
                         <p className="font-semibold text-slate-800">{lesson.lesson_title}</p>
                         <p className="mt-1 text-xs text-slate-500">
-                          {lesson.quiz_items.filter((q) => q.type !== "confidence_check").length} questions
+                          {lesson.quiz_items.filter((q) => q.type === "multiple_choice").length} questions
                         </p>
                       </button>
                     ))}
                   </div>
                 </div>
+                </>
+              )}
+
+
               {/* Quiz preview */}
-              {selectedLesson && quizItems.length > 0 && (
+              {selectedLesson && quizItems.length > 0 && assessmentTab === "quiz" && (
                 <div className="grid gap-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase text-slate-400">Quiz preview ({quizItems.filter((q) => q.type !== "confidence_check").length} questions + confidence checks)</p>
+                    <p className="text-xs font-semibold uppercase text-slate-400">Quiz preview ({quizItems.filter((q) => q.type === "multiple_choice").length} questions + confidence checks)</p>
                     <span className={`rounded-full px-3 py-1 text-xs font-semibold ${quizStatus === "published" ? "bg-emerald-100 text-emerald-700" : quizStatus === "closed" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-700"}`}>
                       {quizStatus}
                     </span>
@@ -1699,19 +1716,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                   <div className="max-h-80 overflow-y-auto rounded-2xl border border-slate-100 bg-slate-50 p-4">
                     {quizItems.map((item, index) => (
                       <div key={item.item_id} className={`mb-3 ${item.type === "confidence_check" ? "ml-6 text-slate-500 italic" : ""}`}>
-                        <p className="text-sm font-medium">{item.question_number ? `${item.question_number}. ` : ""}{item.stem}</p>
-                        {item.type === "experience" && (
-                          <div className="mt-2 space-y-2">
-                            <p className="text-xs font-semibold text-slate-500">Written response · Not graded</p>
-                            {item.example && <p className="text-xs text-slate-500">{item.example}</p>}
-                            {(item.response_fields ?? []).map((field) => (
-                              <div key={field.field_id} className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-600">
-                                <span className="font-medium">{field.label}</span>
-                                {field.response_type === "choice" && field.options?.length ? <span> — {field.options.join(" / ")}</span> : <span> — Student writes an answer</span>}
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <p className="text-sm font-medium">{item.stem}</p>
                         {item.type === "multiple_choice" && item.image && (
                           <button
                             type="button"
@@ -1763,6 +1768,13 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                 </div>
               )}
 
+              {/* Teacher-authored surveys (UC-SV-01_V1, #95) — belong to the learning task, so no lesson is needed */}
+              {assessmentTab === "survey" && (
+                <div>
+                  <SurveyBuilderView classId={classId} assignmentId={assignmentId} />
+                </div>
+              )}
+
               <div className="flex items-center justify-between">
                 <button type="button" disabled className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-300">Previous step</button>
                 <button type="button" onClick={() => setCurrentStep(2)} className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-100">Next step</button>
@@ -1798,24 +1810,18 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
                   {answersError} Select Refresh to try again.{studentAnswers.length > 0 ? " Showing previously loaded responses." : ""}
                 </p>}
                 {(!answersError || studentAnswers.length > 0) && <p className="mt-2 text-sm text-slate-700">
-                  <span className="font-semibold">{completeQuizAnswers.length}</span> student{completeQuizAnswers.length === 1 ? " has" : "s have"} {quizVersion >= CURRENT_QUIZ_VERSION ? "completed the quiz." : "answered so far."}
-                </p>}
-                {pendingExperienceCount > 0 && <p className="mt-2 text-sm text-amber-800">
-                  {pendingExperienceCount} {pendingExperienceCount === 1 ? "student is" : "students are"} awaiting experience responses and confidence checks. Earlier knowledge answers remain available for analysis.
+                  <span className="font-semibold">{studentAnswers.length}</span> student{studentAnswers.length === 1 ? " has" : "s have"} answered so far.
                 </p>}
                 {studentAnswers.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {studentAnswers.map((sa) => (
                       <span key={sa.student_id} className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-600 border border-slate-200">
                         {sa.student_name}
-                        {quizVersion >= CURRENT_QUIZ_VERSION && !completeStudentIds.has(sa.student_id) && <span> · Awaiting experience responses</span>}
                       </span>
                     ))}
                   </div>
                 )}
               </div>
-
-              <ExperienceQuizResults lessonNumber={selectedLesson} answers={studentAnswers} />
 
               {/* Cohort analysis */}
               <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
