@@ -1,4 +1,4 @@
-import { ANALOGY_OPENING_CONTRACT_VERSION, SIX_STEP_REVIEW_CONTRACT_VERSION, SLIDE_CONTRACT_VERSION, isSlideAsset, visibleVisualIds, type SlideDeck, type SlideDraft, type SlideStrategy } from "./model";
+import { ANALOGY_OPENING_CONTRACT_VERSION, SIX_STEP_REVIEW_CONTRACT_VERSION, SLIDE_CONTRACT_VERSION, draftVisibleVisualIds, isSlideAsset, type SlideDeck, type SlideDraft, type SlideStrategy } from "./model";
 import { analogyMappingIndex, resolveAnalogyMethod } from "./analogy-methods";
 import { analogyStudentFields } from "./analogy";
 
@@ -122,7 +122,7 @@ export function teachingErrors(draft: SlideDraft, lessonNumber?: number): string
   if (draft.slides[1]?.stage === "prediction") {
     for (const [i, slide] of draft.slides.slice(0, 2).entries()) {
       for (const field of ["body", "task"] as const) {
-        if (/(?:^|[.!?]\s+)(?:now\s+)?(?:watch|look at|study the (?:image|picture)|observe the (?:image|picture))\b/iu.test(slide[field])) {
+        if (!draftVisibleVisualIds(draft, "cognitive conflict", i).length && /(?:^|[.!?]\s+)(?:now\s+)?(?:watch|look at|study the (?:image|picture)|observe the (?:image|picture))\b/iu.test(slide[field])) {
           errors.push(`Slide ${i + 1}.${field}: describe or imagine the setup in words; no media is displayed before the prediction.`);
         }
         if (/\b(?:shape|outline)\s+changes?\b[^.!?]*\b(?:while|when|as)\s+(?:it|the (?:ball|object))\s+(?:is|gets|becomes)\s+(?:visibly\s+)?(?:squashed|flattened|deformed)\b/iu.test(slide[field])) {
@@ -154,14 +154,16 @@ export function imageContext(draft: SlideDraft, strategy: SlideStrategy, visualI
     ...(strategy === "analogy" && draft.analogyPlan ? { mapping: { ...(draft.analogyMethod === "six-step" ? {} : { hint: draft.analogyPlan.mappingHint }), starter: draft.analogyPlan.responseStarter, sharedRelation: draft.analogyPlan.sharedRelation } } : {}),
     ...(strategy === "analogy" && visualId === "variation" ? { baseline: draft.visuals.find(visual => visual.id === "target") } : {}),
     ...(draft.analogyMethod === "six-step" && visualId === "target" ? { phenomenon: draft.visuals.find(visual => visual.id === "phenomenon") } : {}),
+    ...(strategy === "cognitive conflict" && visualId === "evidence" && imageReferenceId(draft, visualId) ? { phenomenon: draft.visuals.find(visual => visual.id === "phenomenon") } : {}),
     ...(strategy === "analogy" ? { analogyMethod: resolveAnalogyMethod(draft.analogyMethod) } : {}),
-    slides: draft.slides.flatMap((slide, index) => visibleVisualIds(strategy, index, draft.analogyMethod, draft.analogyPlan?.boundaryDecision === "include").includes(visualId)
+    slides: draft.slides.flatMap((slide, index) => draftVisibleVisualIds(draft, strategy, index).includes(visualId)
       ? [{ number: index + 1, stage: slide.stage, title: slide.title, body: slide.body, task: slide.task }] : []) };
 }
 
 export function imageReferenceId(draft: SlideDraft, id: string): string | undefined {
   if (id === "variation") return "target";
   if (draft.analogyMethod === "six-step" && id === "target") return "phenomenon";
+  if (id === "evidence" && draft.slides[1]?.stage === "prediction" && draft.visuals.some(visual => visual.id === "phenomenon")) return "phenomenon";
   return undefined;
 }
 

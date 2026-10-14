@@ -204,7 +204,9 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     const key = imageCheckKey(target, visualId);
     if (!force && existing?.key === key && existing.imageData === asset.data) return target;
     setStatus(`Checking ${visualId} image against the slide text...`);
-    const reference = visualId === "variation" ? target.assets.target : target.strategy === "analogy" && target.draft.analogyPlan && visualId === "target" ? target.assets.analogue : undefined;
+    const reference = target.strategy === "cognitive conflict" && imageReferenceId(target.draft, visualId) === "phenomenon"
+      ? target.assets.phenomenon
+      : visualId === "variation" ? target.assets.target : target.strategy === "analogy" && target.draft.analogyPlan && visualId === "target" ? target.assets.analogue : undefined;
     const phenomenon = target.draft.analogyMethod === "six-step" && visualId === "target" ? target.assets.phenomenon : undefined;
     try {
       const result = await post("/api/slides/check", { lessonNumber: target.lessonNumber, strategy: target.strategy, draft: target.draft, textModel: target.modelSelection?.textModel, classroomContext: target.classroomContext ?? "", visualId,

@@ -83,7 +83,8 @@ it.each(versions)("preserves cognitive conflict's prediction-before-evidence con
   const prompt = slidePrompt(lesson, strategy, undefined, "", undefined, { version, referenceText: source.text });
   const instructions = effective(prompt.system);
   expect(instructions).toMatch(/(?:WRITE|written)[^.\n]{0,100}prediction/iu);
-  expect(instructions).toContain("first two slides have NO image, particular predicted outcome");
+  expect(instructions).toContain("phenomenon picture is visible on pages 1-2");
+  expect(instructions).toContain("first two slides reveal no particular predicted outcome");
   expect(instructions).toContain("evidence image first appears on slide 3");
   expect(instructions).toContain("Your prediction:");
   expect(instructions).toContain("What we observed in the activity:");
@@ -99,7 +100,7 @@ it.each(versions)("preserves cognitive conflict's prediction-before-evidence con
   expect(evidence).not.toContain("Describe only the inspectable unexpected result");
   const prediction = schemaStages(strategy).find(stage => stage.properties.stage.enum.includes("prediction"))!;
   expect(prediction.properties.task.description).toMatch(/WRITE a prediction[\s\S]*before seeing the result/iu);
-  expect(Array.from({ length: 5 }, (_, index) => visibleVisualIds(strategy, index))).toEqual([[], [], ["evidence"], ["evidence"], []]);
+  expect(Array.from({ length: 5 }, (_, index) => visibleVisualIds(strategy, index))).toEqual([["phenomenon"], ["phenomenon"], ["evidence"], ["evidence"], []]);
 });
 
 it.each(versions)("preserves experience bridging's accessible lived-experience sequence in %s", async version => {

@@ -20,7 +20,7 @@ import { GET, POST as startDraft } from "@/app/api/slides/route";
 import { POST as startImage } from "@/app/api/slides/image/route";
 import { POST as startCheck } from "@/app/api/slides/check/route";
 import { WorkspaceError } from "@/lib/workspace";
-import { slideFixture, deckFixture } from "../fixtures/slides";
+import { cognitiveConflictOpeningDraft, slideFixture, deckFixture } from "../fixtures/slides";
 import { analogyPlanFixture } from "../fixtures/analogy";
 import { loadSlideSource } from "@/lib/slides/source-prompts";
 import { analogyPromptRevision, SLIDE_PROMPT_REVISION } from "@/lib/slides/prompt-versions";
@@ -38,12 +38,25 @@ beforeEach(() => {
   mocks.session.mockResolvedValue({ role: "teacher", geniusId: "teacher-test" });
   mocks.context.mockResolvedValue({});
   mocks.answers.mockResolvedValue([]);
-  mocks.complete.mockResolvedValue(completion(slideFixture("cognitive conflict")));
+  mocks.complete.mockResolvedValue(completion(cognitiveConflictOpeningDraft()));
   mocks.generate.mockResolvedValue({ data: [{ b64_json: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64") }] });
   mocks.edit.mockResolvedValue({ data: [{ b64_json: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64") }] });
 });
 afterEach(() => vi.unstubAllEnvs());
 describe("authorized slide APIs", () => {
+  it.each(["generate", "review"] as const)("requires the opening phenomenon in new conflict %s output while accepting a legacy revision input", async operation => {
+    const legacy = slideFixture("cognitive conflict");
+    const data = { ...base, operation, ...(operation === "review" ? { draft: legacy } : {}) };
+    mocks.complete.mockResolvedValueOnce(completion(legacy));
+    const missing = await POST(req(data));
+    expect(missing.status).toBe(502);
+    expect((await missing.json()).error).toContain("opening phenomenon image plan is missing");
+    mocks.complete.mockResolvedValueOnce(completion(cognitiveConflictOpeningDraft()));
+    const ready = await POST(req(data));
+    expect(ready.status).toBe(200);
+    expect((await ready.json()).draft.visuals.map((visual: { id: string }) => visual.id)).toEqual(["phenomenon", "evidence"]);
+  });
+
   it("accepts a complete four-page experience draft in generation and revision without inserting a filler connection", async () => {
     const draft = slideFixture("experience bridging");
     draft.slides.splice(3, 1);
@@ -414,7 +427,7 @@ describe("slide quality checks", () => {
     expect(mocks.complete).not.toHaveBeenCalled();
   });
   it("retains overlong drafts for bounded correction but never passes their output check", async () => {
-    const draft = slideFixture("cognitive conflict"); draft.slides[0].body = "word ".repeat(35).trim();
+    const draft = cognitiveConflictOpeningDraft(); draft.slides[0].body = "word ".repeat(35).trim();
     mocks.complete.mockResolvedValue(completion(draft));
     const generated = await POST(req());
     expect(generated.status).toBe(200);

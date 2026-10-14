@@ -1,5 +1,5 @@
 import { assertSlideLayout, containImage, wrapText } from "@/scripts/slides/layout-rules.mjs";
-import { draftErrors, isSlideAsset, visibleVisualIds, type SlideDeck } from "./model";
+import { draftErrors, draftVisibleVisualIds, isSlideAsset, type SlideDeck } from "./model";
 import { getSlideLearningTarget } from "./learning-target";
 import { analogyMappingIndex } from "./analogy-methods";
 
@@ -15,7 +15,7 @@ export function slideElements(deck: SlideDeck, index: number): SlideElement[] {
   const sixStep = deck.strategy === "analogy" && deck.draft.analogyMethod === "six-step";
   const privateQuestionRecap = sixStep || deck.strategy !== "analogy";
   const showLearningTarget = deck.strategy === "experience bridging" ? slide.stage === "name" : index === 0;
-  const images = visibleVisualIds(deck.strategy, index, deck.draft.analogyMethod, deck.draft.analogyPlan?.boundaryDecision === "include");
+  const images = draftVisibleVisualIds(deck.draft, deck.strategy, index);
   const openingPair = deck.strategy === "analogy" && index === 0 && images.length === 2;
   const mapping = deck.strategy === "analogy" && index === analogyMappingIndex(deck.draft.analogyMethod) ? deck.draft.analogyPlan : undefined;
   const frame = (left: number, top: number, width: number, height: number) => ({ left, top, width, height });
@@ -38,7 +38,10 @@ export function slideElements(deck: SlideDeck, index: number): SlideElement[] {
       elements.push(text("mapping-hint", mapping.mappingHint, frame(64, 524, 1152, 66), 24, "body", false, "1553A4"));
     }
   } else if (images.length === 1) {
-    elements.push(text("body", slide.body, index === 0 ? frame(64, 240, 528, 172) : frame(64, 192, 528, 204), 28));
+    // The conflict comparison includes two required labels. Give their six
+    // wrapped lines room while retaining a gap before the student task.
+    const bodyHeight = deck.strategy === "cognitive conflict" && slide.stage === "compare" ? 232 : 204;
+    elements.push(text("body", slide.body, index === 0 ? frame(64, 240, 528, 172) : frame(64, 192, 528, bodyHeight), 28));
     elements.push(text("task", slide.task, frame(64, 434, 528, 212), 28, "body", true, "087368"));
   } else {
     elements.push(text("body", slide.body, frame(64, index === 0 || showLearningTarget ? 240 : 216, 1152, 176), 34));

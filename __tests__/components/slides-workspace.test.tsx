@@ -568,8 +568,10 @@ it.each(["text", "image"])("does not reuse an earlier clean result when a %s rec
   expect(screen.queryByText(/No revision is needed/)).toBeNull();
   expect(screen.getByRole("heading", { name: "Review incomplete" })).toBeTruthy();
   expect(screen.queryByRole("region", { name: "AI review suggestions" })).toBeNull();
-  const saved = mocks.save.mock.calls.at(-1)![1];
-  expect(kind === "text" ? saved.checks.text : saved.checks.images.target).toBeUndefined();
+  await waitFor(() => {
+    const saved = mocks.save.mock.calls.at(-1)![1];
+    expect(kind === "text" ? saved.checks.text : saved.checks.images.target).toBeUndefined();
+  });
   expect((screen.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(false);
   expect((screen.getByRole("button", { name: "Download PPTX" }) as HTMLButtonElement).disabled).toBe(false);
 });

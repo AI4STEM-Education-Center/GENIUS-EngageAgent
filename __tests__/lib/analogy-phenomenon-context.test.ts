@@ -121,7 +121,7 @@ it("allows a bounded three-part private rationale without expanding other plan f
 });
 
 it("invalidates v6 reviews and teacher acceptance while retaining usable legacy images", () => {
-  expect(analogyPromptRevision("six-step")).toBe("analogy-six-step-20261003-v7:six-step");
+  expect(analogyPromptRevision("six-step")).toBe("analogy-six-step-20261014-v8:six-step");
   expect(SIX_STEP_REVIEW_CONTRACT_VERSION).toBe("analogy-lesson-context-20261003");
   const deck = sixStepDeck();
   const oldKey = (key: string) => {

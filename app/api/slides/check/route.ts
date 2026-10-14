@@ -1,7 +1,7 @@
 import { beginSlideJob } from "@/lib/slides/jobs";
 import { draftErrors, isSlideAsset } from "@/lib/slides/model";
 import { resolveAnalogyMethod } from "@/lib/slides/analogy-methods";
-import { teachingErrors } from "@/lib/slides/quality";
+import { imageReferenceId, teachingErrors } from "@/lib/slides/quality";
 import { slideCheckFormat, slideCheckPrompt, sourceAdaptation } from "@/lib/slides/prompts";
 import { loadSlideSource } from "@/lib/slides/source-prompts";
 import { textReviewFormat } from "@/lib/slides/review";
@@ -29,12 +29,13 @@ export async function POST(request: Request) {
     if (visualId === undefined && body.asset !== undefined) throw new SlideRequestError("Select the image to check.");
     const mappingPair = strategy === "analogy" && !!draft.analogyPlan && visualId === "target";
     const continuity = mappingPair && resolveAnalogyMethod(draft.analogyMethod) === "six-step";
-    if (!continuity && Buffer.byteLength(JSON.stringify(body), "utf8") > 4_600_000) throw new SlideRequestError("Slide request is too large.", 413);
+    const evidenceContinuation = strategy === "cognitive conflict" && visualId === "evidence" && imageReferenceId(draft, visualId) === "phenomenon";
+    if (!continuity && !evidenceContinuation && Buffer.byteLength(JSON.stringify(body), "utf8") > 4_600_000) throw new SlideRequestError("Slide request is too large.", 413);
     if (continuity && (!isSlideAsset(body.phenomenonAsset) || body.phenomenonAsset.data.length > 4_500_024)) throw new SlideRequestError("Provide the phenomenon image to check target continuity.", 422);
     if (!continuity && body.phenomenonAsset !== undefined) throw new SlideRequestError("A phenomenon reference is only allowed for a six-step target check.");
-    const pair = (strategy === "analogy" && visualId === "variation") || mappingPair;
-    if (pair && (!isSlideAsset(body.referenceAsset) || body.referenceAsset.data.length > 4_500_024)) throw new SlideRequestError(mappingPair ? "Provide the familiar image to check the student comparison." : "Provide the baseline image to compare with its variation.", 422);
-    if (!pair && body.referenceAsset !== undefined) throw new SlideRequestError("A reference is only allowed for an analogy mapping or variation check.");
+    const pair = (strategy === "analogy" && visualId === "variation") || mappingPair || evidenceContinuation;
+    if (pair && (!isSlideAsset(body.referenceAsset) || body.referenceAsset.data.length > 4_500_024)) throw new SlideRequestError(evidenceContinuation ? "Provide the opening phenomenon image to check evidence continuity." : mappingPair ? "Provide the familiar image to check the student comparison." : "Provide the baseline image to compare with its variation.", 422);
+    if (!pair && body.referenceAsset !== undefined) throw new SlideRequestError("A reference is only allowed for an analogy mapping, variation, or cognitive-conflict evidence check.");
     const hardErrors = [...draftErrors(draft, strategy), ...teachingErrors(draft, lesson.lessonNumber)];
     if (visualId === undefined && hardErrors.length) return slideJson({ issues: hardErrors, model: "output-rules" });
     existingGenerationKey();
@@ -58,9 +59,9 @@ export async function POST(request: Request) {
         { type: "input_text", text: prompt.user },
         ...(continuity ? [{ type: "input_text" as const, text: "PHENOMENON (first); the target must continue this same scientific event and apparatus." },
           { type: "input_image" as const, image_url: (body.phenomenonAsset as { data: string }).data, detail: "high" as const }] : []),
-        ...(pair ? [{ type: "input_text" as const, text: continuity ? "FAMILIAR situation (second); compare its useful relation with the target." : mappingPair ? "FAMILIAR situation (first); compare the science situation against this one." : "BASELINE image (first); compare the next image against this one." },
+        ...(pair ? [{ type: "input_text" as const, text: evidenceContinuation ? "PHENOMENON SETUP (first); this is the scene students see before committing their prediction. Check that the evidence preserves its objects and test conditions." : continuity ? "FAMILIAR situation (second); compare its useful relation with the target." : mappingPair ? "FAMILIAR situation (first); compare the science situation against this one." : "BASELINE image (first); compare the next image against this one." },
           { type: "input_image" as const, image_url: (body.referenceAsset as { data: string }).data, detail: "high" as const },
-          { type: "input_text" as const, text: continuity ? "TARGET situation (third); inspect continuity with the first image and the mapping with the second." : mappingPair ? "SCIENCE situation (second)." : "VARIATION image (second)." }] : []),
+          { type: "input_text" as const, text: evidenceContinuation ? "EVIDENCE (second); inspect the planned later moments of the same event, without silently changing apparatus, materials or conditions to create a surprise." : continuity ? "TARGET situation (third); inspect continuity with the first image and the mapping with the second." : mappingPair ? "SCIENCE situation (second)." : "VARIATION image (second)." }] : []),
         { type: "input_image", image_url: (body.asset as { data: string }).data, detail: "high" },
       ] }],
     }, visualId === undefined ? { kind: "text-check", model, strategy, draft } : { kind: "image-check", model });

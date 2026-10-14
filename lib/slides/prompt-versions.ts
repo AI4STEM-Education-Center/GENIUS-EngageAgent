@@ -1,6 +1,6 @@
-export const SLIDE_PROMPT_REVISION = "student-inquiry-strategies-20261005-v5";
-export const ANALOGY_PROMPT_REVISION = "analogy-six-step-20261001-v4";
-export const SIX_STEP_PROMPT_REVISION = "analogy-six-step-20261003-v7";
+export const SLIDE_PROMPT_REVISION = "student-inquiry-strategies-20261014-v6";
+export const ANALOGY_PROMPT_REVISION = "analogy-illustrated-opening-20261014-v5";
+export const SIX_STEP_PROMPT_REVISION = "analogy-six-step-20261014-v8";
 export function analogyPromptRevision(method?: AnalogyMethod) {
   const resolved = resolveAnalogyMethod(method);
   return `${resolved === "six-step" ? SIX_STEP_PROMPT_REVISION : ANALOGY_PROMPT_REVISION}:${resolved}`;

@@ -162,5 +162,5 @@ it("preserves controlled-condition evidence instead of forcing every conflict in
   expect(generated).toContain("initial setting and the same later outcome for each trial");
   expect(generated).not.toMatch(/(?:2-3|two or three) (?:time panels|ordered moments)/iu);
   const schema = slideOutputFormat("cognitive conflict").json_schema.schema as { properties: { visuals: { items: { anyOf: { properties: { prompt: { description: string } } }[] } } } };
-  expect(schema.properties.visuals.items.anyOf[0].properties.prompt.description).toContain("ordered moments OR controlled conditions");
+  expect(schema.properties.visuals.items.anyOf[1].properties.prompt.description).toContain("ordered moments OR controlled conditions");
 });

@@ -3,7 +3,7 @@ import { analogyStages, analogyVisualIds, analogyVisibleVisualIds, isAnalogyMeth
 
 export const STRATEGIES = ["analogy", "cognitive conflict", "experience bridging"] as const;
 export type SlideStrategy = typeof STRATEGIES[number];
-export const SLIDE_CONTRACT_VERSION = "student-inquiry-strategies-20261005-v5";
+export const SLIDE_CONTRACT_VERSION = "student-inquiry-strategies-20261014-v6";
 export const ANALOGY_OPENING_CONTRACT_VERSION = "analogy-six-step-20261001";
 export const SIX_STEP_REVIEW_CONTRACT_VERSION = "analogy-lesson-context-20261003";
 export const STAGES: Record<SlideStrategy, readonly string[]> = {
@@ -21,7 +21,7 @@ export function stageOptions(strategy: SlideStrategy, index: number, method?: An
   return strategy === "analogy" && method !== "six-step" && index === 3 ? ["reflect", "limits"] : [methodStages(strategy, method, includeLimits)[index]];
 }
 export const VISUALS: Record<SlideStrategy, readonly string[]> = {
-  analogy: ["analogue", "target", "variation"], "cognitive conflict": ["evidence"], "experience bridging": ["experience"],
+  analogy: ["analogue", "target", "variation"], "cognitive conflict": ["phenomenon", "evidence"], "experience bridging": ["experience"],
 };
 export function methodVisualIds(strategy: SlideStrategy, method?: AnalogyMethod): readonly string[] {
   return strategy === "analogy" ? analogyVisualIds(method) : VISUALS[strategy];
@@ -42,8 +42,19 @@ export function isSlideStrategy(value: unknown): value is SlideStrategy {
 // Reveal order is owned by the application, never by model-generated coordinates.
 export function visibleVisualIds(strategy: SlideStrategy, index: number, method?: AnalogyMethod, includeLimits = false): readonly string[] {
   if (strategy === "analogy") return analogyVisibleVisualIds(method, index, includeLimits);
-  if (strategy === "cognitive conflict") return index === 2 || index === 3 ? ["evidence"] : [];
+  if (strategy === "cognitive conflict") return index === 0 || index === 1 ? ["phenomenon"] : index === 2 || index === 3 ? ["evidence"] : [];
   return index === 0 || index === 1 ? ["experience"] : [];
+}
+
+// Previously saved conflict decks contain only the later result image. Keep
+// their opening text-only rather than showing that result before a prediction.
+function legacyConflictVisuals(visuals: unknown): boolean {
+  return Array.isArray(visuals) && visuals.length === 1 && record(visuals[0]) && visuals[0].id === "evidence";
+}
+
+export function draftVisibleVisualIds(draft: SlideDraft, strategy: SlideStrategy, index: number): readonly string[] {
+  if (strategy === "cognitive conflict" && index < 2 && legacyConflictVisuals(draft.visuals)) return [];
+  return visibleVisualIds(strategy, index, draft.analogyMethod, draft.analogyPlan?.boundaryDecision === "include");
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -91,7 +102,9 @@ export function draftErrors(value: unknown, strategy: SlideStrategy, editable = 
     if (!Array.isArray(slide.teacherNotes) || slide.teacherNotes.length > 2) errors.push(`${path}.teacherNotes: use at most two notes.`);
     else slide.teacherNotes.forEach((note, n) => text(note, `${path}.teacherNotes ${n + 1}`, studentInquiry ? 900 : 300, studentInquiry ? 150 : 50));
   });
-  const ids = methodVisualIds(strategy, method);
+  // Read/edit/export old decks without inventing a missing opening illustration;
+  // the generation schema still requires the current two-image conflict plan.
+  const ids = strategy === "cognitive conflict" && legacyConflictVisuals(value.visuals) ? ["evidence"] : methodVisualIds(strategy, method);
   if (!Array.isArray(value.visuals) || value.visuals.length !== ids.length) errors.push(`Deck: ${ids.length} image plan(s) required.`);
   else value.visuals.forEach((visual, index) => {
     const path = `Image ${index + 1}`;

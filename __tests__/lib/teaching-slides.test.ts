@@ -114,8 +114,8 @@ describe("teaching slide contract", () => {
     expect(await after.file("[Content_Types].xml")!.async("string")).toContain('/ppt/slideMasters/slideMaster1.xml');
   });
   it("owns reveal timing without leaking future images into earlier slides", () => {
-    expect(visibleVisualIds("cognitive conflict", 0)).toEqual([]);
-    expect(visibleVisualIds("cognitive conflict", 1)).toEqual([]);
+    expect(visibleVisualIds("cognitive conflict", 0)).toEqual(["phenomenon"]);
+    expect(visibleVisualIds("cognitive conflict", 1)).toEqual(["phenomenon"]);
     expect(visibleVisualIds("cognitive conflict", 2)).toEqual(["evidence"]);
     expect(visibleVisualIds("analogy", 0)).toEqual(["analogue", "target"]);
     expect(visibleVisualIds("analogy", 1)).toEqual(["analogue", "target"]);
