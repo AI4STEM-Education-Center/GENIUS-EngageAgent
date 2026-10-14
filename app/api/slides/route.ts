@@ -47,6 +47,7 @@ export async function POST(request: Request) {
       max_output_tokens: limits.maxCompletionTokens,
     }, {
       kind: "draft", model, strategy, ...(analogyMethod ? { analogyMethod } : {}),
+      ...(strategy === "cognitive conflict" ? { requireOpeningPhenomenon: true } : {}),
       promptProvenance: { version: promptVersion, revision: strategy === "analogy" ? analogyPromptRevision(analogyMethod) : SLIDE_PROMPT_REVISION, sourceSha256: source.sha256, ...(analogyMethod ? { analogyMethod } : {}) },
     });
   } catch (error) { return slideFailure(error); }

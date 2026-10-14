@@ -164,10 +164,10 @@ it.each(["reference", "optimized"] as const)("keeps %s creation and revision on 
 });
 
 it("versions the six-step pedagogy correction without changing either legacy prompt revision", () => {
-  expect(analogyPromptRevision("six-step")).toBe("analogy-six-step-20261003-v7:six-step");
-  expect(analogyPromptRevision("reference-story")).toBe("analogy-six-step-20261001-v4:reference-story");
-  expect(analogyPromptRevision("predict-transfer")).toBe("analogy-six-step-20261001-v4:predict-transfer");
-  expect(analogyPromptRevision()).toBe("analogy-six-step-20261001-v4:predict-transfer");
+  expect(analogyPromptRevision("six-step")).toBe("analogy-six-step-20261014-v8:six-step");
+  expect(analogyPromptRevision("reference-story")).toBe("analogy-illustrated-opening-20261014-v5:reference-story");
+  expect(analogyPromptRevision("predict-transfer")).toBe("analogy-illustrated-opening-20261014-v5:predict-transfer");
+  expect(analogyPromptRevision()).toBe("analogy-illustrated-opening-20261014-v5:predict-transfer");
 });
 
 it("keeps exact-answer and concrete-boundary requirements in the six-step planning schema", () => {

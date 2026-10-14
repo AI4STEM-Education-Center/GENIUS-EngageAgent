@@ -1,5 +1,5 @@
 import { assertSlideLayout, containImage, wrapText } from "@/scripts/slides/layout-rules.mjs";
-import { draftErrors, isSlideAsset, visibleVisualIds, type SlideDeck } from "./model";
+import { draftErrors, draftVisibleVisualIds, isSlideAsset, type SlideDeck } from "./model";
 import { getSlideLearningTarget } from "./learning-target";
 import { analogyMappingIndex } from "./analogy-methods";
 
@@ -15,7 +15,7 @@ export function slideElements(deck: SlideDeck, index: number): SlideElement[] {
   const sixStep = deck.strategy === "analogy" && deck.draft.analogyMethod === "six-step";
   const privateQuestionRecap = sixStep || deck.strategy !== "analogy";
   const showLearningTarget = deck.strategy === "experience bridging" ? slide.stage === "name" : index === 0;
-  const images = visibleVisualIds(deck.strategy, index, deck.draft.analogyMethod, deck.draft.analogyPlan?.boundaryDecision === "include");
+  const images = draftVisibleVisualIds(deck.draft, deck.strategy, index);
   const openingPair = deck.strategy === "analogy" && index === 0 && images.length === 2;
   const mapping = deck.strategy === "analogy" && index === analogyMappingIndex(deck.draft.analogyMethod) ? deck.draft.analogyPlan : undefined;
   const frame = (left: number, top: number, width: number, height: number) => ({ left, top, width, height });

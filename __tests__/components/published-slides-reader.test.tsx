@@ -8,7 +8,7 @@ import SlidePreview from "@/app/components/SlidePreview";
 import { slideElements } from "@/lib/slides/layout";
 import type { SlideDeck } from "@/lib/slides/model";
 import type { PublishedSlideResponse } from "@/lib/slides/publication";
-import { deckFixture } from "../fixtures/slides";
+import { cognitiveConflictOpeningDeck, deckFixture } from "../fixtures/slides";
 import { sixStepDeck } from "../fixtures/analogy-six-step";
 
 const publicationId = "9b3951fe-578f-4df2-a20b-dd96b80ee70b";
@@ -53,6 +53,25 @@ it.each(["student", "teacher"] as const)("shows only the slide canvas while reta
   fireEvent.click(screen.getByRole("button", { name: "Enlarge slides" }));
   expect(screen.getAllByRole("region", { name: "Slide text" })).toHaveLength(1);
   expect(within(screen.getByRole("dialog")).getByRole("region", { name: "Slide text" }).classList.contains("sr-only")).toBe(true);
+});
+
+it.each(["student", "teacher"] as const)("shows the phenomenon first and reserves the later evidence for its own stage for %s", async audience => {
+  fetchMock.mockResolvedValue(reply(response(cognitiveConflictOpeningDeck())));
+  const { container } = render(<PublishedSlidesReader {...props} audience={audience} />);
+  await screen.findByText("Slide 1 of 5");
+  expect(container.querySelectorAll("image")).toHaveLength(1);
+  expect(container.querySelector("image")?.getAttribute("href")).toContain("phenomenon.jpg");
+  expect(container.innerHTML).not.toContain("evidence.jpg");
+  next();
+  expect(container.querySelector("image")?.getAttribute("href")).toContain("phenomenon.jpg");
+  if (audience === "student") {
+    expect((screen.getByRole("button", { name: "Next slide" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "I predict that the ball changes shape when pressed." } });
+  }
+  next();
+  expect(container.querySelectorAll("image")).toHaveLength(1);
+  expect(container.querySelector("image")?.getAttribute("href")).toContain("evidence.jpg");
+  expect(container.innerHTML).not.toContain("phenomenon.jpg");
 });
 
 it("requires a typed prediction before rendering any future evidence and compares the learner's recorded prediction", async () => {

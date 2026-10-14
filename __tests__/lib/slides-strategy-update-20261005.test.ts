@@ -110,10 +110,10 @@ it("requires a concrete conflict outcome rather than empty labels or output plac
 
 it.each(["cognitive conflict", "experience bridging"] as const)("invalidates old %s text/image approvals and teacher decisions under the new contract", strategy => {
   const deck = deckFixture(strategy);
-  expect(SLIDE_CONTRACT_VERSION).toBe("student-inquiry-strategies-20261005-v5");
-  deck.checks!.text!.key = deck.checks!.text!.key.replace(SLIDE_CONTRACT_VERSION, "student-facing-strategies-20261005-v4");
+  expect(SLIDE_CONTRACT_VERSION).toBe("student-inquiry-strategies-20261014-v6");
+  deck.checks!.text!.key = deck.checks!.text!.key.replace(SLIDE_CONTRACT_VERSION, "student-inquiry-strategies-20261005-v5");
   const imageId = deck.draft.visuals[0].id;
-  deck.checks!.images[imageId].key = deck.checks!.images[imageId].key.replace(SLIDE_CONTRACT_VERSION, "student-facing-strategies-20261005-v4");
+  deck.checks!.images[imageId].key = deck.checks!.images[imageId].key.replace(SLIDE_CONTRACT_VERSION, "student-inquiry-strategies-20261005-v5");
   deck.teacherDecision = { reason: "Accepted the older sequence", draftKey: deck.checks!.text!.key, checks: deck.checks!, assets: deck.assets };
   expect(qualityErrors(deck)).toEqual(expect.arrayContaining([
     "Text: quality check pending after generation or edits.",

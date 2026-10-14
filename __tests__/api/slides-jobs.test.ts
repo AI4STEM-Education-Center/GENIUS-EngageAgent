@@ -12,7 +12,7 @@ import { POST } from "@/app/api/slides/jobs/route";
 import { beginSlideJob, finishSlideJob, SLIDE_JOB_TTL_SECONDS, type SlideJobSpec } from "@/lib/slides/jobs";
 import { authorizeSlides } from "@/lib/slides/server";
 import { WorkspaceError } from "@/lib/workspace";
-import { slideFixture } from "../fixtures/slides";
+import { cognitiveConflictOpeningDraft, slideFixture } from "../fixtures/slides";
 import { sixStepDraft } from "../fixtures/analogy-six-step";
 
 const context = { classId: "ea-class-test", assignmentId: "ea-task-test" };
@@ -37,6 +37,20 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 describe("durable owner-bound slide jobs", () => {
+  it("persists the current opening-image requirement and rejects an incomplete result at the later poll", async () => {
+    const spec: SlideJobSpec = { ...draftSpec, requireOpeningPhenomenon: true };
+    const id = await ticket(spec);
+    expect(mocks.put.mock.calls[0][0][0].value.spec.requireOpeningPhenomenon).toBe(true);
+    mocks.retrieve.mockResolvedValue(completed(slideFixture("cognitive conflict")));
+    const rejected = await poll(id);
+    expect(rejected.status).toBe(502);
+    expect(await rejected.json()).toMatchObject({ jobFailure: true, error: expect.stringContaining("opening phenomenon image plan is missing") });
+    mocks.retrieve.mockResolvedValue(completed(cognitiveConflictOpeningDraft()));
+    const response = await poll(id);
+    expect(response.status).toBe(200);
+    expect((await response.json()).draft.visuals.map((visual: { id: string }) => visual.id)).toEqual(["phenomenon", "evidence"]);
+  });
+
   it("starts once with short provider timeout, no storage, opaque ticket, and bounded metadata only", async () => {
     const response = await start();
     expect(response.status).toBe(202); expect(response.headers.get("cache-control")).toBe("no-store");
@@ -157,6 +171,14 @@ describe("durable owner-bound slide jobs", () => {
 });
 
 describe("completed slide output validation", () => {
+  it("preserves already-submitted legacy jobs while requiring a phenomenon in current conflict output", () => {
+    const legacy = slideFixture("cognitive conflict");
+    expect(finishSlideJob(completed(legacy), draftSpec).draft).toEqual(legacy);
+    const spec: SlideJobSpec = { ...draftSpec, requireOpeningPhenomenon: true };
+    expect(() => finishSlideJob(completed(legacy), spec)).toThrow("opening phenomenon image plan is missing");
+    expect(finishSlideJob(completed(cognitiveConflictOpeningDraft()), spec).draft).toEqual(cognitiveConflictOpeningDraft());
+  });
+
   it("accepts output text blocks without the SDK convenience output_text property", () => {
     const response = completed({}, { output_text: undefined, output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ issues: [] }) }] }] });
     expect(finishSlideJob(response, { kind: "image-check", model: "review-model" })).toEqual({ issues: [], model: "review-model" });

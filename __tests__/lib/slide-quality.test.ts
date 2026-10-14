@@ -290,7 +290,8 @@ it("keeps reviewer authority on editable content instead of inventing another me
     if (strategy === "cognitive conflict") expect(prompt.system).toContain("Do not demand extra images, compare unavailable pictures or report app-owned imageIds");
     else expect(prompt.system).toContain("NEVER report imageIds");
     const context = JSON.parse(prompt.user);
-    expect(context).not.toHaveProperty("appOwnedImagePlacement");
+    expect(context.appOwnedImagePlacement).toHaveLength(slideFixture(strategy).slides.length);
+    expect(context.appOwnedImagePlacement[0].images).toEqual(strategy === "cognitive conflict" ? [] : ["experience"]);
     expect(context.editableFields.some((field: { id: string }) => field.id.includes("imageIds"))).toBe(false);
     expect(context.studentFacingSlides[0]).not.toHaveProperty("teacherNotes");
     expect(context.privateTeacherNotes[0].teacherNotes).toEqual(slideFixture(strategy).slides[0].teacherNotes);

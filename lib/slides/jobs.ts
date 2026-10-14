@@ -10,7 +10,7 @@ import { parseTextFindings } from "./review";
 import { authorizeSlides, requestDraft, slideJson, SlideRequestError, type AuthorizedSlideContext } from "./server";
 
 export type SlideJobSpec =
-  | { kind: "draft"; model: string; strategy: SlideStrategy; analogyMethod?: AnalogyMethod; promptProvenance: SlidePromptProvenance }
+  | { kind: "draft"; model: string; strategy: SlideStrategy; analogyMethod?: AnalogyMethod; requireOpeningPhenomenon?: true; promptProvenance: SlidePromptProvenance }
   | { kind: "text-check"; model: string; strategy: SlideStrategy; draft: SlideDraft }
   | { kind: "image-check"; model: string }
   | { kind: "image"; model: string };
@@ -32,6 +32,7 @@ function boundedSpec(spec: SlideJobSpec): SlideJobSpec {
   let value: SlideJobSpec;
   switch (spec.kind) {
     case "draft": value = { kind: spec.kind, model: spec.model, strategy: spec.strategy,
+      ...(spec.strategy === "cognitive conflict" && spec.requireOpeningPhenomenon === true ? { requireOpeningPhenomenon: true } : {}),
       ...(spec.analogyMethod ? { analogyMethod: spec.analogyMethod } : {}), promptProvenance: {
         version: spec.promptProvenance.version, revision: spec.promptProvenance.revision,
         sourceSha256: spec.promptProvenance.sourceSha256,
@@ -88,6 +89,10 @@ export function finishSlideJob(response: OpenAI.Responses.Response, spec: SlideJ
   if (spec.kind === "draft") {
     // Retain bounded editable text for repair; export remains strict.
     const draft = requestDraft(parsed, spec.strategy, true, spec.analogyMethod);
+    // Saved decks and jobs submitted before the opening-image contract remain
+    // readable. Newly submitted conflict drafts must satisfy the current output
+    // contract even when a provider does not honor its structured-output schema.
+    if (spec.strategy === "cognitive conflict" && spec.requireOpeningPhenomenon && !draft.visuals.some(visual => visual.id === "phenomenon")) throw new SlideRequestError("The opening phenomenon image plan is missing. Please retry generation.", 502);
     if (spec.strategy === "analogy" && !draft.analogyPlan) throw new SlideRequestError("The analogy design is incomplete. Please retry generation.", 502);
     if (spec.analogyMethod === "six-step" && (SIX_STEP_CONTEXT_FIELDS.some(field => !draft.analogyPlan?.[field]?.trim()) || draft.analogyPlan?.mappingHint !== "")) throw new SlideRequestError("The teacher-led analogy design is incomplete. Please retry generation.", 502);
     return { draft, model: spec.model, promptProvenance: spec.promptProvenance };

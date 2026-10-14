@@ -47,14 +47,14 @@ it.each(["gpt-4.1", "gpt-5-mini", "gpt-6-astra", "gpt-6.1-sol"])("submits %s dra
   expect(parameters).not.toHaveProperty("response_format");
   expect(parameters).not.toHaveProperty("max_completion_tokens");
   expect(parameters.reasoning).toEqual(textModel === "gpt-4.1" ? undefined : { effort: "low" });
-  expect(spec).toMatchObject({ kind: "draft", strategy: "cognitive conflict", model: textModel, promptProvenance: { version: "optimized", sourceSha256: source.sha256 } });
+  expect(spec).toMatchObject({ kind: "draft", strategy: "cognitive conflict", requireOpeningPhenomenon: true, model: textModel, promptProvenance: { version: "optimized", sourceSha256: source.sha256 } });
 });
 
 it.each(["generate", "review"])("submits a %s operation as its own job", async operation => {
   const existing = slideFixture("cognitive conflict");
   expect((await draft(request({ ...base, operation, ...(operation === "review" ? { draft: existing, feedback: "Keep prediction before evidence." } : {}) }))).status).toBe(202);
   expect(mocks.begin).toHaveBeenCalledTimes(1);
-  expect(mocks.begin.mock.calls[0][3].kind).toBe("draft");
+  expect(mocks.begin.mock.calls[0][3]).toMatchObject({ kind: "draft", requireOpeningPhenomenon: true });
   if (operation === "review") expect(JSON.parse(mocks.begin.mock.calls[0][2].input[0].content).correctionRequest).toBe("Keep prediction before evidence.");
 });
 

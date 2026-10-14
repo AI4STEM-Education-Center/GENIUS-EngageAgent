@@ -4,6 +4,7 @@ import { slideImagePrompt } from "@/lib/slides/prompts";
 import { authorizeSlides, readSlideBody, requestAnalogyMethod, requestDraft, slideContext, slideFailure, SlideRequestError } from "@/lib/slides/server";
 import { resolveSlideModel } from "@/lib/slides/model-config";
 import { beginSlideJob } from "@/lib/slides/jobs";
+import { imageReferenceId } from "@/lib/slides/quality";
 
 export const runtime = "nodejs";
 // Submit a provider background job; every web request stays short.
@@ -20,13 +21,14 @@ export async function POST(request: Request) {
     if (body.feedback !== undefined && (typeof body.feedback !== "string" || body.feedback.length > 4000)) throw new SlideRequestError("Image feedback must be at most 4000 characters.");
     const variation = strategy === "analogy" && body.visualId === "variation";
     const targetContinuation = strategy === "analogy" && resolveAnalogyMethod(draft.analogyMethod) === "six-step" && body.visualId === "target";
+    const evidenceContinuation = strategy === "cognitive conflict" && body.visualId === "evidence" && imageReferenceId(draft, body.visualId) === "phenomenon";
     let reference: string | undefined;
-    if (variation || targetContinuation) {
-      if (!isSlideAsset(body.referenceAsset) || body.referenceAsset.data.length > 4_500_024 || !body.referenceAsset.data.startsWith("data:image/jpeg;base64,")) throw new SlideRequestError(targetContinuation ? "Generate the phenomenon image before its target continuation." : "Generate the baseline target image before its variation.", 422);
+    if (variation || targetContinuation || evidenceContinuation) {
+      if (!isSlideAsset(body.referenceAsset) || body.referenceAsset.data.length > 4_500_024 || !body.referenceAsset.data.startsWith("data:image/jpeg;base64,")) throw new SlideRequestError(evidenceContinuation ? "Generate the opening phenomenon image before its evidence image." : targetContinuation ? "Generate the phenomenon image before its target continuation." : "Generate the baseline target image before its variation.", 422);
       const bytes = Buffer.from(body.referenceAsset.data.split(",")[1], "base64");
-      if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) throw new SlideRequestError(targetContinuation ? "Invalid phenomenon JPEG." : "Invalid baseline JPEG.", 422);
+      if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) throw new SlideRequestError(targetContinuation || evidenceContinuation ? "Invalid phenomenon JPEG." : "Invalid baseline JPEG.", 422);
       reference = body.referenceAsset.data;
-    } else if (body.referenceAsset !== undefined) throw new SlideRequestError("A reference image is only used for an analogy variation or six-step target continuation.");
+    } else if (body.referenceAsset !== undefined) throw new SlideRequestError("A reference image is only used for an analogy variation, six-step target continuation, or cognitive-conflict evidence continuation.");
     const model = resolveSlideModel("image", body.imageModel);
     const imageTool = { type: "image_generation" as const, model, size: "1536x1024" as const, quality: "high" as const,
       output_format: "jpeg" as const, output_compression: 85, action: reference ? "edit" as const : "generate" as const };

@@ -1,6 +1,6 @@
 import type { SlideDeck, SlideDraft, SlideStrategy, TeachingSlide } from "@/lib/slides/model";
 import { STAGES } from "@/lib/slides/model";
-import { imageCheckKey, imageSourcePrompt, textCheckKey } from "@/lib/slides/quality";
+import { imageCheckKey, imageReferenceId, imageSourcePrompt, textCheckKey } from "@/lib/slides/quality";
 
 const slide = (title: string, body: string, task: string): Omit<TeachingSlide, "stage"> => ({ title, body, task, teacherNotes: ["Allow time for students to write before advancing."] });
 const contents: Record<SlideStrategy, Omit<TeachingSlide, "stage">[]> = {
@@ -45,5 +45,22 @@ export function deckFixture(strategy: SlideStrategy): SlideDeck {
   const deck: SlideDeck = { id: "test-deck", lessonNumber: strategy === "analogy" ? 8 : 3, strategy, draft,
     assets: Object.fromEntries(draft.visuals.map(visual => [visual.id, { data: tinyImage, width: 1536, height: 1024, sourcePrompt: imageSourcePrompt(draft, visual.id), ...(visual.id === "variation" ? { referenceData: tinyImage } : {}) }])) };
   deck.checks = { text: { key: textCheckKey(deck), issues: [] }, images: Object.fromEntries(draft.visuals.map(visual => [visual.id, { key: imageCheckKey(deck, visual.id), imageData: tinyImage, issues: [] }])) };
+  return deck;
+}
+
+/** Current conflict output; the generic fixtures above retain historical decks. */
+export function cognitiveConflictOpeningDraft(): SlideDraft {
+  const draft = slideFixture("cognitive conflict");
+  draft.visuals.unshift({ id: "phenomenon", prompt: "A round soft red rubber ball rests on a plain table. An open palm is held just above it, ready to press, without touching it. One scene before pressure is applied, matching the table, ball and side viewpoint of the later evidence. No flattening, recovery, arrows, panels or text.", caption: "A soft ball before the hand presses it", alt: "A round red ball sits on a table with an open palm held above it." });
+  return draft;
+}
+
+export function cognitiveConflictOpeningDeck(): SlideDeck {
+  const draft = cognitiveConflictOpeningDraft();
+  const deck: SlideDeck = { id: "opening-conflict-deck", lessonNumber: 3, strategy: "cognitive conflict", draft,
+    assets: Object.fromEntries(draft.visuals.map(visual => [visual.id, { data: tinyImage, width: 1536, height: 1024,
+      sourcePrompt: imageSourcePrompt(draft, visual.id), ...(imageReferenceId(draft, visual.id) ? { referenceData: tinyImage } : {}) }])) };
+  deck.checks = { text: { key: textCheckKey(deck), issues: [] }, images: Object.fromEntries(draft.visuals.map(visual => [visual.id,
+    { key: imageCheckKey(deck, visual.id), imageData: tinyImage, issues: [] }])) };
   return deck;
 }
