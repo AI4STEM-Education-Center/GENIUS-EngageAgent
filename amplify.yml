@@ -16,6 +16,7 @@ frontend:
         - echo "ALLOWED_ORIGINS=$ALLOWED_ORIGINS" >> .env.production
         - echo "ENGAGE_APP_URL=${ENGAGE_APP_URL:-https://engageagent.ai4genius.org}" >> .env.production
         - echo "GENIUS_URL=${GENIUS_URL:-https://learn.ai4genius.org}" >> .env.production
+        - if [ -n "$GENIUS_EMBED_ORIGIN" ]; then echo "GENIUS_EMBED_ORIGIN=$GENIUS_EMBED_ORIGIN" >> .env.production; fi
         - echo "DYNAMODB_TABLE=$DYNAMODB_TABLE" >> .env.production
         - echo "ENGAGE_AWS_REGION=$ENGAGE_AWS_REGION" >> .env.production
         - echo "ENGAGE_AWS_ACCESS_KEY_ID=$ENGAGE_AWS_ACCESS_KEY_ID" >> .env.production

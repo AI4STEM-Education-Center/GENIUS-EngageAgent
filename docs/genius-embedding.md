@@ -5,6 +5,9 @@ independent workspaces and GENIUS learning tasks. An assigned GENIUS task opens
 the existing three-step teacher workflow or student activity directly. It does
 not require creating a second class in EngageAgent.
 
+The new GENIUS version opens fixed URLs (`/create`, `/edit`, `/view`, `/delete`,
+`/launch`) instead; see [GENIUS standard URLs](./genius-standard-urls.md).
+
 ## Production status — October 8, 2026
 
 EngageAgent's embedded Slides implementation is deployed, with the public

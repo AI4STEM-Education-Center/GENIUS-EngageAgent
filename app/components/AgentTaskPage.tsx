@@ -20,9 +20,10 @@ async function call(body: Record<string, unknown>) {
   return data as { task: TaskSummary; links?: AgentTaskLink[] };
 }
 
-function Shell({ heading, children }: { heading: string; children: React.ReactNode }) {
+// Compact when a class workflow or dashboard follows, so it stays in view.
+function Shell({ heading, children, compact = false }: { heading: string; children: React.ReactNode; compact?: boolean }) {
   return (
-    <main className="min-h-screen bg-gray-50 px-6 py-10 text-gray-900">
+    <main className={compact ? "border-b border-gray-200 bg-gray-50 px-6 py-6 text-gray-900" : "min-h-screen bg-gray-50 px-6 py-10 text-gray-900"}>
       <section className="mx-auto w-full max-w-xl">
         <p className="text-sm font-semibold text-red-800">EngageAgent</p>
         <h1 className="mt-2 break-words text-2xl font-semibold">{heading}</h1>
@@ -127,7 +128,7 @@ export default function AgentTaskPage({ mode, taskId, geniusOrigin }: Props) {
   }
 
   const setup = mode === "edit" ? (
-    <Shell heading="Edit activity">
+    <Shell heading="Edit activity" compact={hasClass}>
       <TitleForm initial={task.title} submitLabel="Save changes" onSave={async title => {
         const { task: updated } = await call({ action: "update", taskId: task.agentTaskId, title });
         setTask(updated);
@@ -138,7 +139,7 @@ export default function AgentTaskPage({ mode, taskId, geniusOrigin }: Props) {
       {!hasClass && <p className="mt-6 text-sm text-gray-600">Open this activity from a GENIUS class to prepare materials and see results.</p>}
     </Shell>
   ) : (
-    <Shell heading={task.title}>
+    <Shell heading={task.title} compact={hasClass}>
       <Status message={`Used by ${links.length} GENIUS ${links.length === 1 ? "class" : "classes"}.`} />
       {!hasClass && <p className="mt-3 text-sm text-gray-600">Open this preview from a GENIUS class to see that class&apos;s results.</p>}
     </Shell>
