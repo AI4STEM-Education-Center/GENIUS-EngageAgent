@@ -22,3 +22,18 @@ export const notifyTaskReopened = (classId: string, assignmentId: string, genius
   if (typeof window === "undefined" || window.parent === window) return;
   window.parent.postMessage({ type: "engage-agent.activity-reopened", classId, assignmentId, geniusId }, "*");
 };
+
+// GENIUS standard-URL messages (/create, /edit, /delete). Sent only after the
+// save or archive succeeds, and only to the configured GENIUS origin, never "*".
+export type GeniusTaskEvent = "genius.task-created" | "genius.task-updated" | "genius.task-deleted";
+export const notifyGeniusTask = (type: GeniusTaskEvent, task: { agentTaskId: string; title: string }, targetOrigin: string | null) => {
+  if (typeof window === "undefined" || window.parent === window || !targetOrigin || targetOrigin === "*") return false;
+  window.parent.postMessage({ type, version: 1, agentId: "EngageAgent", agentTaskId: task.agentTaskId, title: task.title }, targetOrigin);
+  return true;
+};
+export const notifyTaskCreated = (task: { agentTaskId: string; title: string }, targetOrigin: string | null) =>
+  notifyGeniusTask("genius.task-created", task, targetOrigin);
+export const notifyTaskUpdated = (task: { agentTaskId: string; title: string }, targetOrigin: string | null) =>
+  notifyGeniusTask("genius.task-updated", task, targetOrigin);
+export const notifyTaskDeleted = (task: { agentTaskId: string; title: string }, targetOrigin: string | null) =>
+  notifyGeniusTask("genius.task-deleted", task, targetOrigin);

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { clearVerifiedClientAuth, scopedClientAuthHeaders, scopedTaskFetch, setVerifiedClientAuth } from "@/lib/client-auth";
+import { agentTaskFetch, clearVerifiedClientAuth, scopedClientAuthHeaders, scopedTaskFetch, setVerifiedClientAuth } from "@/lib/client-auth";
 import type { UserContext } from "@/lib/auth";
 
 const user: UserContext = { geniusId: "teacher", userId: "teacher", email: null, name: "Teacher", role: "teacher", classId: "host-class", assignmentId: "host-task" };
@@ -55,4 +55,21 @@ it("never sends embedded credentials for native classes, or carries old credenti
   setVerifiedClientAuth("host-token", user);
   setVerifiedClientAuth("unscoped-token", { ...user, classId: undefined });
   expect(scopedClientAuthHeaders(user)).toEqual({});
+});
+
+it("sends the verified token to the activity API even without a class, but never a native workspace one", async () => {
+  const transport = vi.fn(async () => new Response("{}"));
+  vi.stubGlobal("fetch", transport);
+  const headerOf = (call: number) => new Headers((transport.mock.calls[call] as unknown as [string, RequestInit])[1].headers).get("Authorization");
+  setVerifiedClientAuth("create-token", { ...user, classId: undefined, assignmentId: undefined });
+  expect(scopedClientAuthHeaders(user)).toEqual({});
+  await agentTaskFetch({ action: "create", title: "Forces" });
+  expect(transport.mock.calls[0]).toMatchObject(["/api/agent-tasks", { method: "POST", body: JSON.stringify({ action: "create", title: "Forces" }) }]);
+  expect(headerOf(0)).toBe("Bearer create-token");
+  setVerifiedClientAuth("native-token", { ...user, classId: "ea-class-1", assignmentId: "ea-task-1" });
+  await agentTaskFetch({ action: "open" });
+  expect(headerOf(1)).toBeNull();
+  clearVerifiedClientAuth();
+  await agentTaskFetch({ action: "open" });
+  expect(headerOf(2)).toBeNull();
 });
