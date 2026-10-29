@@ -2,6 +2,8 @@
 
 This plan connects the v8.3 prototype (`EngageAgent-UI-v8.3-prototype_2.html`) to the backend. It replaces the current 3-step teacher flow and 2-step student flow.
 
+Use-case scenarios for every subtask are in [ui-v8-use-cases.md](ui-v8-use-cases.md).
+
 The "Student experience check-in" in the prototype is **out of scope** and dropped from this plan. Existing survey code (`/api/surveys`, `SurveyBuilderView`, `lib/survey-*.ts`, `lib/task-interests.ts`) is not wired into the new UI.
 
 The work is split into **two tasks, one per developer**. Work that depends on other work sits in the same task as numbered subtasks, done in order. The two tasks touch only at four small **handoff points**, listed below. Each handoff point is agreed on day 1 and delivered as the first subtask of its owner's task, so neither developer waits.
