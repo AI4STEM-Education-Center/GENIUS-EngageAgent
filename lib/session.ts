@@ -8,7 +8,16 @@ export const SESSION_COOKIE = "engage-session-v1";
 export const LOGIN_COOKIE = "engage-login-v1";
 export const appOrigin = () => process.env.ENGAGE_APP_URL || "https://engageagent.ai4genius.org";
 export const geniusOrigin = () => process.env.GENIUS_URL || "https://learn.ai4genius.org";
-export const callbackUrl = () => `${appOrigin()}/api/auth/callback`;
+/** The window that embeds the GENIUS standard URLs and receives genius.task-* messages.
+ * The new GENIUS may live on a different origin from SSO, so it can be set on its own.
+ * Returns null rather than a wildcard when the value is not a valid http(s) origin. */
+export const geniusEmbedOrigin = () => {
+  try {
+    const url = new URL(process.env.GENIUS_EMBED_ORIGIN || geniusOrigin());
+    return ["https:", "http:"].includes(url.protocol) ? url.origin : null;
+  } catch { return null; }
+};
+export const callbackUrl =() => `${appOrigin()}/api/auth/callback`;
 export const randomValue = () => randomBytes(32).toString("base64url");
 export const challengeFor = (value: string) => createHash("sha256").update(value).digest("base64url");
 

@@ -46,6 +46,7 @@ SSO key equality or provider model access.
 | `ENGAGE_APP_URL` | `https://engageagent.ai4genius.org`, with no trailing slash. The default is this origin. |
 | `GENIUS_URL` | `https://learn.ai4genius.org`, with no trailing slash. The default is this origin. |
 | `ALLOWED_ORIGINS` | Must contain the exact GENIUS HTTPS origin for the frame-ancestor policy. |
+| `GENIUS_EMBED_ORIGIN` | Optional. The new GENIUS origin that embeds the [standard URLs](./genius-standard-urls.md) and receives `genius.task-*` messages; defaults to the `GENIUS_URL` origin. When set, it must be canonical HTTPS and listed in `ALLOWED_ORIGINS`. |
 | `OPENAI_API_KEY` | Existing server-side key with access to the configured slide text and image models. |
 | `OPENAI_SLIDES_MODEL` / `OPENAI_IMAGE_MODEL` | Verify actual access; the current code defaults are `gpt-6.1-sol` / `gpt-image-1`. Empty Amplify overrides retain these defaults. |
 | `DYNAMODB_TABLE` | Existing production table with string keys `class_id` and `record_id`; verify application read/write/query and transaction permissions. |

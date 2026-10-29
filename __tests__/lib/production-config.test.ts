@@ -37,4 +37,14 @@ describe("Amplify production configuration preflight", () => {
   it.each([{ ENGAGE_AWS_ACCESS_KEY_ID: "key" }, { ENGAGE_AWS_SECRET_ACCESS_KEY: "secret" }])("rejects a partial AWS credential override", (credentials) => {
     expect(productionConfigErrors({ ...ready, ...credentials })).toEqual([expect.stringContaining("Set both ENGAGE_AWS")]);
   });
+  it("accepts an optional new-GENIUS embed origin only when it is canonical HTTPS and allowed to frame", () => {
+    expect(productionConfigErrors({ ...ready, GENIUS_EMBED_ORIGIN: "https://new.example.edu",
+      ALLOWED_ORIGINS: "https://learn.ai4genius.org,https://new.example.edu" })).toEqual([]);
+    expect(productionConfigErrors({ ...ready, GENIUS_EMBED_ORIGIN: "https://new.example.edu" }))
+      .toEqual([expect.stringContaining("ALLOWED_ORIGINS must include the exact GENIUS_EMBED_ORIGIN")]);
+    for (const origin of ["*", "http://new.example.edu", "https://new.example.edu/", "http://localhost:3100"]) {
+      expect(productionConfigErrors({ ...ready, GENIUS_EMBED_ORIGIN: origin, ALLOWED_ORIGINS: `https://learn.ai4genius.org,${origin}` }))
+        .toEqual([expect.stringContaining("GENIUS_EMBED_ORIGIN must be a canonical HTTPS origin")]);
+    }
+  });
 });

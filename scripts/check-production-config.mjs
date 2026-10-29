@@ -27,6 +27,17 @@ export function productionConfigErrors(env) {
   if (origins.GENIUS_URL && !allowed.includes(origins.GENIUS_URL)) {
     errors.push("ALLOWED_ORIGINS must include the exact GENIUS_URL origin so GENIUS can display EngageAgent.");
   }
+  // Optional: the new GENIUS that embeds the standard URLs may use another origin.
+  const embedOrigin = value("GENIUS_EMBED_ORIGIN");
+  if (embedOrigin) {
+    let valid = false;
+    try {
+      const url = new URL(embedOrigin);
+      valid = url.protocol === "https:" && url.origin === embedOrigin && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    } catch { /* reported below */ }
+    if (!valid) errors.push("GENIUS_EMBED_ORIGIN must be a canonical HTTPS origin without a trailing slash, path, or credentials.");
+    else if (!allowed.includes(embedOrigin)) errors.push("ALLOWED_ORIGINS must include the exact GENIUS_EMBED_ORIGIN so the new GENIUS can display EngageAgent.");
+  }
   if (value("ENGAGE_LOCAL_MATERIAL_STORAGE") === "1" || value("ENGAGE_LOCAL_DATA_DIR")) {
     errors.push("Remove ENGAGE_LOCAL_MATERIAL_STORAGE and ENGAGE_LOCAL_DATA_DIR from production configuration.");
   }
