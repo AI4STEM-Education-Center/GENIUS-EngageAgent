@@ -80,7 +80,7 @@ describe("getTaskInterests", () => {
     vi.mocked(listSurveys).mockResolvedValue([{ ...dailyExperienceSurvey, daily_experience_topic: "Chores at home" }]);
 
     const result = await interests();
-    expect(model.calls.filter((c) => c.name === "daily_experience_extraction")).toHaveLength(2);
+    expect(model.calls.filter((c) => c.name === "daily_experience_extraction")).toHaveLength(19);
     expect(result!.dailyExperienceTopic).toBe("Chores at home");
   });
 

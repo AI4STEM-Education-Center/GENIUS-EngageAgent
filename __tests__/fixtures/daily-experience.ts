@@ -6,6 +6,8 @@ import type { Survey, SurveyResponse } from "@/lib/types";
  * (#114). No real student data. The responses deliberately include synonyms
  * ("football", "futbol"), typos ("socer", "bball"), watched-only activities,
  * the same activity mentioned twice, a blank response and an off-topic one.
+ * Both "football" students give soccer details (kicking, a goalkeeper), so a
+ * good extraction already writes "soccer" for them.
  *
  * `expectedExtractions` and `expectedGrouping` are what a good LLM should
  * return for these responses; they drive the counting tests and later serve
@@ -124,14 +126,14 @@ const act = (
 
 export const expectedExtractions: StudentExtraction[] = [
   { student: "S1", activities: [act("soccer", "do", ["ball", "cleats", "shin guards"], "Shin guard cracked during a slide tackle"), act("basketball", "watched", [], "A player fell going for a rebound")] },
-  { student: "S2", activities: [act("football", "do", ["ball", "goal"], "Ball bounced off the goal post into their face")] },
+  { student: "S2", activities: [act("soccer", "do", ["ball", "goal"], "Ball bounced off the goal post into their face")] },
   { student: "S3", activities: [act("futbol", "do", ["ball", "cones"], "Tripped over a cone and scraped a knee"), act("cooking", "do", ["pan", "oil"], "Hot oil splashed from the pan")] },
   { student: "S4", activities: [act("socer", "do", ["ball", "gloves"], "Landed on their wrist diving for the ball"), act("soccer", "watched", [], "A player got a red card for a bad tackle")] },
   { student: "S5", activities: [act("soccer", "do", ["ball"], "Ball went over the fence and broke a flower pot"), act("skateboarding", "watched", ["skateboard", "ramp"], "Fell off a ramp and the board snapped")] },
   { student: "S6", activities: [act("soccer", "do", ["ball", "goal"], "Goal net ripped from a hard shot"), act("video games", "do", ["controller"], "Controller fell off the couch and broke")] },
   { student: "S7", activities: [act("bball", "do", ["basketball", "hoop"], "Ball bounced off the rim and hit a car"), act("soccer", "watched", [], "A player was carried off on a stretcher")] },
   { student: "S8", activities: [act("basketball", "do", ["ball", "hoop"], "Jammed a finger catching a pass")] },
-  { student: "S9", activities: [act("hoops", "do", ["basketball"], "The net tore off the hoop"), act("football", "watched", [], "The goalkeeper ran into the post")] },
+  { student: "S9", activities: [act("hoops", "do", ["basketball"], "The net tore off the hoop"), act("soccer", "watched", [], "The goalkeeper ran into the post")] },
   { student: "S10", activities: [act("basketball", "do", ["ball", "sneakers"], "Rolled an ankle landing"), act("swimming", "do", ["lane rope"], "Hit their head on the lane rope")] },
   { student: "S11", activities: [act("skateboarding", "do", ["skateboard", "helmet"], "A wheel came off mid-trick")] },
   { student: "S12", activities: [act("skateboard", "do", ["skateboard"], "Hit a rock and flew off"), act("basketball", "watched", ["backboard"], "Backboard glass shattered on a dunk")] },
@@ -147,7 +149,8 @@ export const expectedExtractions: StudentExtraction[] = [
 
 export const expectedGrouping: LabelGrouping = {
   soccer: { category: "Sports", activity: "Soccer" },
-  football: { category: "Sports", activity: "Soccer" },
+  // Only written when the sport is unclear, so it stays its own activity.
+  football: { category: "Sports", activity: "Football" },
   futbol: { category: "Sports", activity: "Soccer" },
   socer: { category: "Sports", activity: "Soccer" },
   basketball: { category: "Sports", activity: "Basketball" },
@@ -164,11 +167,14 @@ export const expectedGrouping: LabelGrouping = {
 
 /**
  * A fake OpenAI client that answers like a well-behaved model, using the
- * expected output above. Extraction requests are matched by each student's
- * answers (not their S-number, which changes when only some students are
- * sent); grouping uses `expectedGrouping`. `calls` records every request.
+ * expected output above. Extraction requests (one student each) are matched
+ * by the student's answers; grouping uses `expectedGrouping`. `calls` records
+ * every request. `cutOff` makes extraction of matching answers stop at the
+ * output limit, like a runaway reply.
  */
-export const fakeAnalysisModel = () => {
+export const fakeAnalysisModel = (
+  options: { cutOff?: (answers: Record<string, string>) => boolean } = {},
+) => {
   const keyFor = (answers: Record<string, string>) => JSON.stringify(answers);
   const byAnswers = new Map(
     rawAnswers.map((a, i) => [
@@ -176,25 +182,32 @@ export const fakeAnalysisModel = () => {
       expectedExtractions[i].activities,
     ]),
   );
-  const calls: { name: string; system: string; user: unknown; temperature?: number }[] = [];
+  const calls: { name: string; system: string; user: unknown; temperature?: number; max_completion_tokens?: number }[] = [];
   const create = async (params: {
     response_format: { json_schema: { name: string } };
     temperature?: number;
+    max_completion_tokens?: number;
     messages: { role: string; content: string }[];
   }) => {
     const name = params.response_format.json_schema.name;
     const user = JSON.parse(params.messages[1].content);
-    calls.push({ name, system: params.messages[0].content, user, temperature: params.temperature });
-    const body =
-      name === "daily_experience_extraction"
-        ? {
-            students: (user.students as { student: string; answers: Record<string, string> }[]).map((s) => ({
-              student: s.student,
-              activities: (byAnswers.get(keyFor(s.answers)) ?? []).map((a) => ({ ...a, incident: a.incident ?? "" })),
-            })),
-          }
-        : { groups: (user.labels as string[]).map((label) => ({ label, ...expectedGrouping[label] })) };
-    return { choices: [{ message: { content: JSON.stringify(body) } }] };
+    calls.push({
+      name,
+      system: params.messages[0].content,
+      user,
+      temperature: params.temperature,
+      max_completion_tokens: params.max_completion_tokens,
+    });
+    if (name === "daily_experience_extraction") {
+      const answers = (user as { answers: Record<string, string> }).answers;
+      if (options.cutOff?.(answers)) {
+        return { choices: [{ message: { content: '{"activities":[{"label":"socc' }, finish_reason: "length" }] };
+      }
+      const activities = (byAnswers.get(keyFor(answers)) ?? []).map((a) => ({ ...a, incident: a.incident ?? "" }));
+      return { choices: [{ message: { content: JSON.stringify({ activities }) }, finish_reason: "stop" }] };
+    }
+    const groups = (user.labels as string[]).map((label) => ({ label, ...expectedGrouping[label] }));
+    return { choices: [{ message: { content: JSON.stringify({ groups }) }, finish_reason: "stop" }] };
   };
   return { client: { chat: { completions: { create } } }, calls };
 };
