@@ -2,6 +2,8 @@
 
 This plan connects the v8.3 prototype (`EngageAgent-UI-v8.3-prototype_2.html`) to the backend. It replaces the current 3-step teacher flow and 2-step student flow.
 
+The "Student experience check-in" in the prototype is **out of scope** and dropped from this plan. Existing survey code (`/api/surveys`, `SurveyBuilderView`, `lib/survey-*.ts`, `lib/task-interests.ts`) is not wired into the new UI.
+
 The work is split into **two tasks, one per developer**. Work that depends on other work sits in the same task as numbered subtasks, done in order. The two tasks touch only at four small **handoff points**, listed below. Each handoff point is agreed on day 1 and delivered as the first subtask of its owner's task, so neither developer waits.
 
 The "Status" notes come from a quick read of the repo. Confirm them before starting a subtask.
@@ -27,7 +29,7 @@ Proposed keys:
 
 | Record | Key | Holds |
 |---|---|---|
-| Lesson content (read-only) | `data/lessonN.json` | objective, core ideas, misconceptions, quiz, default check-in items, item explanations |
+| Lesson content (read-only) | `data/lessonN.json` | objective, core ideas, misconceptions, quiz, item explanations |
 | Class profile | `class_id` / `CLASS_PROFILE` | locale, groups (ranked, up to 3, or "not sure" / "prefer not to say"), class type, includes ELs, includes IEP/504 |
 | **Lesson run** (class × GENIUS lesson) | `class_id` / `RUN#{scopeId}` | linked lesson number, anchoring phenomenon, added misconceptions, status of the 4 steps |
 | Everything else | existing prefixes, with `ASSIGN#{assignmentId}` → `{scopeId}` | — |
@@ -44,7 +46,7 @@ Agree these on day 1 as TypeScript types in `lib/types.ts`. Until each is delive
 |---|---|---|---|---|
 | H1 | `scopeId` helper and `getLessonRun()` (linked lesson, misconception list incl. teacher-added, step status) | A | A1 | All B pages read the lesson and step status from it |
 | H2 | `distractor_misconception_map` values become `string[]`; a `getRunQuiz(scopeId)` that returns the teacher's final quiz | A | A3 | Strategy evidence counts (B2) |
-| H3 | `StudentAnswer` gains per-item `confidence` (1–4); `getClassProfile(classId)` | A | A2 / A6 | Strategy evidence, classroom context for slides (B3) |
+| H3 | `StudentAnswer` gains per-item `confidence` (1–4); `getClassProfile(classId)` | A | A2 / A5 | Strategy evidence, classroom context for slides (B3) |
 | H4 | Shared UI primitives and the teacher/student shell with page slots | B | B1 | All A pages are built inside it |
 
 ---
@@ -56,7 +58,7 @@ Agree these on day 1 as TypeScript types in `lib/types.ts`. Until each is delive
 - Accept the new GENIUS SSO claims (`classId`, `lessonId`, lesson title) next to the legacy `assignmentId`/`taskId`. Derive `scopeId`. Confirm claim names with the GENIUS team.
 - Replace `ASSIGN#{assignmentId}` in `nosql.ts` key builders with one `scopeKey(scopeId)` helper. Legacy records must still read.
 - Lesson run record and `GET/PUT /api/lesson-run`: linked lesson, anchoring phenomenon, added misconceptions, step status. Linking a lesson is rejected once the task is published.
-- Extend `data/lessonN.json` with `checkin_items` and a per-item `explanation`. Lesson 1's content is in the prototype (`EXPL_L1`, `SURVEY_PROVIDED`). Lessons 2–8 need content written (see Decisions).
+- Extend `data/lessonN.json` with a per-item `explanation`. Lesson 1's explanations are in the prototype (`EXPL_L1`). Lessons 2–8 need them written (see Decisions).
 - Standalone workspace classes (`ea-class-*`): "lesson" replaces "assignment".
 - `genius-notify.ts` events carry `lessonId`. Update `/test/teacher` and `/test/student` mock auth.
 - Done when: a new-GENIUS launch and a legacy launch both resolve to a run, and existing tests pass.
@@ -80,23 +82,15 @@ Agree these on day 1 as TypeScript types in `lib/types.ts`. Until each is delive
 - Structured-output prompts following `lib/material-output-schema.ts` and `docs/LLM_PROMPTS.md`.
 - Wire "Match all items", "Set as answer", "Add to lesson list and use", "Dismiss".
 
-### A5. Experience check-in authoring
-**Status:** Partial. Survey CRUD, publish, schedule, responses, and analysis exist (`/api/surveys`, `SurveyBuilderView`, `lib/survey-*.ts`). Check the existing "review" code in `SurveyBuilderView` first.
-- One check-in per run; "Provided" source seeded from `checkin_items`.
-- AI check per item and in bulk: 6 criteria scored y/m/n, verdict (`good | revise | bad`), note, optional rewrite. Stored with the item and cleared when the prompt text changes.
-- Use rewrite / Keep mine / Re-check. Publishing is blocked while an item is unchecked or `bad` without "Keep mine".
-- Write with AI: draft 3 items from optional instructions, or start from the provided items.
-- Item fields: prompt, example, purpose, related idea, short or long answer (maps to `SurveyItem`). Static guidelines panel.
-
-### A6. Publish one task + student "Get ready for the lesson" *(delivers the rest of H3)*
-**Status:** Partial. Quiz publish, survey publish, student answers, and activity status exist separately.
-- One publish action for quiz + check-in, allowed only when both are ready. Locks the lesson picker. "Preview as student".
+### A5. Publish the quiz + student "Get ready for the lesson" *(delivers the rest of H3)*
+**Status:** Partial. Quiz publish (`/api/quiz-status`), student answers, and activity status exist.
+- Publish is allowed only when every quiz item is confirmed. Locks the lesson picker. "Preview as student".
 - Per-item confidence (4 levels) stored on `StudentAnswer`. Replace the separate `*_confidence` items in `data/` and update the code that reads them.
-- Student page: quiz part, check-in part, answered counter, "Next unanswered", required-answer highlighting, one submit for answers + confidence + check-in.
+- Student page: quiz items with confidence, answered counter, "Next unanswered", required-answer highlighting, one submit for answers + confidence.
 - Submission count for the publish bar and Step 2 ("0 of 24 submitted"); class size from the GENIUS roster.
 - Activity status and GENIUS notify for the merged step.
 
-### A7. Feedback reports
+### A6. Feedback reports
 **Status:** New.
 - Per-student report: answer, correct answer, confidence, explanation (from `explanation`, or AI-written for uploaded and AI items).
 - Release per run: "Mark lesson taught" or "Release now". Teacher preview before release.
@@ -116,17 +110,15 @@ Agree these on day 1 as TypeScript types in `lib/types.ts`. Until each is delive
 
 ### B2. Strategy step: evidence, recommendation, focus
 **Status:** Partial. `recommendStrategy`, cohort analysis (SQS worker), strategy cache, and `getTaskInterests` exist.
-- `GET /api/strategy-evidence`:
-  - quiz: students, answers, correct, incorrect by misconception (using H2), unclassified;
-  - check-in: top 2 activities (category, count, did vs. watched, objects with counts, a quote), "also mentioned", count with no clear activity. Extend `TaskInterests` where fields are missing.
+- `GET /api/strategy-evidence` from the quiz only: students, answers, correct, incorrect by misconception (using H2), unclassified.
 - Recommendation and reason using the prototype thresholds (over 25% on one misconception → Cognitive Conflict; over 70% correct → Engaged Critiquing), reconciled with `recommendStrategy`, not duplicated.
-- Save choice, focus, and override reason. Focus: target misconception (Cognitive Conflict, Engaged Critiquing); core idea + experience (Analogy); experience + core idea (Experience Bridging).
+- Save choice, focus, and override reason. Focus: target misconception (Cognitive Conflict, Engaged Critiquing); core idea (Analogy, Experience Bridging). The prototype also picks a student experience for Analogy and Experience Bridging from check-in results; with the check-in dropped, that picker goes (see Decisions).
 - Strategy tooltips: add `fit` and `flow` to `lib/engagement-strategies.ts`.
 
 ### B3. Materials: generate
 **Status:** Mostly exists (`/api/slides`, jobs, per-strategy prompts, analogy methods, `/api/engagement-video`, PPTX export).
-- Context panel: lesson, strategy + focus, class profile summary (H3), students' experiences.
-- Editable classroom context, auto-built from profile + check-in + focus, passed as `classroomContext`.
+- Context panel: lesson, strategy + focus, class profile summary (H3).
+- Editable classroom context, auto-built from profile + focus, passed as `classroomContext`.
 - Pass the B2 focus into generation; the teacher's choice overrides `resolveCognitiveConflictTarget`. Add an equivalent focus for the other three strategies.
 - Slide deck or animated video; "Generate again"; job progress via the jobs API.
 - Thumbnails, large preview, and editor (title, body, thinking task, teacher notes) saved to draft storage.
@@ -140,7 +132,7 @@ Agree these on day 1 as TypeScript types in `lib/types.ts`. Until each is delive
 
 ### B5. Gallery: share materials with other teachers
 **Status:** Partial. `/api/gallery` lists images and videos; deck sharing is new.
-- Share dialog: title, grade band, topic, include notes. Always remove class details (counts, check-in quotes, names), and show the teacher the cleaned text.
+- Share dialog: title, grade band, topic, include notes. Always remove class details (student counts, names), and show the teacher the cleaned text.
 - Global gallery record: owner, strategy, format, topic, usage count. List, preview, "Use as a starting point" (copies into the current lesson's draft), "Remove from Gallery".
 - Block students from the gallery API in `guardWorkspaceRequest`.
 
@@ -170,8 +162,9 @@ Agree these on day 1 as TypeScript types in `lib/types.ts`. Until each is delive
 ## Decisions needed in week 1
 
 1. **GENIUS SSO payload**: claim names for the lesson, and whether GENIUS sends a lesson-number hint so the picker can default. *(A1)*
-2. **Confidence**: per-item 4-level on the answer (recommended), or keep the separate confidence items. *(A6, affects B2)*
-3. **Check-in items and explanations for Lessons 2–8**: who writes them, and whether AI drafts are acceptable. *(A1)*
+2. **Confidence**: per-item 4-level on the answer (recommended), or keep the separate confidence items. *(A5, affects B2)*
+3. **Explanations for Lessons 2–8**: who writes them, and whether AI drafts are acceptable. *(A1)*
 4. **Link import**: which form providers must work in v1. *(A4)*
 5. **Gallery moderation**: review before other teachers see shared materials, or not. *(B5)*
 6. **Legacy data**: keep reading `ASSIGN#` records, or migrate once. *(A1)*
+7. **Experience Bridging and Analogy without the check-in**: the prototype builds these from students' check-in experiences. Decide whether teachers type the experience into the classroom context, or these strategies use generic everyday examples. *(B2, B3)*
