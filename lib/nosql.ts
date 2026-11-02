@@ -12,7 +12,6 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import crypto from "node:crypto";
 import type { Survey, SurveyResponse } from "@/lib/types";
 import type { SurveyAnalysisRecord } from "@/lib/daily-experience-analysis";
-import type { ClassProfile } from "@/lib/class-profile";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -142,7 +141,6 @@ type Store = {
   surveys: SurveyRecord[];
   survey_responses: SurveyResponseRecord[];
   survey_analyses: SurveyAnalysisRecord[];
-  class_profiles: ClassProfile[];
 };
 
 type TeacherAnnotation = {
@@ -179,7 +177,6 @@ const emptyStore: Store = {
   surveys: [],
   survey_responses: [],
   survey_analyses: [],
-  class_profiles: [],
 };
 const dataDir = process.env.ENGAGE_LOCAL_DATA_DIR || path.join(process.cwd(), "data");
 const storePath = path.join(dataDir, "engage-nosql.json");
@@ -312,9 +309,6 @@ const loadStore = async () => {
       }
       if (!Array.isArray(parsed.survey_analyses)) {
         parsed.survey_analyses = [];
-      }
-      if (!Array.isArray(parsed.class_profiles)) {
-        parsed.class_profiles = [];
       }
       storeCache = parsed;
       return parsed;
@@ -2305,78 +2299,4 @@ export const getSurveyAnalysis = async (
         a.survey_id === surveyId,
     ) ?? null
   );
-};
-
-/* ------------------------------------------------------------------ */
-/*  Class profile (#173)                                               */
-/* ------------------------------------------------------------------ */
-
-// One record per class, shared by all of its lessons.
-const CLASS_PROFILE_SORT_KEY = "CLASS_PROFILE";
-
-export const getClassProfile = async (classId: string): Promise<ClassProfile | null> => {
-  if (useDynamoDb) {
-    const client = getDynamoClient();
-    if (!client) return null;
-    const result = await client.send(
-      new GetCommand({
-        TableName: dynamoTableName,
-        Key: { [pkField]: `CLASS#${classId}`, [skField]: CLASS_PROFILE_SORT_KEY },
-      }),
-    );
-    const item = result.Item;
-    if (!item) return null;
-    return {
-      class_id: classId,
-      status: (item.status as ClassProfile["status"]) ?? "saved",
-      locale: (item.locale as ClassProfile["locale"]) ?? null,
-      groups: (item.groups as ClassProfile["groups"]) ?? [],
-      groupAlternative: (item.group_alternative as ClassProfile["groupAlternative"]) ?? null,
-      classType: (item.class_type as ClassProfile["classType"]) ?? null,
-      englishLearners: item.english_learners === true,
-      iepOr504: item.iep_or_504 === true,
-      updated_by: item.updated_by as string | undefined,
-      updated_at: (item.updated_at as string) ?? "",
-    };
-  }
-
-  const store = await loadStore();
-  return store.class_profiles.find((p) => p.class_id === classId) ?? null;
-};
-
-export const upsertClassProfile = async (record: ClassProfile): Promise<ClassProfile> => {
-  if (useDynamoDb) {
-    const client = getDynamoClient();
-    if (client) {
-      await client.send(
-        new PutCommand({
-          TableName: dynamoTableName,
-          Item: {
-            [pkField]: `CLASS#${record.class_id}`,
-            [skField]: CLASS_PROFILE_SORT_KEY,
-            record_type: "class_profile",
-            status: record.status,
-            locale: record.locale,
-            groups: record.groups,
-            group_alternative: record.groupAlternative,
-            class_type: record.classType,
-            english_learners: record.englishLearners,
-            iep_or_504: record.iepOr504,
-            updated_by: record.updated_by,
-            updated_at: record.updated_at,
-          },
-        }),
-      );
-    }
-    return record;
-  }
-
-  await withWriteLock(async () => {
-    const store = await loadStore();
-    const idx = store.class_profiles.findIndex((p) => p.class_id === record.class_id);
-    if (idx >= 0) store.class_profiles[idx] = record;
-    else store.class_profiles.push(record);
-    await persistStore(store);
-  });
-  return record;
 };
