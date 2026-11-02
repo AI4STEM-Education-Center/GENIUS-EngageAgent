@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { FileText, Users } from "lucide-react";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import type { UserContext } from "@/lib/auth";
 import StudentQuizView from "./StudentQuizView";
 import StudentContentReviewView from "./StudentContentReviewView";
-import StudentProgressStepper from "./StudentProgressStepper";
+import AppFrame from "./layout/AppFrame";
+import AppHeader, { taskContext, type TaskShell } from "./layout/AppHeader";
+import StepTabs, { type StepTab } from "./layout/StepTabs";
 import {
   STUDENT_VIEW_STEPS,
   type StepDisplayState,
@@ -18,7 +21,11 @@ import { notifyTaskCompleted, notifyTaskReopened } from "@/lib/genius-notify";
 
 type Props = {
   user: UserContext;
+  shell?: TaskShell;
 };
+
+// Class questions and the quiz report are built in #182; until then they show locked.
+type StudentTabId = StudentViewStepId | "class-questions" | "report";
 
 const STATUS_POLL_MS = 15000;
 
@@ -69,7 +76,7 @@ function buildDisplayStates(
   return result;
 }
 
-function StudentWorkspace({ user }: Props) {
+function StudentWorkspace({ user, shell }: Props) {
   const [activeStep, setActiveStep] = useState<StudentViewStepId>("assessment");
   const [serverStatus, setServerStatus] = useState<Record<StudentStepId, ActivityStatus>>(INITIAL_SERVER_STATUS);
   const activeStepRef = useRef(activeStep);
@@ -203,34 +210,25 @@ function StudentWorkspace({ user }: Props) {
   }, []);
 
   const displayStates = buildDisplayStates(serverStatus);
-  const availableSteps = STUDENT_VIEW_STEPS.filter((step) => displayStates[step.id].status !== "locked");
+  const tabs: StepTab<StudentTabId>[] = [
+    ...STUDENT_VIEW_STEPS.map((step, index) => ({
+      id: step.id,
+      title: step.title,
+      status: displayStates[step.id].label,
+      marker: index + 1,
+      done: displayStates[step.id].status === "completed",
+      locked: displayStates[step.id].status === "locked",
+    })),
+    { id: "class-questions", title: "Class questions", status: "Your teacher will share these", marker: <Users size={13} />, locked: true },
+    { id: "report", title: "My quiz report", status: "After the lesson", marker: <FileText size={13} />, locked: true },
+  ];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto flex max-w-4xl flex-col gap-6 px-6 py-8">
-        <header className="flex flex-col gap-3">
-          <div className="flex items-center gap-3">
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
-              Engage Agent
-            </p>
-            <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase text-sky-700">
-              Student
-            </span>
-          </div>
-          <p className="text-sm text-slate-500">
-            Welcome, <span className="font-semibold text-slate-700">{user.name}</span>
-          </p>
-        </header>
-
-        <StudentProgressStepper
-          steps={STUDENT_VIEW_STEPS}
-          activeStep={activeStep}
-          states={displayStates}
-          onSelectStep={setActiveStep}
-          completedSteps={availableSteps.filter((step) => displayStates[step.id].status === "completed").length}
-          totalSteps={availableSteps.length}
-        />
-
+    <AppFrame narrow
+      header={<AppHeader userName={user.name} homeHref={shell?.homeHref} context={taskContext(user, shell)} canSignOut={shell?.canSignOut} showName />}
+      tabs={<StepTabs label="Student steps" tabs={tabs} activeId={activeStep}
+        onSelect={(id) => { if (id === "assessment" || id === "explore-and-ask") setActiveStep(id); }} />}>
+      <div className="flex flex-col gap-6">
         {/* The assessment and content-review views stay mounted (hidden when
             inactive) so they keep polling/reporting progress regardless of
             which tab is visible. Material Rating is a card below the review
@@ -248,7 +246,7 @@ function StudentWorkspace({ user }: Props) {
           />
         </div>
       </div>
-    </div>
+    </AppFrame>
   );
 }
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import Workspace from "@/app/components/Workspace";
 const mocks = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), query: "", role: "teacher", fetch: vi.fn() }));
@@ -7,8 +7,10 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push, replac
 const teacher = { geniusId: "teacher", userId: "teacher", role: "teacher", name: "Teacher", email: null };
 const student = { ...teacher, geniusId: "student", userId: "student", role: "student" };
 vi.mock("@/app/components/AuthContext", () => ({ useAuth: () => ({ user: mocks.role === "teacher" ? teacher : student, loading: false, error: null }) }));
-vi.mock("@/app/components/TeacherView", () => ({ default: ({ user, initialMaterialFormat }: { user: { classId: string; assignmentId: string }; initialMaterialFormat?: string }) => <p data-class-id={user.classId} data-initial-material-format={initialMaterialFormat}>Teacher workflow {user.assignmentId}</p> }));
-vi.mock("@/app/components/TeacherDashboardView", () => ({ default: () => <p>Teacher dashboard</p> }));
+type ViewProps = { user: { classId: string; assignmentId: string }; initialMaterialFormat?: string; initialStep?: number; shell?: { homeHref?: string; classHref?: string; canSignOut?: boolean } };
+vi.mock("@/app/components/TeacherView", () => ({ default: ({ user, initialMaterialFormat, initialStep, shell }: ViewProps) => <p data-class-id={user.classId}
+  data-initial-material-format={initialMaterialFormat} data-initial-step={initialStep} data-home-href={shell?.homeHref} data-class-href={shell?.classHref}
+  data-can-sign-out={String(!!shell?.canSignOut)}>Teacher workflow {user.assignmentId}</p> }));
 vi.mock("@/app/components/StudentView", () => ({ default: () => <p>Student workflow</p> }));
 beforeEach(() => { mocks.query = ""; mocks.role = "teacher"; mocks.fetch.mockReset(); mocks.push.mockReset(); mocks.replace.mockReset(); vi.stubGlobal("fetch", mocks.fetch); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -40,17 +42,20 @@ it("renders the existing workflow only after the server verifies the selected co
   mocks.query = "classId=ea-class-a&assignmentId=ea-task-a";
   mocks.fetch.mockResolvedValue(reply({ user: { ...teacher, classId: "ea-class-a", assignmentId: "ea-task-a" } }));
   render(<Workspace />); expect(await screen.findByText("Teacher workflow ea-task-a")).toBeTruthy();
-  expect(screen.getByText("Teacher workflow ea-task-a").getAttribute("data-initial-material-format")).toBeNull();
-  const navigation = within(screen.getByRole("navigation", { name: "Task views" }));
-  expect(navigation.getAllByRole("link").map(link => link.textContent)).toEqual(["Engagement", "Dashboard"]);
-  expect(navigation.getByRole("link", { name: "Engagement" }).getAttribute("aria-current")).toBe("page");
+  const workflow = screen.getByText("Teacher workflow ea-task-a");
+  expect(workflow.getAttribute("data-initial-material-format")).toBeNull();
+  expect(workflow.getAttribute("data-initial-step")).toBeNull();
+  // The task view draws its own header, linked back to the class lists (#172).
+  expect(workflow.getAttribute("data-home-href")).toBe("/teacher/classes");
+  expect(workflow.getAttribute("data-class-href")).toBe("/teacher/classes?classId=ea-class-a");
+  expect(workflow.getAttribute("data-can-sign-out")).toBe("true");
+  expect(screen.queryByRole("banner")).toBeNull();
 });
-it("keeps the assignment context when opening the existing dashboard", async () => {
+it("opens old dashboard links on Step 4 of the teacher workflow", async () => {
   mocks.query = "classId=ea-class-a&assignmentId=ea-task-a&view=dashboard";
   mocks.fetch.mockResolvedValue(reply({ user: { ...teacher, classId: "ea-class-a", assignmentId: "ea-task-a" } }));
-  render(<Workspace />); expect(await screen.findByText("Teacher dashboard")).toBeTruthy();
-  expect(screen.getByRole("link", { name: "Dashboard" }).getAttribute("aria-current")).toBe("page");
-  expect(screen.getByRole("link", { name: "Engagement" }).getAttribute("aria-current")).toBeNull();
+  render(<Workspace />);
+  expect((await screen.findByText("Teacher workflow ea-task-a")).getAttribute("data-initial-step")).toBe("4");
 });
 it("opens old slides links inside the teacher workflow with Slides selected", async () => {
   mocks.query = "classId=ea-class-a&assignmentId=ea-task-a&view=slides";
@@ -59,24 +64,28 @@ it("opens old slides links inside the teacher workflow with Slides selected", as
   const workflow = await screen.findByText("Teacher workflow ea-task-a");
   expect(workflow.getAttribute("data-class-id")).toBe("ea-class-a");
   expect(workflow.getAttribute("data-initial-material-format")).toBe("slides");
-  const engagement = screen.getByRole("link", { name: "Engagement" });
-  expect(engagement.getAttribute("href")).toBe("/teacher/classes?classId=ea-class-a&assignmentId=ea-task-a&view=engagement");
-  expect(engagement.getAttribute("aria-current")).toBe("page");
-  expect(screen.queryByRole("link", { name: "Slides" })).toBeNull();
-  expect(within(screen.getByRole("navigation", { name: "Task views" })).getAllByRole("link")).toHaveLength(2);
+  expect(workflow.getAttribute("data-initial-step")).toBeNull();
 });
 it("does not open an old slides link when workspace ownership verification fails", async () => {
   mocks.query = "classId=ea-class-other&assignmentId=ea-task-other&view=slides";
   mocks.fetch.mockResolvedValue(reply({ error: "Forbidden" }, false));
   render(<Workspace />); expect((await screen.findByRole("alert")).textContent).toContain("Forbidden");
   expect(screen.queryByText(/Teacher workflow/)).toBeNull();
-  expect(screen.queryByRole("navigation", { name: "Task views" })).toBeNull();
 });
 it("does not expose the slide editor to students through view parameters", async () => {
   mocks.role = "student"; mocks.query = "classId=ea-class-a&assignmentId=ea-task-a&view=slides";
   mocks.fetch.mockResolvedValue(reply({ user: { ...student, classId: "ea-class-a", assignmentId: "ea-task-a" } }));
   render(<Workspace />); expect(await screen.findByText("Student workflow")).toBeTruthy();
   expect(screen.queryByText(/Teacher workflow/)).toBeNull();
-  expect(screen.queryByRole("navigation", { name: "Task views" })).toBeNull();
   expect(screen.queryByRole("link", { name: "Slides" })).toBeNull();
+});
+it("frames the class list with the shared header", async () => {
+  mocks.query = "classId=ea-class-a";
+  mocks.fetch.mockResolvedValue(reply({ classroom: { id: "ea-class-a", name: "Physics · Period 3" }, assignments: [], members: [] }));
+  render(<Workspace />); await screen.findByText("No tasks yet.");
+  const header = screen.getByRole("banner");
+  expect(header.querySelector('a[href="/teacher/classes"]')?.textContent).toBe("EngageAgent");
+  expect(screen.getByRole("link", { name: "Physics · Period 3" }).getAttribute("href")).toBe("/teacher/classes?classId=ea-class-a");
+  expect(screen.getByRole("link", { name: "Gallery" }).getAttribute("href")).toBe("/community");
+  expect(screen.getByRole("button", { name: "Sign out of EngageAgent" })).toBeTruthy();
 });
