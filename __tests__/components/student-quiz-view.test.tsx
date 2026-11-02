@@ -100,7 +100,7 @@ it.each(["timer", "focus", "button"])("loads a newly published quiz through %s w
     else if (trigger === "focus") fireEvent.focus(window);
     else fireEvent.click(screen.getByRole("button", { name: "Refresh quiz" }));
   });
-  expect(screen.getByText("Answer the questions below")).toBeTruthy();
+  expect(screen.getByText("Get ready for the lesson")).toBeTruthy();
   expect(screen.queryByText("No quiz available yet")).toBeNull();
   const choice = within(screen.getAllByRole("radiogroup")[0]).getByRole("radio", { name: "Very confident" });
   fireEvent.click(choice);
@@ -118,7 +118,7 @@ it("lets a student retry a failed initial quiz load", async () => {
   await screen.findByText("Quiz temporarily unavailable.");
   fetchMock.mockImplementation(originalFetch);
   fireEvent.click(screen.getByRole("button", { name: "Retry loading quiz" }));
-  await screen.findByText("Answer the questions below");
+  await screen.findByText("Get ready for the lesson");
   expect(screen.queryByText("Unable to load quiz")).toBeNull();
 });
 

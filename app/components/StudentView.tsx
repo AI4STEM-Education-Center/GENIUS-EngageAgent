@@ -9,6 +9,7 @@ import StudentContentReviewView from "./StudentContentReviewView";
 import AppFrame from "./layout/AppFrame";
 import AppHeader, { taskContext, type TaskShell } from "./layout/AppHeader";
 import StepTabs, { type StepTab } from "./layout/StepTabs";
+import { studentNavActions } from "./layout/studentNav";
 import {
   STUDENT_VIEW_STEPS,
   type StepDisplayState,
@@ -225,7 +226,8 @@ function StudentWorkspace({ user, shell }: Props) {
 
   return (
     <AppFrame narrow
-      header={<AppHeader userName={user.name} homeHref={shell?.homeHref} context={taskContext(user, shell)} canSignOut={shell?.canSignOut} showName />}
+      header={<AppHeader userName={user.name} homeHref={shell?.homeHref} context={taskContext(user, shell)} canSignOut={shell?.canSignOut} showName
+        actions={studentNavActions({ homeHref: shell?.homeHref, classHref: shell?.classHref })} />}
       tabs={<StepTabs label="Student steps" tabs={tabs} activeId={activeStep}
         onSelect={(id) => { if (id === "assessment" || id === "explore-and-ask") setActiveStep(id); }} />}>
       <div className="flex flex-col gap-6">

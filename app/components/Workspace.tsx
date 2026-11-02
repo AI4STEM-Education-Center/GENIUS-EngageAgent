@@ -11,6 +11,7 @@ import GeniusSignIn from "./GeniusSignIn";
 import TeacherView from "./TeacherView";
 import StudentView from "./StudentView";
 import AppHeader from "./layout/AppHeader";
+import { studentNavActions } from "./layout/studentNav";
 
 type Data = {
   classes?: { id: string; name: string }[];
@@ -89,7 +90,8 @@ export default function Workspace() {
   return <div className="min-h-screen bg-canvas text-ink">
     <AppHeader userName={auth.user.name} homeHref={home} canSignOut
       context={data?.classroom ? [{ label: data.classroom.name, href: classPath(data.classroom.id) }] : []}
-      actions={teacher ? [{ label: "Gallery", icon: <LayoutGrid size={15} />, href: "/community" }] : []} />
+      actions={teacher ? [{ label: "Gallery", icon: <LayoutGrid size={15} />, href: "/community" }]
+        : studentNavActions({ homeHref: home, classHref: classId ? classPath(classId) : undefined }, classId ? "tasks" : "classes")} />
     {error && <div role="alert" className="mx-auto max-w-7xl px-5 py-3 text-sm text-red-800">{error} <button onClick={() => setRefresh(n => n + 1)} className="underline">Retry</button></div>}
     {loading ? <p role="status" className="mx-auto max-w-7xl px-5 py-8 text-sm">Loading workspace...</p> : !(classId && assignmentId) &&
       <main className="mx-auto max-w-7xl px-5 pb-12 pt-5">
