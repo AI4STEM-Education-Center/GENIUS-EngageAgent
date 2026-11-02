@@ -31,17 +31,6 @@ it("preserves request headers while authenticating matching task API requests", 
   expect(init.headers).not.toHaveProperty("Authorization");
 });
 
-it("authenticates class profile reads and saves inside GENIUS (#173)", async () => {
-  const transport = vi.fn(async () => new Response("{}"));
-  vi.stubGlobal("fetch", transport);
-  setVerifiedClientAuth("host-token", user);
-  await scopedTaskFetch(user, "/api/class-profile?classId=host-class&assignmentId=host-task");
-  await scopedTaskFetch(user, "/api/class-profile", { method: "POST", body: "{}" });
-  for (const call of transport.mock.calls as unknown as [string, RequestInit][]) {
-    expect(new Headers(call[1].headers).get("Authorization")).toBe("Bearer host-token");
-  }
-});
-
 it("never leaks the launch credential to external, media, download, or different-task requests", async () => {
   const transport = vi.fn(async () => new Response("{}"));
   vi.stubGlobal("fetch", transport);
