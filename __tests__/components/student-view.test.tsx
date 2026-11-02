@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ActivityStatus } from "@/lib/activity-status";
 import type { UserContext } from "@/lib/auth";
@@ -28,8 +28,12 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-const assessment = () => screen.getByRole("button", { name: /1\. Get ready for the lesson/ }) as HTMLButtonElement;
-const materials = () => screen.getByRole("button", { name: /2\. Explore and ask/ }) as HTMLButtonElement;
+const tab = (name: RegExp) => within(screen.getByRole("navigation", { name: "Student steps" })).getByRole("button", { name }) as HTMLButtonElement;
+const assessment = () => tab(/Get ready for the lesson/);
+const materials = () => tab(/Explore and ask/);
+const expectStatus = async (button: () => HTMLButtonElement, status: string) => {
+  await waitFor(() => expect(button().textContent).toContain(status));
+};
 const expectActive = async (button: () => HTMLButtonElement) => {
   await waitFor(() => expect(button().getAttribute("aria-current")).toBe("step"));
 };
@@ -39,7 +43,7 @@ it("opens published material without a quiz and keeps the unpublished assessment
   statuses["content-review"] = "available";
   render(<StudentView user={student} />);
   await expectActive(materials);
-  expect(screen.getByText("0 of 1 available activity completed")).toBeTruthy();
+  expect(materials().textContent).toContain("In progress");
   expect(assessment().disabled).toBe(true);
   expect(assessment().textContent).toContain("Not available yet");
   expect(screen.getByRole("region", { name: "Materials content" }).parentElement?.className).not.toContain("hidden");
@@ -50,7 +54,7 @@ it("opens published material without a quiz and keeps the unpublished assessment
 it("keeps normal quiz and material navigation with two available activities", async () => {
   statuses = { assessment: "available", "content-review": "available", "content-rating": "locked" };
   render(<StudentView user={student} />);
-  await screen.findByText("0 of 2 available activities completed");
+  await waitFor(() => expect(materials().disabled).toBe(false));
   await expectActive(assessment);
   expect(assessment().disabled).toBe(false);
   expect(materials().disabled).toBe(false);
@@ -69,7 +73,7 @@ it("does not bounce away from a completed quiz the student deliberately revisits
   statuses = { assessment: "completed", "content-review": "available", "content-rating": "locked" };
   render(<StudentView user={student} />);
   await expectActive(materials);
-  expect(screen.getByText("1 of 2 available activities completed")).toBeTruthy();
+  expect(assessment().textContent).toContain("Completed");
   fireEvent.click(assessment());
   await expectActive(assessment);
   refresh();
@@ -84,70 +88,89 @@ it("opens materials published after the student entered a task with no available
   statuses["content-review"] = "available";
   refresh();
   await expectActive(materials);
-  expect(screen.getByText("0 of 1 available activity completed")).toBeTruthy();
+  expect(materials().textContent).toContain("In progress");
   expect(assessment().disabled).toBe(true);
 });
 
 it("does not interrupt an available quiz when the teacher publishes material", async () => {
   statuses.assessment = "available";
   render(<StudentView user={student} />);
-  await screen.findByText("0 of 1 available activity completed");
+  await waitFor(() => expect(assessment().disabled).toBe(false));
+  expect(materials().disabled).toBe(true);
   statuses["content-review"] = "available";
   refresh();
-  await screen.findByText("0 of 2 available activities completed");
+  await waitFor(() => expect(materials().disabled).toBe(false));
   await expectActive(assessment);
   expect(materials().disabled).toBe(false);
 });
 
-it("explains that nothing is available while retaining both disabled activity cards", async () => {
+it("keeps every tab locked while nothing is available", async () => {
   render(<StudentView user={student} />);
   await waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
-  expect(screen.getByText("No activities are available yet. Your teacher will publish them here.")).toBeTruthy();
   expect(assessment().disabled).toBe(true);
+  expect(assessment().textContent).toContain("Not available yet");
   expect(materials().disabled).toBe(true);
-  expect(screen.queryByText(/0 of 0/)).toBeNull();
+  expect(materials().textContent).toContain("Not available yet");
   expect(mocks.completed).not.toHaveBeenCalled();
+});
+
+it("shows Class questions and My quiz report as locked tabs until they are built (#182)", async () => {
+  statuses = { assessment: "completed", "content-review": "completed", "content-rating": "completed" };
+  render(<StudentView user={student} />);
+  await expectStatus(materials, "Completed");
+  expect(tab(/Class questions/).disabled).toBe(true);
+  expect(tab(/Class questions/).textContent).toContain("Your teacher will share these");
+  expect(tab(/My quiz report/).disabled).toBe(true);
+  expect(tab(/My quiz report/).textContent).toContain("After the lesson");
+});
+
+it("shows the student's name in the shared header and links back to the class when opened from the workspace", async () => {
+  render(<StudentView user={{ ...student, className: "Physics · Period 3" }}
+    shell={{ homeHref: "/student/classes", classHref: "/student/classes?classId=ea-class-one", canSignOut: true }} />);
+  const header = within(screen.getByRole("banner"));
+  expect(header.getByText("Student")).toBeTruthy();
+  expect(header.getByRole("link", { name: "Physics · Period 3" }).getAttribute("href")).toBe("/student/classes?classId=ea-class-one");
+  expect(header.getByRole("button", { name: "Sign out of EngageAgent" })).toBeTruthy();
 });
 
 it("completes the sole material activity only after questions and all ratings are complete", async () => {
   statuses = { assessment: "locked", "content-review": "completed", "content-rating": "available" };
   render(<StudentView user={student} />);
   await expectActive(materials);
-  expect(screen.getByText("0 of 1 available activity completed")).toBeTruthy();
+  expect(materials().textContent).toContain("In progress");
   expect(screen.getByRole("region", { name: "Materials content" }).getAttribute("data-rating-unlocked")).toBe("true");
   expect(mocks.completed).not.toHaveBeenCalled();
   statuses["content-rating"] = "completed";
   refresh();
-  await screen.findByText("1 of 1 available activity completed");
+  await expectStatus(materials, "Completed");
   expect(assessment().disabled).toBe(true);
   expect(assessment().textContent).toContain("Not available yet");
-  expect(materials().textContent).toContain("Completed");
   expect(mocks.completed).toHaveBeenCalledExactlyOnceWith(student.classId, student.assignmentId, student.geniusId);
   refresh();
   await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(3));
   expect(mocks.completed).toHaveBeenCalledOnce();
 });
 
-it("opens an already completed material-only task with a one-of-one progress count", async () => {
+it("opens an already completed material-only task", async () => {
   statuses = { assessment: "locked", "content-review": "completed", "content-rating": "completed" };
   render(<StudentView user={student} />);
   await expectActive(materials);
-  expect(screen.getByText("1 of 1 available activity completed")).toBeTruthy();
+  expect(materials().textContent).toContain("Completed");
   expect(assessment().disabled).toBe(true);
 });
 
 it("reopens a completed material task when more material arrives and notifies again after rating it", async () => {
   statuses = { assessment: "completed", "content-review": "completed", "content-rating": "completed" };
   render(<StudentView user={student} />);
-  await screen.findByText("2 of 2 available activities completed");
+  await expectStatus(materials, "Completed");
+  expect(assessment().textContent).toContain("Completed");
   expect(mocks.completed).toHaveBeenCalledOnce();
   statuses["content-rating"] = "available";
   refresh();
-  await screen.findByText("1 of 2 available activities completed");
-  expect(materials().textContent).toContain("In progress");
+  await expectStatus(materials, "In progress");
   expect(mocks.reopened).toHaveBeenCalledExactlyOnceWith(student.classId, student.assignmentId, student.geniusId);
   statuses["content-rating"] = "completed";
   refresh();
-  await screen.findByText("2 of 2 available activities completed");
+  await expectStatus(materials, "Completed");
   expect(mocks.completed).toHaveBeenCalledTimes(2);
 });

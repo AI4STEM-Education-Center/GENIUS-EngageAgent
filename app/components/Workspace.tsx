@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRight, BookOpen, LogOut, Plus, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, LayoutGrid, Plus } from "lucide-react";
 import type { UserContext } from "@/lib/auth";
 import type { WorkspaceAssignment, WorkspaceMember } from "@/lib/workspace";
 import { useAuth } from "./AuthContext";
 import GeniusSignIn from "./GeniusSignIn";
 import TeacherView from "./TeacherView";
-import TeacherDashboardView from "./TeacherDashboardView";
 import StudentView from "./StudentView";
+import AppHeader from "./layout/AppHeader";
 
 type Data = {
   classes?: { id: string; name: string }[];
@@ -27,7 +27,6 @@ export default function Workspace() {
   const params = useSearchParams();
   const router = useRouter();
   const classId = params.get("classId"), assignmentId = params.get("assignmentId");
-  const taskView = params.get("view") === "dashboard" ? "dashboard" : "engagement";
   const [data, setData] = useState<Data | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -74,42 +73,25 @@ export default function Workspace() {
     finally { setBusy(false); }
   }
 
-  async function logout() {
-    setBusy(true); setError("");
-    try {
-      const response = await fetch("/api/auth/logout", { method: "POST" });
-      if (!response.ok) throw new Error("Unable to sign out. Please try again.");
-      sessionStorage.removeItem("engage-sso-token"); sessionStorage.removeItem("engage-mock-user-role");
-      window.location.assign("/");
-    } catch (err) { setError(err instanceof Error ? err.message : "Unable to sign out."); setBusy(false); }
-  }
-
   if (auth.loading) return <p role="status" className="p-8 text-sm">Checking your session...</p>;
   if (!auth.user || auth.error) return <GeniusSignIn error={auth.error} />;
 
-  return <div className="min-h-screen bg-gray-50 text-gray-900">
-    <header className="border-b border-gray-200 bg-white">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-4">
-        <Link href={home} className="flex items-center gap-3 text-xl font-semibold"><BookOpen size={24} className="shrink-0 text-red-800" />EngageAgent</Link>
-        <div className="flex min-w-0 items-center gap-4 text-sm"><span className="break-words">{auth.user.name} <span className="text-gray-500">({teacher ? "Teacher" : "Student"})</span></span>
-          <button title="Sign out of EngageAgent" aria-label="Sign out of EngageAgent" onClick={logout} disabled={busy} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md hover:bg-gray-100"><LogOut size={19} /></button>
-        </div>
-      </div>
-    </header>
-    <nav aria-label="Workspace" className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-5 py-4 text-sm">
-      <Link href={home} className="inline-flex items-center gap-2 text-red-800"><Users size={17} />My classes</Link>
-      {classId && <><span className="text-gray-400">/</span><Link href={classPath(classId)}>Class tasks</Link></>}
-      {assignmentId && <><span className="text-gray-400">/</span><span>Engagement workflow</span></>}
-    </nav>
-    {teacher && data?.user && classId && assignmentId && <nav aria-label="Task views" className="mx-auto mb-4 flex max-w-7xl gap-5 border-b border-gray-200 px-5 text-sm">
-      {[["engagement", "Engagement"], ["dashboard", "Dashboard"]].map(([view, title]) => <Link key={view}
-        href={`${classPath(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&view=${view}`}
-        aria-current={taskView === view ? "page" : undefined}
-        className={`border-b-2 py-3 ${taskView === view ? "border-red-800 font-semibold text-red-800" : "border-transparent"}`}>{title}</Link>)}
-    </nav>}
+  // A task view renders its own header and step bar (#172); this page only frames the class and task lists.
+  if (data?.user && classId && assignmentId) {
+    const shell = { homeHref: home, classHref: classPath(classId), canSignOut: true };
+    return teacher
+      ? <TeacherView key={`${classId}:${assignmentId}`} user={data.user} shell={shell}
+          initialMaterialFormat={params.get("view") === "slides" ? "slides" : undefined}
+          initialStep={params.get("view") === "dashboard" ? 4 : undefined} />
+      : <StudentView key={`${classId}:${assignmentId}`} user={data.user} shell={shell} />;
+  }
+
+  return <div className="min-h-screen bg-canvas text-ink">
+    <AppHeader userName={auth.user.name} homeHref={home} canSignOut
+      context={data?.classroom ? [{ label: data.classroom.name, href: classPath(data.classroom.id) }] : []}
+      actions={teacher ? [{ label: "Gallery", icon: <LayoutGrid size={15} />, href: "/community" }] : []} />
     {error && <div role="alert" className="mx-auto max-w-7xl px-5 py-3 text-sm text-red-800">{error} <button onClick={() => setRefresh(n => n + 1)} className="underline">Retry</button></div>}
-    {loading ? <p role="status" className="mx-auto max-w-7xl px-5 py-8 text-sm">Loading workspace...</p> : data?.user ?
-      (teacher ? (taskView === "dashboard" ? <TeacherDashboardView user={data.user} /> : <TeacherView key={`${classId}:${assignmentId}`} user={data.user} initialMaterialFormat={params.get("view") === "slides" ? "slides" : undefined} />) : <StudentView key={`${classId}:${assignmentId}`} user={data.user} />) :
+    {loading ? <p role="status" className="mx-auto max-w-7xl px-5 py-8 text-sm">Loading workspace...</p> : !(classId && assignmentId) &&
       <main className="mx-auto max-w-7xl px-5 pb-12 pt-5">
         <h1 className="break-words text-2xl font-semibold">{data?.classroom?.name || "My classes"}</h1>
         {data?.classroom?.joinCode && <p className="mt-3 break-all text-sm text-gray-600">Class code: <strong className="font-mono text-gray-900">{data.classroom.joinCode}</strong></p>}

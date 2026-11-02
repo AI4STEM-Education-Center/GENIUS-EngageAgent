@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { clearVerifiedClientAuth, setVerifiedClientAuth } from "@/lib/client-auth";
 import type { UserContext } from "@/lib/auth";
@@ -50,6 +50,8 @@ vi.mock("@/app/components/SlidesWorkspace", async () => {
 vi.mock("@/lib/material-export", () => ({ downloadStudentMaterial: mocks.download }));
 
 import TeacherView from "@/app/components/TeacherView";
+
+const stepTab = (name: RegExp) => within(screen.getByRole("navigation", { name: "Teacher steps" })).getByRole("button", { name });
 
 const user: UserContext = {
   geniusId: "teacher", userId: "teacher", name: "Test teacher", email: null,
@@ -119,7 +121,7 @@ it("opens a Slides entry with only the last valid saved strategy without generat
 it("defaults new material generation to Slides and offers only Slides and Video", async () => {
   render(<TeacherView user={user} />);
   fireEvent.click(await screen.findByRole("button", { name: /Energy/ }));
-  fireEvent.click(screen.getByRole("button", { name: /Strategy recommendation/ }));
+  fireEvent.click(stepTab(/Strategy/));
   fireEvent.click(screen.getByRole("button", { name: "Analogy" }));
   fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
   await ready();
@@ -177,9 +179,9 @@ it("generates the selected slide strategy with inherited context and retains its
   }]);
   fireEvent.change(screen.getByRole("textbox", { name: `Draft for ${strategy}` }), { target: { value: `Teacher edit: ${strategy}` } });
   fireEvent.click(screen.getByRole("radio", { name: "Video" }));
-  fireEvent.click(screen.getByRole("button", { name: /Strategy recommendation/ }));
+  fireEvent.click(stepTab(/Strategy/));
   expect(screen.queryByRole("radio", { name: "Slides" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /Content generation/ }));
+  fireEvent.click(stepTab(/Engagement materials/));
   await act(async () => { fireEvent.click(screen.getByRole("radio", { name: "Slides" })); });
   expect(screen.getByRole("textbox", { name: `Draft for ${strategy}` })).toHaveValue(`Teacher edit: ${strategy}`);
   expect(mocks.mount).toHaveBeenCalledTimes(1);
@@ -280,7 +282,7 @@ it("restores published materials from multiple strategies while selecting only o
   await openSavedActivities();
   await screen.findByText("Keep the published conflict.");
   expect(screen.getByText("Keep the published comparison.")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: /Strategy recommendation/ }));
+  fireEvent.click(stepTab(/Strategy/));
   expect(screen.getByRole("button", { name: "Cognitive Conflict · Selected" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("button", { name: "Analogy" })).toHaveAttribute("aria-pressed", "false");
   expect(postCalls()).toHaveLength(0);
@@ -629,7 +631,7 @@ it("hydrates an embedded teacher workflow and generates in memory when browser s
     const host = { ...user, classId: "host-class", assignmentId: "host-task" };
     render(<TeacherView user={host} />);
     fireEvent.click(await screen.findByRole("button", { name: /Energy/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Strategy recommendation/ }));
+    fireEvent.click(stepTab(/Strategy/));
     fireEvent.click(screen.getByRole("button", { name: "Analogy" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
     await ready();

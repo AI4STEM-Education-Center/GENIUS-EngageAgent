@@ -104,7 +104,7 @@ export default function AgentTaskPage({ mode, taskId, geniusOrigin }: Props) {
 
   if (!task) return <Shell heading="Opening activity"><Status message="Loading activity..." /></Shell>;
 
-  if (mode === "launch") return user.role === "teacher" ? <TeacherView user={user} /> : <StudentView user={user} />;
+  if (mode === "launch") return user.role === "teacher" ? <TeacherView user={user} shell={{ taskTitle: task.title }} /> : <StudentView user={user} shell={{ taskTitle: task.title }} />;
 
   if (mode === "delete") {
     if (task.archived) return <Shell heading="Activity archived"><Status message={`"${task.title}" is archived. Student answers and materials are kept.`} /></Shell>;

@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
+/* EngageAgent v8.3 design tokens (#172). Light only, matching the prototype. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f6f7f9;
+  --foreground: #0f172a;
 }
 
 @theme inline {
@@ -10,17 +11,33 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-brand: #ba0c2f;
+  --color-brand-dark: #9a0a27;
+  --color-brand-light: #fcf0f2;
+  --color-brand-mid: #f3c9d2;
+  --color-ink: #0f172a;
+  --color-ink-2: #334155;
+  --color-mute: #64748b;
+  --color-faint: #94a3b8;
+  --color-line: #e2e8f0;
+  --color-line-2: #eef2f6;
+  --color-canvas: #f6f7f9;
+  --color-ok: #0f7a4f;
+  --color-ok-light: #e7f6ee;
+  --color-warn: #9a5b00;
+  --color-warn-light: #fff5e1;
+  --color-bad: #b42318;
+  --color-bad-light: #fdecea;
+  --color-ai: #4f46e5;
+  --color-ai-light: #eef0ff;
+  --color-ai-mid: #c9ccfa;
+  --color-info: #1d4ed8;
+  --color-info-light: #eaf1fe;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }

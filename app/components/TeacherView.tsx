@@ -3,8 +3,12 @@
 import { scopedTaskFetch } from "@/lib/client-auth";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { BarChart3, LayoutGrid, MessageCircle, Users } from "lucide-react";
 import SurveyBuilderView from "./SurveyBuilderView";
+import TeacherDashboardView from "./TeacherDashboardView";
+import AppFrame from "./layout/AppFrame";
+import AppHeader, { taskContext, type TaskShell } from "./layout/AppHeader";
+import StepTabs, { type StepTab } from "./layout/StepTabs";
 import ActivityContextSuggestion from "./ActivityContextSuggestion";
 import MaterialActivityView from "./MaterialActivityView";
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "./SlidesWorkspace";
@@ -41,6 +45,9 @@ const MAX_IMAGE_VERSIONS = 10;
 type Props = {
   user: UserContext;
   initialMaterialFormat?: MaterialFormat;
+  /** Opens a specific step, e.g. 4 for old `?view=dashboard` links. */
+  initialStep?: number;
+  shell?: TaskShell;
 };
 
 type MaterialFormat = "slides" | "video";
@@ -147,7 +154,7 @@ const LEGACY_DRAFT_STORAGE_KEY = "engage-agent:draft:v2";
 const DRAFT_STORAGE_PREFIX = "engage-agent:draft:v3";
 const DRAFT_VERSION = 2;
 
-const clampStep = (value: number) => Math.min(3, Math.max(1, value));
+const clampStep = (value: number) => Math.min(stepLabels.length, Math.max(1, value));
 
 const getDraftStorageKey = (classId: string, assignmentId: string) =>
   `${DRAFT_STORAGE_PREFIX}:${classId || "__no-class__"}:${assignmentId || "__no-assignment__"}`;
@@ -275,11 +282,12 @@ const parsePersistedContentItem = (
 
 const stepLabels = [
   "Assessment",
-  "Strategy recommendation",
-  "Content generation",
+  "Strategy",
+  "Engagement materials",
+  "Questions & discussion",
 ];
 
-export default function TeacherView({ user, initialMaterialFormat }: Props) {
+export default function TeacherView({ user, initialMaterialFormat, initialStep, shell }: Props) {
   const downloadRef = useRef<HTMLAnchorElement>(null);
   const isMountedRef = useRef(true);
   const activeVideoPollersRef = useRef<Set<string>>(new Set());
@@ -313,6 +321,8 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
   const materialDownloadJob = useRef<{ controller: AbortController; item: ContentItem; imageUrl: string; workspace: string } | null>(null);
   const materialWorkspace = JSON.stringify([user.geniusId, classId, assignmentId]);
   const initialFormatRef = useRef(initialMaterialFormat);
+  // A step requested by the link that opened this view wins over the saved draft.
+  const requestedStepRef = useRef(initialStep ? clampStep(initialStep) : initialMaterialFormat ? 3 : null);
   const [materialFormat, setMaterialFormat] = useState<MaterialFormat>(initialMaterialFormat ?? "slides");
   const [savedActivitiesExpanded, setSavedActivitiesExpanded] = useState(false);
   const [classroomContext, setClassroomContext] = useState("");
@@ -560,7 +570,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     setVideos({});
     setSelectedForPublish(new Set());
     setPublishedContentIds(new Set());
-    setCurrentStep(initialFormatRef.current ? 3 : 1);
+    setCurrentStep(requestedStepRef.current ?? 1);
     setMaterialFormat(initialFormatRef.current ?? "slides");
     setSavedActivitiesExpanded(false);
     setClassroomContext("");
@@ -618,7 +628,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
           setVideos(restoredVideos);
           setSelectedForPublish(new Set((draft.selectedForPublish ?? []).filter((itemId) => contentIds.has(itemId))));
           setPublishedContentIds(new Set((draft.publishedContentIds ?? []).filter((itemId) => contentIds.has(itemId))));
-          setCurrentStep(initialFormatRef.current ? 3 : clampStep(draft.currentStep));
+          setCurrentStep(requestedStepRef.current ?? clampStep(draft.currentStep));
           // Retain earlier activities and their media, while migrating their
           // retired generation format to the current default.
           setMaterialFormat(initialFormatRef.current ?? (isMaterialFormat(draft.materialFormat) ? draft.materialFormat : "slides"));
@@ -1582,69 +1592,29 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
     }
   };
 
+  const stepStatus = [
+    quizStatus === "published" ? "Published" : quizStatus === "closed" ? "Closed" : selectedLesson ? "In progress" : "Not started",
+    selectedStrategies.length ? getEngagementStrategyLabel(selectedStrategies[0]) : "Not chosen yet",
+    publishedContentIds.size ? "Sent to students" : content.length ? "Draft ready" : "Not started",
+    // Shows the assignment dashboard until #182 builds this step.
+    "Class results",
+  ];
+  const stepDone = [quizStatus !== "draft", selectedStrategies.length > 0, publishedContentIds.size > 0, false];
+  const stepTabs: StepTab<string>[] = stepLabels.map((title, index) => ({
+    id: String(index + 1), title, status: stepStatus[index], marker: index + 1, done: stepDone[index],
+  }));
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto flex max-w-6xl flex-col gap-12 px-6 py-12">
-        <header className="flex flex-col gap-4">
-          <nav className="flex flex-wrap items-center gap-3">
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Engage Agent</p>
-            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase text-emerald-700">Teacher</span>
-          </nav>
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Class context</p>
-              <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-slate-400">Teacher</p>
-                  <p className="text-sm font-semibold text-slate-800">{user.name}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-slate-400">Class ID</p>
-                  <p className="text-sm font-semibold text-slate-800">{classId || "—"}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs font-semibold text-slate-400">Assignment ID</p>
-                  <p className="text-sm font-semibold text-slate-800">{assignmentId || "—"}</p>
-                </div>
-              </div>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2 xl:justify-end">
-              <Link href={classId.startsWith("ea-class-") ? `/teacher/classes?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}&view=dashboard` : "/dashboard"} className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">
-                Assignment Dashboard
-              </Link>
-              <Link href="/community" className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">
-                Community Gallery
-              </Link>
-            </div>
-          </div>
-        </header>
-
+    <AppFrame
+      header={<AppHeader userName={user.name} homeHref={shell?.homeHref} context={taskContext(user, shell)} canSignOut={shell?.canSignOut}
+        actions={[
+          { label: "Class profile", icon: <Users size={15} />, comingSoon: true },
+          { label: "Dashboard", icon: <BarChart3 size={15} />, onClick: () => setCurrentStep(4), active: currentStep === 4 },
+          { label: "Gallery", icon: <LayoutGrid size={15} />, href: "/community" },
+          { label: "Ask EngageAgent", icon: <MessageCircle size={15} />, comingSoon: true },
+        ]} />}
+      tabs={<StepTabs label="Teacher steps" tabs={stepTabs} activeId={String(currentStep)} onSelect={(id) => setCurrentStep(Number(id))} />}>
         <section className="grid gap-6">
-          {/* Step navigation */}
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-col gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Workflow steps</p>
-                <h2 className="text-2xl font-semibold text-slate-900">Step-by-step flow</h2>
-              </div>
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                {stepLabels.map((label, index) => {
-                  const stepNumber = index + 1;
-                  const isActive = currentStep === stepNumber;
-                  const isComplete = currentStep > stepNumber;
-                  return (
-                    <button key={label} type="button" onClick={() => setCurrentStep(stepNumber)}
-                      className={`flex flex-1 items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition ${isActive ? "border-[#BA0C2F] bg-[#BA0C2F] text-white" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}>
-                      <span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold ${isActive ? "bg-white text-[#BA0C2F]" : isComplete ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-600"}`}>{stepNumber}</span>
-                      <span className="font-semibold">{label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-
           {/* Step 1: Assessment */}
           {currentStep === 1 && (
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -2227,10 +2197,12 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
               </div>
               <div className="flex items-center justify-between">
                 <button type="button" onClick={() => setCurrentStep(2)} className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-100">Previous step</button>
-                <button type="button" disabled className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-300">Next step</button>
+                <button type="button" onClick={() => setCurrentStep(4)} className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-100">Next step</button>
               </div>
             </div>
           </div>
+
+          {currentStep === 4 && <TeacherDashboardView user={user} embedded />}
 
           {error && (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>
@@ -2393,8 +2365,7 @@ export default function TeacherView({ user, initialMaterialFormat }: Props) {
             </div>
           </div>
         )}
-      </div>
       <a ref={downloadRef} className="hidden" />
-    </div>
+    </AppFrame>
   );
 }
