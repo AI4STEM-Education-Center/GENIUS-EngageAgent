@@ -22,6 +22,8 @@ type AuthState = {
   user: UserContext | null;
   loading: boolean;
   error: string | null;
+  /** GENIUS provides the surrounding navigation for a verified SSO visit. */
+  isGeniusEmbed?: boolean;
 };
 
 const AuthCtx = createContext<AuthState>({
@@ -188,7 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           rememberEmbeddedLaunch(verifiedUser.classId && verifiedUser.assignmentId && !verifiedUser.classId.startsWith("ea-class-")
             ? { classId: verifiedUser.classId, assignmentId: verifiedUser.assignmentId } : null);
           clearStoredMockUser();
-          setState({ user: data.user as UserContext, loading: false, error: null });
+          setState({ user: verifiedUser, loading: false, error: null, isGeniusEmbed: true });
         } catch (err) {
           if (!active) return;
           clearVerifiedClientAuth();

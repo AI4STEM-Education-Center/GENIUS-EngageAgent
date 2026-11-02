@@ -4,6 +4,7 @@ import { scopedTaskFetch } from "@/lib/client-auth";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SurveyResultsSection from "./SurveyResultsSection";
+import { useAuth } from "./AuthContext";
 import Link from "next/link";
 import type { UserContext } from "@/lib/auth";
 import { isPublishedSlideReference } from "@/lib/slides/publication";
@@ -86,6 +87,7 @@ const formatDateTime = (iso: string) => {
 };
 
 export default function TeacherDashboardView({ user, embedded }: Props) {
+  const { isGeniusEmbed } = useAuth();
   const classId = user.classId ?? "";
   const assignmentId = user.assignmentId ?? "";
   const hasAssignmentContext = Boolean(classId && assignmentId);
@@ -414,7 +416,7 @@ export default function TeacherDashboardView({ user, embedded }: Props) {
     <div className={embedded ? "text-slate-900" : "min-h-screen bg-slate-50 text-slate-900"}>
       <div className={embedded ? "flex flex-col gap-8" : "mx-auto flex max-w-6xl flex-col gap-8 px-6 py-12"}>
         <header className="flex flex-col gap-4">
-          {!embedded && <nav className="flex flex-wrap items-center gap-3">
+          {!embedded && !isGeniusEmbed && <nav className="flex flex-wrap items-center gap-3">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Engage Agent</p>
             <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase text-emerald-700">Teacher</span>
             <span className="rounded-full bg-slate-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">Dashboard</span>

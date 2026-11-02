@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { LogOut, Sparkles } from "lucide-react";
+import { useAuth } from "../AuthContext";
 
 export type HeaderAction = {
   label: string;
@@ -43,6 +44,7 @@ const actionClass = (active?: boolean) =>
   } disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent`;
 
 export default function AppHeader({ userName, homeHref, context = [], actions = [], canSignOut, showName }: Props) {
+  const { isGeniusEmbed } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState("");
 
@@ -55,6 +57,8 @@ export default function AppHeader({ userName, homeHref, context = [], actions = 
       window.location.assign("/");
     } catch (err) { setError(err instanceof Error ? err.message : "Unable to sign out."); setSigningOut(false); }
   }
+
+  if (isGeniusEmbed) return null;
 
   const mark = <><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand text-white"><Sparkles size={15} /></span>EngageAgent</>;
 
