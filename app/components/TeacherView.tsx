@@ -17,6 +17,7 @@ import { STRATEGIES as SLIDE_STRATEGIES, type SlideStrategy } from "@/lib/slides
 import { parseMaterialActivity } from "@/lib/material-activities";
 import { downloadStudentMaterial, type PreparedMaterialFile } from "@/lib/material-export";
 import type { UserContext } from "@/lib/auth";
+import { useClassProfile } from "./ClassProfileModal";
 import { recommendWorkspaceCohort, workspaceQuizAnswers } from "@/lib/cohort-recommendation";
 import {
   engagementStrategies as strategies,
@@ -304,6 +305,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const [publishingQuiz, setPublishingQuiz] = useState(false);
   // Assessment step sub-tabs (quiz vs survey), mirrors the tab pattern in StudentView.
   const [assessmentTab, setAssessmentTab] = useState<"quiz" | "survey">("quiz");
+
+  // Class profile (#173): asked once on the teacher's first visit to the class.
+  const classProfile = useClassProfile({ classId, assignmentId, enabled: hasAssignmentContext });
 
   // Student answers
   const [studentAnswers, setStudentAnswers] = useState<StudentAnswer[]>([]);
@@ -2229,6 +2233,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             </div>
           </div>
         )}
+
+        {classProfile.element}
 
         {/* Refine image modal */}
         {refineTarget && (
