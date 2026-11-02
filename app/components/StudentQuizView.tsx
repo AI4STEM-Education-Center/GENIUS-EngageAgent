@@ -9,6 +9,7 @@ import { findMissingAnswers, getSurveyAvailability } from "@/lib/survey-response
 import { pickTaskSurvey } from "@/lib/survey-schedule";
 import type { QuizItem, Survey, SurveyResponse } from "@/lib/types";
 import type { StepProgress } from "@/lib/student-progress";
+import { countAnswered, firstUnanswered, groupQuizItems } from "@/lib/student-quiz-progress";
 
 type Props = {
   user: UserContext;
@@ -260,23 +261,27 @@ export default function StudentQuizView({ user, onProgress }: Props) {
     }
   };
 
+  const refreshButton = (label: string, tone: "plain" | "bad") => (
+    <button type="button" disabled={refreshing} onClick={() => void loadQuiz()}
+      className={`mt-4 rounded-lg border px-4 py-2 text-sm font-semibold disabled:opacity-50 ${tone === "bad" ? "border-bad/30 text-bad" : "border-line text-ink-2 hover:bg-canvas"}`}>
+      {refreshing ? "Refreshing..." : label}
+    </button>
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <span className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+        <span className="h-6 w-6 animate-spin rounded-full border-2 border-line border-t-ink-2" />
       </div>
     );
   }
 
   if (loadError) {
     return (
-      <div className="rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center">
-        <p className="text-lg font-semibold text-rose-700">Unable to load quiz</p>
-        <p className="mt-2 text-sm text-rose-600">{loadError}</p>
-        <button type="button" disabled={refreshing} onClick={() => void loadQuiz()}
-          className="mt-4 rounded-xl border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50">
-          {refreshing ? "Refreshing..." : "Retry loading quiz"}
-        </button>
+      <div className="rounded-2xl border border-bad/20 bg-bad-light p-8 text-center">
+        <p className="text-lg font-semibold text-bad">Unable to load quiz</p>
+        <p className="mt-2 text-sm text-bad">{loadError}</p>
+        {refreshButton("Retry loading quiz", "bad")}
       </div>
     );
   }
@@ -285,38 +290,32 @@ export default function StudentQuizView({ user, onProgress }: Props) {
 
   if ((!quizStatus || quizStatus.status === "draft") && !survey) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
-        <p className="text-lg font-semibold text-slate-700">No quiz available yet</p>
-        <p className="mt-2 text-sm text-slate-500">
+      <div className="rounded-2xl border border-line bg-white p-8 text-center">
+        <p className="text-lg font-semibold text-ink">No quiz available yet</p>
+        <p className="mt-2 text-sm text-mute">
           Your teacher hasn&apos;t published the quiz for this assignment yet. Check back later.
         </p>
-        <button type="button" disabled={refreshing} onClick={() => void loadQuiz()}
-          className="mt-4 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50">
-          {refreshing ? "Refreshing..." : "Refresh quiz"}
-        </button>
+        {refreshButton("Refresh quiz", "plain")}
       </div>
     );
   }
 
   if (quizStatus?.status === "closed" && !survey) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
-        <p className="text-lg font-semibold text-slate-700">Quiz closed</p>
-        <p className="mt-2 text-sm text-slate-500">
+      <div className="rounded-2xl border border-line bg-white p-8 text-center">
+        <p className="text-lg font-semibold text-ink">Quiz closed</p>
+        <p className="mt-2 text-sm text-mute">
           This quiz is no longer accepting responses.
         </p>
-        <button type="button" disabled={refreshing} onClick={() => void loadQuiz()}
-          className="mt-4 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50">
-          {refreshing ? "Refreshing..." : "Refresh quiz"}
-        </button>
+        {refreshButton("Refresh quiz", "plain")}
       </div>
     );
   }
 
-  const multipleChoiceQuestions = questions.filter((q) => q.type === "multiple_choice");
+  const quizItems = quizOpen ? questions : [];
+  const multipleChoiceQuestions = quizItems.filter((q) => q.type === "multiple_choice");
   const allAnswered = multipleChoiceQuestions.every((q) => answers[q.item_id]);
-  // Check confidence items too
-  const confidenceItems = questions.filter((q) => q.type === "confidence_check");
+  const confidenceItems = quizItems.filter((q) => q.type === "confidence_check");
   const allConfidenceAnswered = confidenceItems.every((q) => answers[q.item_id]);
   const surveyComplete = !survey || findMissingAnswers(survey, surveyAnswers).length === 0;
   const allDone = (!quizOpen || submitted) && (!survey || surveySubmitted);
@@ -324,125 +323,144 @@ export default function StudentQuizView({ user, onProgress }: Props) {
     !refreshing && !loadError && (!quizOpen || submitted || (allAnswered && allConfidenceAnswered)) &&
     surveyComplete &&
     !allDone;
-  const questionCount = quizOpen ? multipleChoiceQuestions.length : 0;
+
+  const cards = groupQuizItems(quizItems);
+  const progress = countAnswered(quizItems, answers, survey, surveyAnswers);
+  const next = firstUnanswered(cards, answers, survey, surveyAnswers);
+  const cardId = (itemId: string) => `${questionLabelId}-card-${itemId}`;
+
+  // The count stays pinned while the student scrolls; "Next unanswered"
+  // brings the first card with something left into view and focuses it.
+  const goToNextUnanswered = () => {
+    if (!next) return;
+    const card = document.getElementById(cardId(next.itemId));
+    card?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    card?.focus({ preventScroll: true });
+  };
+
+  const renderConfidence = (item: QuizItem, labelId: string) => {
+    const selected = answers[item.item_id] ?? existingAnswers?.[item.item_id];
+    return (
+      <div role="radiogroup" aria-labelledby={labelId} aria-orientation="horizontal" className="mt-2.5 grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-line">
+        {Object.entries(item.options).map(([key, value], optionIndex) => (
+          <button key={key} type="button" role="radio" aria-checked={selected === key}
+            tabIndex={selected === key || (!selected && optionIndex === 0) ? 0 : -1}
+            disabled={submitted} onClick={() => handleSelect(item.item_id, key)} onKeyDown={event => handleConfidenceKey(event, item, key)}
+            className={`min-h-12 min-w-0 break-words border-r border-line px-1 py-3 text-center text-xs font-medium leading-snug last:border-r-0 focus-visible:relative focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand disabled:cursor-default sm:px-3 sm:text-sm ${selected === key ? "bg-brand text-white" : "bg-white text-ink-2 enabled:hover:bg-canvas"}`}>
+            {value}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  const eyebrow = "text-xs font-semibold uppercase tracking-[0.14em] text-faint";
+  const numberBadge = "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-line-2 text-[13px] font-bold text-ink-2";
+  const cardClass = "scroll-mt-24 rounded-2xl border border-line bg-white p-5 outline-none focus-visible:ring-2 focus-visible:ring-brand/40 sm:p-6";
+  const hasQuiz = cards.length > 0;
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-          {quizOpen && quizStatus
-            ? `Lesson ${quizStatus.lesson_number} ${survey ? "Quiz and Survey" : "Quiz"}`
-            : "Survey"}
-        </p>
-        <h2 className="mt-1 text-xl font-semibold text-slate-900">
-          Answer the questions below
-        </h2>
-        {allDone && (
-          <p className="mt-2 text-sm font-semibold text-emerald-600">
-            Your answers have been submitted.
-          </p>
-        )}
-        {surveyNote && !allDone && <p className="mt-2 text-sm text-slate-500">{surveyNote}</p>}
+    <div className="flex flex-col gap-5">
+      <div className="rounded-2xl border border-line bg-white p-6">
+        {quizOpen && quizStatus && <p className={eyebrow}>Lesson {quizStatus.lesson_number}</p>}
+        <h2 className="mt-1 text-[26px] font-bold tracking-tight text-ink">Get ready for the lesson</h2>
+        {allDone && <p className="mt-2 text-sm font-semibold text-ok">Submitted — thank you!</p>}
+        {surveyNote && !allDone && <p className="mt-2 text-sm text-mute">{surveyNote}</p>}
       </div>
 
-      {quizOpen && questions.map((item, index) => {
-        const isConfidence = item.type === "confidence_check";
-        const selected = answers[item.item_id] ?? existingAnswers?.[item.item_id];
+      {progress.total > 0 && (
+        <div className="sticky top-0 z-20 -mx-2 -my-2 flex flex-wrap items-center gap-x-4 gap-y-2 bg-canvas/95 px-2 py-2.5 backdrop-blur">
+          <p className="font-semibold text-ink">{progress.done} of {progress.total} answered</p>
+          <div role="progressbar" aria-label="Questions answered" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done}
+            className="h-1.5 min-w-24 max-w-[440px] flex-1 overflow-hidden rounded-full bg-line-2">
+            <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${(progress.done / progress.total) * 100}%` }} />
+          </div>
+          {allDone
+            ? <span className="rounded-full bg-ok-light px-3 py-1 text-xs font-semibold text-ok">Submitted</span>
+            : next
+              ? <button type="button" onClick={goToNextUnanswered} className="rounded-lg border border-line bg-white px-3.5 py-2 text-sm font-semibold text-ink hover:bg-canvas">Next unanswered</button>
+              : <span className="rounded-full bg-ok-light px-3 py-1 text-xs font-semibold text-ok">All answered</span>}
+        </div>
+      )}
+
+      {hasQuiz && <p className={`${eyebrow} mt-1`}>Part 1 · Quiz</p>}
+
+      {cards.map(({ question, confidence }, index) => {
+        const isConfidence = question.type === "confidence_check";
+        const selected = answers[question.item_id] ?? existingAnswers?.[question.item_id];
+        const stemId = `${questionLabelId}-${question.item_id}`;
+        const confidenceId = `${questionLabelId}-${question.item_id}-confidence`;
+        const number = question.question_number ?? index + 1;
 
         return (
-          <div
-            key={item.item_id}
-            className={`rounded-2xl border bg-white p-6 ${
-              isConfidence
-                ? "border-slate-100 bg-slate-50"
-                : "border-slate-200"
-            }`}
-          >
-            <div className="flex items-start gap-3">
-              {!isConfidence && (
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
-                  {item.question_number ?? index + 1}
-                </span>
-              )}
+          <section key={question.item_id} id={cardId(question.item_id)} tabIndex={-1} className={cardClass}>
+            <div className="flex items-start gap-3.5">
+              {!isConfidence && <span className={numberBadge}>{number}</span>}
               <div className="min-w-0 flex-1">
-                <p
-                  id={`${questionLabelId}-${index}`}
-                  className={`font-medium ${
-                    isConfidence
-                      ? "text-sm text-slate-500 italic"
-                      : "text-sm text-slate-800"
-                  }`}
-                >
-                  {item.stem}
-                </p>
-                {!isConfidence && item.image && (
-                  <img
-                    src={item.image}
-                    alt={`Visual reference for question ${item.question_number ?? index + 1}`}
-                    loading="lazy"
-                    decoding="async"
-                    className="mt-4 h-auto max-h-[28rem] w-full max-w-2xl rounded-xl border border-slate-200 bg-white object-contain"
-                  />
-                )}
-                {isConfidence ? <div role="radiogroup" aria-labelledby={`${questionLabelId}-${index}`} aria-orientation="horizontal" className="mt-3 grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-slate-300">
-                  {Object.entries(item.options).map(([key, value], optionIndex) => (
-                    <button key={key} type="button" role="radio" aria-checked={selected === key}
-                      tabIndex={selected === key || (!selected && optionIndex === 0) ? 0 : -1}
-                      disabled={submitted} onClick={() => handleSelect(item.item_id, key)} onKeyDown={event => handleConfidenceKey(event, item, key)}
-                      className={`min-h-12 min-w-0 break-words border-r border-slate-300 px-1 py-3 text-center text-xs font-medium leading-snug last:border-r-0 focus-visible:relative focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#BA0C2F] disabled:cursor-default sm:px-3 sm:text-sm ${selected === key ? "bg-[#BA0C2F] text-white" : "bg-white text-slate-600 enabled:hover:bg-slate-50"}`}>
-                      {value}
-                    </button>
-                  ))}
-                </div> : <div className="mt-3 grid gap-2">
-                  {Object.entries(item.options).map(([key, value]) => {
-                    const isSelected = selected === key;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => handleSelect(item.item_id, key)}
-                        disabled={submitted}
-                        className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm transition ${
-                          isSelected
-                            ? "border-[#BA0C2F] bg-[#BA0C2F]/5 text-slate-900"
-                            : "border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                        } ${submitted ? "cursor-default" : "cursor-pointer"}`}
-                      >
-                        <span
-                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
-                            isSelected
-                              ? "bg-[#BA0C2F] text-white"
-                              : "bg-slate-100 text-slate-500"
-                          }`}
+                <div>
+                  <p id={stemId} className={isConfidence ? "text-sm text-mute" : "pt-0.5 text-[15px] font-semibold leading-snug text-ink"}>
+                    {question.stem}
+                  </p>
+                  {!isConfidence && question.image && (
+                    <img
+                      src={question.image}
+                      alt={`Visual reference for question ${number}`}
+                      loading="lazy"
+                      decoding="async"
+                      className="mt-4 h-auto max-h-[28rem] w-full max-w-md rounded-xl border border-line bg-white object-contain"
+                    />
+                  )}
+                  {isConfidence ? renderConfidence(question, stemId) : <div className="mt-4 grid gap-2.5">
+                    {Object.entries(question.options).map(([key, value]) => {
+                      const isSelected = selected === key;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={() => handleSelect(question.item_id, key)}
+                          disabled={submitted}
+                          className={`flex items-center gap-3.5 rounded-xl border px-4 py-3 text-left text-[15px] text-ink transition ${
+                            isSelected ? "border-brand bg-brand-light" : "border-line bg-white enabled:hover:border-faint enabled:hover:bg-canvas"
+                          } ${submitted ? "cursor-default" : "cursor-pointer"}`}
                         >
-                          {key}
-                        </span>
-                        <span>{value}</span>
-                      </button>
-                    );
-                  })}
-                </div>}
+                          <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md text-xs font-bold ${isSelected ? "bg-brand text-white" : "bg-line-2 text-ink-2"}`}>
+                            {key}
+                          </span>
+                          <span>{value}</span>
+                        </button>
+                      );
+                    })}
+                  </div>}
+                </div>
               </div>
             </div>
-          </div>
+            {/* Full card width on phones so the four ratings fit; lined up with the question from sm up. */}
+            {confidence && (
+              <div className="mt-5 border-t border-dashed border-line pt-4 sm:ml-[42px]">
+                <p id={confidenceId} className="text-sm text-mute">{confidence.stem}</p>
+                {renderConfidence(confidence, confidenceId)}
+              </div>
+            )}
+          </section>
         );
       })}
 
+      {survey && <p className={`${eyebrow} mt-3`}>{hasQuiz ? `Part 2 · ${survey.title}` : survey.title}</p>}
+
       {survey &&
         survey.questions.map((item, index) => (
-          <div key={item.item_id} className="rounded-2xl border border-slate-200 bg-white p-6">
-            <div className="flex items-start gap-3">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
-                {questionCount + index + 1}
-              </span>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-slate-800">{item.stem}</p>
-                {item.example && <p className="mt-1 text-xs text-slate-500">{item.example}</p>}
+          <section key={item.item_id} id={cardId(item.item_id)} tabIndex={-1} className={cardClass}>
+            <div className="flex items-start gap-3.5">
+              <span className={numberBadge}>{cards.length + index + 1}</span>
+              <div className="min-w-0 flex-1">
+                <p className="pt-0.5 text-[15px] font-semibold leading-snug text-ink">{item.stem}</p>
+                {item.example && <p className="mt-1 text-xs text-mute">{item.example}</p>}
                 <div className="mt-3 grid gap-2">
                   {item.response_fields.map((field) => {
                     const value = surveyAnswers[field.field_id] ?? "";
                     const cls =
-                      "w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 focus:border-[#BA0C2F] focus:outline-none disabled:bg-slate-50 disabled:text-slate-600";
+                      "w-full rounded-xl border border-line px-4 py-3 text-sm text-ink focus:border-brand focus:outline-none disabled:bg-canvas disabled:text-ink-2";
                     return (field.text_length ?? "short") === "long" ? (
                       <textarea
                         key={field.field_id}
@@ -467,11 +485,11 @@ export default function StudentQuizView({ user, onProgress }: Props) {
                 </div>
               </div>
             </div>
-          </div>
+          </section>
         ))}
 
       {error && (
-        <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+        <div role="alert" className="rounded-2xl border border-bad/20 bg-bad-light p-4 text-sm text-bad">
           {error}
         </div>
       )}
@@ -481,7 +499,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
           type="button"
           onClick={handleSubmit}
           disabled={!canSubmit || submitting}
-          className="rounded-xl bg-[#BA0C2F] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="rounded-xl bg-brand px-6 py-3 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-line disabled:text-mute"
         >
           {submitting
             ? "Submitting..."
