@@ -64,11 +64,17 @@ export function parseMaterialActivity(value: unknown, strategy: string): Materia
       !mapping.correspondences.every(pair => record(pair) && nonempty(pair.targetPart, 200) && nonempty(pair.analoguePart, 200) && nonempty(pair.relationship, 400))) return undefined;
     analogyMapping = { target: mapping.target.trim(), analogue: mapping.analogue.trim(), correspondences: mapping.correspondences.map(pair => ({ targetPart: pair.targetPart.trim(), analoguePart: pair.analoguePart.trim(), relationship: pair.relationship.trim() })) };
   }
+  // The model can copy its schema key into a learner's task. Repair only this
+  // exact internal reference, including old published drafts; retain the
+  // teacher's wording and the structured evidence rather than rewriting a task.
+  const studentText = (text: string) => strategy === "cognitive conflict"
+    ? text.replace(/`?\b(?:activity\.)?observedOutcome\b`?/g, "observed result")
+    : text;
   return {
     version: 1,
-    stages: value.stages.map(stage => ({ id: stage.id, title: stage.title.trim(), text: stage.id === "compare" && strategy === "cognitive conflict"
+    stages: value.stages.map(stage => ({ id: stage.id, title: studentText(stage.title.trim()), text: studentText(stage.id === "compare" && strategy === "cognitive conflict"
       ? `What we observed in the activity: ${String(value.observedOutcome).trim()}\nHow did what we observed match or differ from your recorded prediction?`
-      : stage.text.trim() })),
+      : stage.text.trim()) })),
     image: { scene: value.image.scene.trim(), revealAt: Number(value.image.revealAt), ...(panels ? { panels } : {}) },
     ...(strategy === "analogy" ? { mappingDepth: value.mappingDepth as MaterialActivity["mappingDepth"] } : {}),
     ...(analogyMapping ? { analogyMapping } : {}),
