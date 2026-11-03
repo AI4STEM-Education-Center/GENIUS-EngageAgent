@@ -6,6 +6,7 @@ import { isWorkspaceClass, workspaceContext, WorkspaceError } from "../workspace
 import { getLessonGenerationContext } from "../lesson-context";
 import { listStudentAnswers } from "../nosql";
 import { summarizeDiagnosticAnswers } from "../material-prompts";
+import { FocusError, resolveStrategyFocus, type ResolvedFocus } from "../strategy-focus";
 import { isSlideStrategy, parseDraft, type SlideDraft } from "./model";
 import { isAnalogyMethod, resolveAnalogyMethod, type AnalogyMethod } from "./analogy-methods";
 import { GENIUS_LAUNCH_UPGRADE_CODE, GENIUS_LAUNCH_UPGRADE_MESSAGE } from "./access-errors";
@@ -111,6 +112,10 @@ export function requestClassroomContext(value: unknown): string {
   if (typeof value !== "string" || value.length > 1200) throw new SlideRequestError("Classroom context must be plain text of at most 1200 characters.");
   // Keep teacher-provided context as data; prompt builders place it in user JSON.
   return value.trim();
+}
+export function requestFocus(lessonNumber: number, strategy: string, value: unknown): ResolvedFocus | null {
+  try { return resolveStrategyFocus(lessonNumber, strategy, value); }
+  catch (error) { throw error instanceof FocusError ? new SlideRequestError(error.message) : error; }
 }
 export function requestAnalogyMethod(value: unknown, strategy: Parameters<typeof parseDraft>[1], draft?: SlideDraft): AnalogyMethod | undefined {
   if (strategy !== "analogy") {

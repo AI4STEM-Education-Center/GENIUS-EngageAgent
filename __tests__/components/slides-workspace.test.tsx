@@ -520,24 +520,24 @@ it("retains actual model metadata and private teacher notes in downloads without
   expect(mocks.save.mock.calls.at(-1)![1].draft.slides[0].teacherNotes).toEqual(exported.draft.slides[0].teacherNotes);
 });
 
-it("shows slides before AI review and editing, and keeps publication independent of revision", async () => {
+it("places v8.4 revision controls above the preview and editor, and keeps publication independent of revision", async () => {
   await generate();
   const preview = screen.getByRole("region", { name: "Slide preview" });
   const editor = screen.getByRole("complementary", { name: "Slide editor" });
   const review = screen.getByRole("region", { name: "Review and publish" });
   const aiReview = screen.getByRole("region", { name: "AI Review" });
   const revision = screen.getByRole("region", { name: /Revise slides/ });
-  for (const section of [aiReview, editor, revision, review]) {
+  for (const section of [aiReview, editor, review]) {
     expect(preview.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   }
-  expect(aiReview.compareDocumentPosition(revision) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(revision.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(within(preview).queryByRole("button", { name: "Check slides" })).toBeNull();
   expect(within(aiReview).getByRole("button", { name: "Check slides" })).toBeTruthy();
   expect(within(revision).getByLabelText("Revision request")).toBeTruthy();
   expect(within(revision).getByRole("button", { name: "Revise with AI" })).toBeTruthy();
   for (const field of ["Slide title", "Slide body", "Slide task"]) expect(within(editor).getByLabelText(field)).toBeTruthy();
   for (const field of ["Text model", "Image model", "Prompt version", "Analogy story", "Teacher note 1", "Teacher note 2", "target prompt", "target caption", "target alt"]) expect(screen.queryByLabelText(field)).toBeNull();
-  expect(screen.queryByRole("tablist")).toBeNull();
+  expect(screen.getByRole("tablist", { name: "Slide fields" })).toBeTruthy();
   expect(screen.queryByText("Teaching design for this comparison")).toBeNull();
   expect(screen.queryByRole("region", { name: "Image recovery" })).toBeNull();
 });
@@ -944,4 +944,90 @@ it("loads and generates GENIUS slides using verified class/task authorization an
   await act(async () => { fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "Embedded teacher edit" } }); });
   expect((screen.getByLabelText("Slide title") as HTMLInputElement).value).toBe("Embedded teacher edit");
   expect((screen.getByRole("button", { name: "Send to students" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+
+it("limits a selected-slide revision to that slide, preserving all other slides and images, and can undo", async () => {
+  const saved = deckFixture("cognitive conflict"); saved.lessonNumber = 8;
+  saved.focus = { misconceptions: ["a"] };
+  saved.gallerySource = { templateId: "gallery-original", revision: 2, title: "Original gallery material", mode: "adapt" };
+  mocks.load.mockResolvedValue(saved);
+  const revised = { ...saved.draft.slides[0], title: "A shorter opening" };
+  render(<SlidesWorkspace user={user} embeddedContext={{ lessonNumber: 8, strategy: "cognitive conflict" }} />);
+  await screen.findByText(/Saved draft restored/);
+  mocks.fetch.mockResolvedValueOnce(reply({ slide: revised, slideIndex: 0, model: "test-review-model" }));
+  fireEvent.click(screen.getByRole("button", { name: "Slide 1 only" }));
+  fireEvent.change(screen.getByLabelText("Revision request"), { target: { value: "Shorten this title." } });
+  fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
+  await screen.findByText("Slide 1 revised. Other slides and images are unchanged.");
+  await waitFor(() => expect(mocks.save.mock.calls.at(-1)![1].draft.slides[0].title).toBe("A shorter opening"));
+  const result = mocks.save.mock.calls.at(-1)![1];
+  expect(result.draft.slides.slice(1)).toEqual(saved.draft.slides.slice(1));
+  expect(result.draft.visuals).toEqual(saved.draft.visuals);
+  expect(result.assets).toEqual(saved.assets);
+  expect(result.focus).toEqual(saved.focus);
+  expect(result.gallerySource).toEqual(saved.gallerySource);
+  const posts = mocks.fetch.mock.calls.filter(([, init]) => init?.method === "POST");
+  expect(posts).toHaveLength(1);
+  const request = JSON.parse(posts[0][1].body);
+  expect(request).toMatchObject({ operation: "review-slide", slideIndex: 0, focus: saved.focus });
+  expect(request.feedback).toContain("Shorten this title.");
+  fireEvent.click(screen.getByRole("button", { name: "Undo revision" }));
+  expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe(saved.draft.slides[0].title);
+  await waitFor(() => expect(mocks.save.mock.calls.at(-1)![1]).toEqual(saved));
+});
+
+it.each(["wrong slide", "wrong stage", "invalid text", "provider failure"])("retains the complete original draft when selected-slide revision returns %s", async failure => {
+  const saved = deckFixture("cognitive conflict"); saved.lessonNumber = 8;
+  mocks.load.mockResolvedValue(saved);
+  render(<SlidesWorkspace user={user} embeddedContext={{ lessonNumber: 8, strategy: "cognitive conflict" }} />);
+  await screen.findByText(/Saved draft restored/);
+  const slide = { ...saved.draft.slides[0], title: failure === "invalid text" ? "" : "Unaccepted change", ...(failure === "wrong stage" ? { stage: "question" } : {}) };
+  mocks.fetch.mockResolvedValueOnce(failure === "provider failure"
+    ? reply({ error: "The slide revision reached its generation limit; your draft is unchanged." }, false)
+    : reply({ slide, slideIndex: failure === "wrong slide" ? 1 : 0 }));
+  fireEvent.click(screen.getByRole("button", { name: "Slide 1 only" }));
+  fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
+  await waitFor(() => expect((screen.getByRole("button", { name: "Revise with AI" }) as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.getByLabelText("Slide title")).toHaveProperty("value", saved.draft.slides[0].title);
+  expect(mocks.save.mock.calls.at(-1)![1]).toEqual(saved);
+  expect(mocks.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  expect(screen.queryByText("Slide 1 revised. Other slides and images are unchanged.")).toBeNull();
+});
+
+it("revises a selected analogy slide without replacing the original method or teaching plan", async () => {
+  const saved = deckFixture("analogy"); saved.lessonNumber = 8;
+  mocks.load.mockResolvedValue(saved);
+  render(<SlidesWorkspace user={user} embeddedContext={{ lessonNumber: 8, strategy: "analogy" }} />);
+  await screen.findByText(/Saved draft restored/);
+  fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+  mocks.fetch.mockResolvedValueOnce(reply({ slide: { ...saved.draft.slides[1], task: "What does the shared arrangement suggest?" }, slideIndex: 1 }));
+  fireEvent.click(screen.getByRole("button", { name: "Slide 2 only" }));
+  fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
+  await screen.findByText("Slide 2 revised. Other slides and images are unchanged.");
+  const result = mocks.save.mock.calls.at(-1)![1];
+  expect(result.draft.analogyPlan).toEqual(saved.draft.analogyPlan);
+  expect(result.draft.analogyMethod).toEqual(saved.draft.analogyMethod);
+  expect(result.draft.slides[0]).toEqual(saved.draft.slides[0]);
+  expect(result.draft.slides.slice(2)).toEqual(saved.draft.slides.slice(2));
+  expect(result.draft.visuals).toEqual(saved.draft.visuals);
+  expect(result.assets).toEqual(saved.assets);
+  expect(result.draft.slides[1].task).toBe("What does the shared arrangement suggest?");
+  const request = JSON.parse(mocks.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1].body);
+  expect(request).toMatchObject({ operation: "review-slide", slideIndex: 1 });
+});
+
+it("keeps teacher notes private until their editor tab is opened and saves edits in the draft", async () => {
+  const saved = deckFixture("cognitive conflict"); saved.lessonNumber = 8;
+  saved.draft.slides[0].teacherNotes = ["Private teacher guidance"];
+  mocks.load.mockResolvedValue(saved);
+  render(<SlidesWorkspace user={user} embeddedContext={{ lessonNumber: 8, strategy: "cognitive conflict" }} />);
+  await screen.findByText(/Saved draft restored/);
+  expect(screen.queryByText("Private teacher guidance")).toBeNull();
+  fireEvent.click(screen.getByRole("tab", { name: "Teacher notes" }));
+  const field = screen.getByLabelText("Slide teacher notes") as HTMLTextAreaElement;
+  expect(field.value).toBe("Private teacher guidance");
+  fireEvent.change(field, { target: { value: "Ask students to describe what they see.\n\nListen for evidence about contact." } });
+  await waitFor(() => expect(mocks.save.mock.calls.at(-1)![1].draft.slides[0].teacherNotes).toEqual(["Ask students to describe what they see.", "Listen for evidence about contact."]));
+  expect(mocks.fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
 });

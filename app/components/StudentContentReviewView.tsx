@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, LoaderCircle, Plus, RefreshCw, Presentation } from "lucide-react";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import MaterialActivityView from "./MaterialActivityView";
 import PublishedSlidesReader from "./PublishedSlidesReader";
@@ -23,6 +24,10 @@ type Props = {
   ratingUnlocked?: boolean;
   onRatingProgress?: (progress: StepProgress) => void;
 };
+
+const cardStyle = "rounded-xl border border-line bg-white p-5 sm:p-[22px]";
+const secondaryButton = "inline-flex min-h-10 items-center justify-center gap-2 rounded-[9px] border border-line bg-white px-3.5 py-2 text-sm font-semibold text-ink transition hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-45";
+const primaryButton = "inline-flex min-h-10 items-center justify-center gap-2 rounded-[9px] border border-brand bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-45";
 
 const RATING_LABELS = ["", "Not engaging", "Slightly engaging", "Moderately engaging", "Very engaging", "Extremely engaging"];
 
@@ -276,12 +281,12 @@ function ContentReview({
   // Submit (#110). A material with a saved rating is locked, so only newly
   // published, still-unrated materials can be picked after submitting.
   const selectRating = (contentItemId: string, rating: number) => {
-    if (savedRatings[contentItemId] != null || ratingSubmitting) return;
+    if (!ratingUnlocked || savedRatings[contentItemId] != null || ratingSubmitting) return;
     setRatings((prev) => ({ ...prev, [contentItemId]: rating }));
   };
 
   const submitRatings = async () => {
-    if (!classId || !assignmentId) return;
+    if (!classId || !assignmentId || !ratingUnlocked || ratingSubmitting) return;
 
     const pending = contentItems.filter((item) => savedRatings[item.id] == null);
     if (pending.some((item) => ratings[item.id] == null)) {
@@ -327,256 +332,161 @@ function ContentReview({
     setRatingSubmitting(false);
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <span className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
-      </div>
-    );
+  if (!classId || !assignmentId) {
+    return <div className={`${cardStyle} text-center`} role="status">
+      <h2 className="text-lg font-semibold text-ink">Open your class task</h2>
+      <p className="mt-2 text-sm text-mute">Reopen this activity from your class in GENIUS to see its materials.</p>
+    </div>;
   }
 
-  if (error) {
-    return (
-      <div className="rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center">
-        <p className="text-lg font-semibold text-rose-700">Unable to load content</p>
-        <p className="mt-2 text-sm text-rose-600">{error}</p>
-      </div>
-    );
+  if (loading && contentItems.length === 0) {
+    return <div className={`${cardStyle} flex items-center justify-center gap-3 py-12 text-sm text-mute`} role="status">
+      <LoaderCircle className="animate-spin" size={20} aria-hidden="true" />Loading materials…
+    </div>;
+  }
+
+  if (error && contentItems.length === 0) {
+    return <div className={`${cardStyle} text-center`}>
+      <h2 className="text-lg font-semibold text-ink">Unable to load materials</h2>
+      <p className="mt-2 text-sm text-bad" role="alert">{error}</p>
+      <button type="button" className={`${secondaryButton} mt-4`} onClick={() => void loadPublishedContent()}>
+        <RefreshCw size={16} aria-hidden="true" />Try again
+      </button>
+    </div>;
   }
 
   if (contentItems.length === 0) {
-    return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
-        <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[#BA0C2F]/10 text-[#BA0C2F]">
-          ⏳
-        </div>
-        <p className="mt-3 text-lg font-semibold text-slate-700">Waiting for your teacher</p>
-        <p className="mt-2 text-sm text-slate-500">
-          Your teacher is reviewing the assessment and preparing learning material for you.
-          This step will update automatically once it&apos;s ready — you don&apos;t need to do
-          anything right now.
-        </p>
-      </div>
-    );
+    return <div className={`${cardStyle} py-11 text-center`} role="status">
+      <Presentation className="mx-auto text-mute" size={24} aria-hidden="true" />
+      <h2 className="mt-3 text-lg font-semibold text-ink">Waiting for your teacher</h2>
+      <p className="mx-auto mt-2 max-w-lg text-sm text-mute">
+        Your teacher is preparing learning materials. They will appear here when they are ready.
+      </p>
+    </div>;
   }
 
   const allRatingsSubmitted = contentItems.every((item) => savedRatings[item.id] != null);
   const allRatingsSelected = contentItems.every((item) => ratings[item.id] != null);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-          Explore and ask
-        </p>
-        <h2 className="mt-1 text-xl font-semibold text-slate-900">
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className={cardStyle}>
+        <p className="text-[11.5px] font-bold uppercase tracking-[0.07em] text-faint">Explore and ask</p>
+        <h2 className="mt-1 text-[23px] font-bold leading-tight tracking-[-0.015em] text-ink sm:text-[26px]">
           What do you notice? What do you wonder?
         </h2>
-        <p className="mt-2 text-sm text-slate-500">
-          After exploring and learning the materials, please write at least one question about
-          something you are curious about or want to understand better.
-        </p>
       </div>
+
+      {error && <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-warn-light p-4">
+        <p className="flex-1 text-sm text-warn" role="alert">Materials could not refresh. You can keep reading and try again.</p>
+        <button type="button" className={secondaryButton} onClick={() => void loadPublishedContent(true)}>
+          <RefreshCw size={16} aria-hidden="true" />Try again
+        </button>
+      </div>}
 
       {contentItems.map((item) => {
         const itemMedia = media[item.id];
-
-        return (
-          <div key={item.id} className="rounded-2xl border border-slate-200 bg-white p-6">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-              {!item.slides && !item.activity && (itemMedia?.image || itemMedia?.video) && (
-                <div className="flex shrink-0 gap-3">
-                  {itemMedia.image && (
-                    <img
-                      src={itemMedia.image}
-                      alt={item.title}
-                      className="h-32 w-32 rounded-xl border border-slate-200 object-cover"
-                    />
-                  )}
-                  {itemMedia.video && (
-                    <video
-                      src={itemMedia.video}
-                      className="h-32 w-32 rounded-xl border border-slate-200 object-cover"
-                      muted
-                      playsInline
-                      loop
-                      autoPlay
-                    />
-                  )}
-                </div>
-              )}
-
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap gap-2">
-                  {getContentModeLabels(item).map((label) => (
-                    <span
-                      key={`${item.id}-${label}`}
-                      className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500"
-                    >
-                      {label}
-                    </span>
-                  ))}
-                </div>
-                <p className="mt-3 text-base font-semibold text-slate-900">{item.title}</p>
-                {item.slides && classId && assignmentId ? (
-                  <PublishedSlidesReader classId={classId} assignmentId={assignmentId} publicationId={item.slides.publicationId} audience="student" learnerId={user.geniusId} onQuestion={focusQuestions} />
-                ) : item.activity ? (
-                  <MaterialActivityView activity={item.activity} media={itemMedia} questionInput={false} />
-                ) : <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600">{item.body}</p>}
-              </div>
+        return <article key={item.id} aria-label={item.title} className={`${cardStyle} ${item.slides ? "!p-4" : ""}`}>
+          {item.slides ? (
+            <PublishedSlidesReader classId={classId} assignmentId={assignmentId} publicationId={item.slides.publicationId} audience="student" learnerId={user.geniusId} onQuestion={focusQuestions} />
+          ) : <>
+            <div className="flex flex-wrap gap-2">
+              {getContentModeLabels(item).map((label) => <span key={`${item.id}-${label}`} className="rounded-full bg-line-2 px-2 py-0.5 text-xs font-semibold text-ink-2">{label}</span>)}
             </div>
-
-          </div>
-        );
+            <h3 className="mt-2 text-lg font-semibold text-ink">{item.title}</h3>
+            {item.activity ? <MaterialActivityView activity={item.activity} media={itemMedia} questionInput={false}
+              predictionKey={`engage:material-prediction:${JSON.stringify([user.geniusId, classId, assignmentId, item.id])}`} /> : (
+              <div className="mt-3 space-y-4">
+                {itemMedia?.image && <img src={itemMedia.image} alt={item.title} className="max-h-96 w-full rounded-lg border border-line object-contain" />}
+                {itemMedia?.video && <video src={itemMedia.video} aria-label={item.title} className="max-h-96 w-full rounded-lg border border-line" controls playsInline preload="metadata" />}
+                <p className="whitespace-pre-line text-[15px] leading-relaxed text-ink-2">{item.body}</p>
+              </div>
+            )}
+          </>}
+        </article>;
       })}
 
-      <div ref={questionsCard} tabIndex={-1} className="rounded-2xl border border-slate-200 bg-white p-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-          Your questions
-        </p>
-
+      <div ref={questionsCard} tabIndex={-1} className={`${cardStyle} focus:outline-none`} aria-label="Your questions">
+        <h2 className="text-[19px] font-semibold tracking-[-0.01em] text-ink">Your questions</h2>
         {submittedQuestions && submittedQuestions.length > 0 ? (
           <>
-            <p className="mt-1 text-sm font-semibold text-emerald-600">
-              Submitted - see your questions below.
-            </p>
-            <ul className="mt-4 flex flex-col gap-2">
-              {submittedQuestions.map((q, i) => (
-                <li
-                  key={i}
-                  className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-700"
-                >
-                  {q}
-                </li>
-              ))}
+            <p className="mt-2 flex items-center gap-1.5 text-sm font-medium text-ok" role="status"><Check size={16} aria-hidden="true" />Submitted</p>
+            <ul className="mt-3 space-y-2">
+              {submittedQuestions.map((q, i) => <li key={i} className="break-words rounded-lg bg-canvas px-3 py-2.5 text-sm leading-relaxed text-ink-2">{q}</li>)}
             </ul>
           </>
         ) : (
           <>
-            <h2 className="mt-1 text-xl font-semibold text-slate-900">
-              What questions do you have after learning the materials?
-            </h2>
-            <p className="mt-2 text-sm text-slate-500">
-              After exploring and learning the materials, please write at least one question about
-              something you&apos;re curious about or want to understand better.
-            </p>
-            <div className="mt-4 flex flex-col gap-3">
-              {draftQuestions.map((q, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <textarea
-                    ref={i === 0 ? firstQuestion : undefined}
-                    value={q}
-                    onChange={(e) => updateDraftQuestion(i, e.target.value)}
-                    placeholder="What are you wondering about this material?"
-                    rows={2}
-                    className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-800 focus:border-[#BA0C2F] focus:outline-none"
-                  />
-                  {draftQuestions.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeDraftQuestion(i)}
-                      className="mt-1 shrink-0 rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 hover:border-slate-300 hover:bg-slate-50"
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              ))}
+            <div className="mt-3 flex flex-col gap-3">
+              {draftQuestions.map((q, i) => <div key={i} className="flex items-start gap-2">
+                <textarea
+                  ref={i === 0 ? firstQuestion : undefined}
+                  aria-label={`Question ${i + 1}`}
+                  value={q}
+                  onChange={(e) => updateDraftQuestion(i, e.target.value)}
+                  placeholder="What are you wondering about?"
+                  rows={2}
+                  disabled={submitting}
+                  className="min-h-[76px] min-w-0 flex-1 resize-y rounded-[9px] border border-slate-300 bg-white px-3 py-2.5 text-[14.5px] leading-normal text-ink outline-none focus:border-brand focus:ring-3 focus:ring-brand/10 disabled:opacity-60"
+                />
+                {draftQuestions.length > 1 && <button type="button" onClick={() => removeDraftQuestion(i)} disabled={submitting}
+                  aria-label={`Remove question ${i + 1}`} className="mt-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-mute hover:bg-canvas disabled:opacity-45">Remove</button>}
+              </div>)}
             </div>
-
-            <div className="mt-3 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={addDraftQuestion}
-                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-              >
-                + Add another question
-              </button>
-              <button
-                type="button"
-                onClick={submitQuestions}
-                disabled={submitting}
-                className="rounded-xl bg-[#BA0C2F] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-300"
-              >
-                {submitting ? "Submitting..." : "Submit"}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <button type="button" onClick={addDraftQuestion} disabled={submitting} className={secondaryButton}><Plus size={15} aria-hidden="true" />Add another question</button>
+              <button type="button" onClick={submitQuestions} disabled={submitting} className={primaryButton}>
+                {submitting && <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />}
+                {submitting ? "Submitting…" : "Submit questions"}
               </button>
             </div>
-
-            {submitError && (
-              <p className="mt-3 text-sm text-rose-600">{submitError}</p>
-            )}
+            {submitError && <p className="mt-3 text-sm text-bad" role="alert">{submitError}</p>}
           </>
         )}
       </div>
 
-      <div
-        className={`rounded-2xl border border-slate-200 bg-white p-6 ${ratingUnlocked ? "" : "opacity-60"}`}
-      >
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-          Material rating
+      <div className={`${cardStyle} ${ratingUnlocked ? "" : "opacity-55"}`}>
+        <h2 className="text-[19px] font-semibold tracking-[-0.01em] text-ink">Rate the material</h2>
+        <p className="mt-1 text-[13.5px] text-mute">
+          {ratingUnlocked ? "1 = not engaging · 5 = extremely engaging" : "Submit your questions first"}
         </p>
-        {!ratingUnlocked ? (
-          <p className="mt-1 text-sm text-slate-500">
-            Submit your questions first, then rate how engaging the material was.
-          </p>
-        ) : allRatingsSubmitted ? (
-          <p className="mt-1 text-sm font-semibold text-emerald-600">
-            Submitted - thanks for rating the material.
-          </p>
-        ) : (
-          <p className="mt-1 text-sm text-slate-500">
-            How engaging was the material? 1 = Not engaging, 5 = Extremely engaging
-          </p>
-        )}
-
-        <div className="mt-4 flex flex-col gap-4">
+        <div className="mt-3 space-y-4">
           {contentItems.map((item) => {
             const currentRating = ratings[item.id];
-            const locked = !ratingUnlocked || savedRatings[item.id] != null || ratingSubmitting;
-
-            return (
-              <div key={item.id}>
-                <p className="text-sm font-semibold text-slate-800">{item.title}</p>
-                <div className="mt-2 flex items-center gap-2">
-                  {[1, 2, 3, 4, 5].map((value) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => selectRating(item.id, value)}
-                      disabled={locked}
-                      className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold transition disabled:cursor-not-allowed ${
-                        currentRating === value
-                          ? "bg-[#BA0C2F] text-white"
-                          : `border border-slate-200 text-slate-600 ${locked ? "" : "hover:border-slate-300 hover:bg-slate-50"}`
-                      }`}
-                      title={RATING_LABELS[value]}
-                    >
-                      {value}
-                    </button>
-                  ))}
-                  {currentRating && (
-                    <span className="ml-2 text-xs text-slate-400">{RATING_LABELS[currentRating]}</span>
-                  )}
+            const saved = savedRatings[item.id];
+            const locked = !ratingUnlocked || saved != null || ratingSubmitting;
+            return <div key={item.id}>
+              {contentItems.length > 1 && <h3 className="mb-2 text-sm font-semibold text-ink-2">{item.title}</h3>}
+              {saved != null ? <p className="flex items-center gap-1.5 text-sm text-ok" role="status"><Check size={16} aria-hidden="true" />Thanks — you rated it {saved} / 5.</p> : (
+                <div role="radiogroup" aria-label={`Engagement rating for ${item.title}`} className="flex flex-wrap gap-2">
+                  {[1, 2, 3, 4, 5].map((value) => <button
+                    key={value} type="button" role="radio" aria-checked={currentRating === value}
+                    aria-label={`${value} — ${RATING_LABELS[value]}`}
+                    tabIndex={currentRating === value || (!currentRating && value === 1) ? 0 : -1}
+                    onClick={() => selectRating(item.id, value)} disabled={locked}
+                    onKeyDown={(event) => {
+                      const direction = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+                      if (!direction && event.key !== "Home" && event.key !== "End") return;
+                      event.preventDefault();
+                      const next = event.key === "Home" ? 1 : event.key === "End" ? 5 : ((value - 1 + direction + 5) % 5) + 1;
+                      selectRating(item.id, next);
+                      const choices = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]');
+                      choices?.[next - 1]?.focus();
+                    }}
+                    className={`flex h-11 w-11 items-center justify-center rounded-full border-[1.5px] text-sm font-bold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed ${currentRating === value ? "border-brand bg-brand text-white" : "border-slate-300 bg-white text-ink-2 hover:border-brand hover:bg-brand-light disabled:hover:border-slate-300 disabled:hover:bg-white"}`}
+                  >{value}</button>)}
                 </div>
-              </div>
-            );
+              )}
+            </div>;
           })}
         </div>
-
-        {ratingUnlocked && !allRatingsSubmitted && (
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={submitRatings}
-              disabled={ratingSubmitting || !allRatingsSelected}
-              className="rounded-xl bg-[#BA0C2F] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              {ratingSubmitting ? "Submitting..." : "Submit"}
-            </button>
-          </div>
-        )}
-
-        {ratingError && <p className="mt-3 text-sm text-rose-600">{ratingError}</p>}
+        {!allRatingsSubmitted && <div className="mt-3 flex justify-end">
+          <button type="button" onClick={submitRatings} disabled={!ratingUnlocked || ratingSubmitting || !allRatingsSelected} className={primaryButton}>
+            {ratingSubmitting && <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />}
+            {ratingSubmitting ? "Submitting…" : "Submit rating"}
+          </button>
+        </div>}
+        {ratingError && <p className="mt-3 text-sm text-bad" role="alert">{ratingError}</p>}
       </div>
     </div>
   );

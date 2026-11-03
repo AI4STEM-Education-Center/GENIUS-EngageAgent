@@ -14,9 +14,10 @@ export type MaterialActivity = {
   observedOutcome?: string;
 };
 
-export const MATERIAL_STRATEGIES = ["analogy", "cognitive conflict", "experience bridging"] as readonly string[];
+export const MATERIAL_STRATEGIES = ["analogy", "cognitive conflict", "experience bridging", "engaged critiquing"] as readonly string[];
 
 export const stageSequences: Record<string, string[][]> = {
+  "engaged critiquing": [["claim", "evidence", "critique", "revise", "question"]],
   "experience bridging": [
     ["experience", "notice", "name", "question"],
     ["experience", "notice", "name", "connect", "question"],
@@ -44,14 +45,14 @@ export function parseMaterialActivity(value: unknown, strategy: string): Materia
   if (!value.stages.every(stage => record(stage) && nonempty(stage.title, 100) && nonempty(stage.text, 1600))) return undefined;
   if (!record(value.image) || !nonempty(value.image.scene, 5000)) return undefined;
   // A combined illustration must not reveal a comparison before the learner is ready.
-  const minimumReveal = strategy === "experience bridging" ? 0 : 2;
+  const minimumReveal = strategy === "experience bridging" ? 0 : strategy === "engaged critiquing" ? 1 : 2;
   if (!Number.isInteger(value.image.revealAt) || Number(value.image.revealAt) < minimumReveal || Number(value.image.revealAt) >= value.stages.length) return undefined;
   if (strategy === "analogy" && !["entities", "configurations", "mechanisms"].includes(String(value.mappingDepth))) return undefined;
   if (strategy === "cognitive conflict" && !nonempty(value.observedOutcome, 800)) return undefined;
   let panels: MaterialPanel[] | undefined;
   if (value.image.panels !== undefined) {
     const input = value.image.panels;
-    const validCount = Array.isArray(input) && (strategy === "analogy" ? input.length === 2 : strategy === "experience bridging" ? input.length === 1 : input.length >= 2 && input.length <= 3);
+    const validCount = Array.isArray(input) && (strategy === "analogy" ? input.length === 2 : strategy === "experience bridging" ? input.length === 1 : input.length >= (strategy === "engaged critiquing" ? 1 : 2) && input.length <= 3);
     if (!validCount || !Array.isArray(input) || !input.every(panel => record(panel) && nonempty(panel.description, 1400) && nonempty(panel.caption, 100) && nonempty(panel.alt, 500))) return undefined;
     panels = input.map(panel => ({ description: panel.description.trim(), caption: panel.caption.trim(), alt: panel.alt.trim() }));
   }
@@ -79,6 +80,6 @@ export function parseMaterialActivity(value: unknown, strategy: string): Materia
 export function parseGeneratedMaterialActivity(value: unknown, strategy: string): MaterialActivity | undefined {
   const activity = parseMaterialActivity(value, strategy);
   if (!activity?.image.panels || (strategy === "analogy" && !activity.analogyMapping)) return undefined;
-  if (strategy === "experience bridging" ? activity.image.revealAt > 1 : activity.image.revealAt !== 2) return undefined;
+  if (strategy === "experience bridging" ? activity.image.revealAt > 1 : activity.image.revealAt !== (strategy === "engaged critiquing" ? 1 : 2)) return undefined;
   return activity;
 }

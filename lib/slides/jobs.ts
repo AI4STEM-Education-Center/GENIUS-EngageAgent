@@ -1,3 +1,4 @@
+import { parseSlideRevision, validSlideRevisionIndex } from "./slide-revision";
 import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
 import { workspaceGet, workspacePut } from "../workspace-store";
@@ -11,6 +12,7 @@ import { authorizeSlides, requestDraft, slideJson, SlideRequestError, type Autho
 
 export type SlideJobSpec =
   | { kind: "draft"; model: string; strategy: SlideStrategy; analogyMethod?: AnalogyMethod; requireOpeningPhenomenon?: true; promptProvenance: SlidePromptProvenance }
+  | { kind: "slide-revision"; model: string; strategy: SlideStrategy; lessonNumber: number; slideIndex: number; draft: SlideDraft }
   | { kind: "text-check"; model: string; strategy: SlideStrategy; draft: SlideDraft }
   | { kind: "image-check"; model: string }
   | { kind: "image"; model: string };
@@ -38,12 +40,18 @@ function boundedSpec(spec: SlideJobSpec): SlideJobSpec {
         sourceSha256: spec.promptProvenance.sourceSha256,
         ...(spec.promptProvenance.analogyMethod ? { analogyMethod: spec.promptProvenance.analogyMethod } : {}),
       } }; break;
+    case "slide-revision": {
+      const draft = requestDraft(spec.draft, spec.strategy, true, spec.draft.analogyMethod);
+      if (!validSlideRevisionIndex(draft, spec.slideIndex) || !Number.isInteger(spec.lessonNumber) || spec.lessonNumber < 1 || spec.lessonNumber > 8) throw new SlideRequestError("Choose one valid slide to revise.");
+      value = { kind: spec.kind, model: spec.model, strategy: spec.strategy, lessonNumber: spec.lessonNumber, slideIndex: spec.slideIndex, draft };
+      break;
+    }
     case "text-check": value = { kind: spec.kind, model: spec.model, strategy: spec.strategy,
       draft: requestDraft(spec.draft, spec.strategy, true, spec.draft.analogyMethod) }; break;
     default: value = { kind: spec.kind, model: spec.model };
   }
   const serialized = JSON.stringify(value);
-  if (Buffer.byteLength(serialized, "utf8") > MAX_METADATA_BYTES) throw new SlideRequestError("The slide draft is too large to check. Shorten the draft and retry.", 413);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_METADATA_BYTES) throw new SlideRequestError(`The slide draft is too large to ${spec.kind === "slide-revision" ? "revise" : "check"}. Shorten the draft and retry.`, 413);
   // DocumentClient does not remove undefined values; keep persisted JSON canonical.
   return JSON.parse(serialized) as SlideJobSpec;
 }
@@ -67,12 +75,43 @@ export async function beginSlideJob(request: Request, authorized: AuthorizedSlid
   return pending(id);
 }
 
+// Provider diagnostics are an explicit allowlist: never log messages, prompts,
+// output bodies, response IDs, request headers, credentials or image data.
+const providerStatuses = ["completed", "failed", "in_progress", "cancelled", "queued", "incomplete"];
+const providerErrors = ["image_generation_user_error", "image_generation_failed", "model_not_found", "unsupported_image_model", "server_error", "rate_limit_exceeded", "invalid_prompt", "vector_store_timeout", "invalid_image", "invalid_image_format", "invalid_base64_image", "invalid_image_url", "image_too_large", "image_too_small", "image_parse_error", "image_content_policy_violation", "invalid_image_mode", "image_file_too_large", "unsupported_image_media_type", "empty_image_file", "failed_to_download_image", "image_file_not_found"];
+const providerOutputTypes = ["message", "reasoning", "image_generation_call", "function_call", "web_search_call", "file_search_call", "computer_call", "code_interpreter_call", "mcp_call"];
+const known = (value: unknown, allowed: string[]) => typeof value === "string" && allowed.includes(value) ? value : value === null || value === undefined ? null : "other";
+// Provider machine codes use a bounded lowercase identifier; never emit free-form messages.
+const providerCode = (value: unknown, allowed: string[]) => typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(value) ? value : known(value, allowed);
+const tokenCount = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null;
+function incompleteResult(response: OpenAI.Responses.Response, spec: SlideJobSpec, refused: boolean): never {
+  const reason = known(response.incomplete_details?.reason, ["max_output_tokens", "content_filter", "max_messages", "steered"]);
+  const code = providerCode(response.error?.code, providerErrors);
+  console.warn("Slide provider result incomplete", {
+    kind: spec.kind, status: known(response.status, providerStatuses), errorCode: code,
+    incompleteReason: reason, refused,
+    output: (Array.isArray(response.output) ? response.output : []).slice(0, 12).map(item => ({
+      type: known(item.type, providerOutputTypes), status: providerCode("status" in item ? item.status : undefined, providerStatuses),
+    })),
+    outputTokens: tokenCount(response.usage?.output_tokens),
+    reasoningTokens: tokenCount(response.usage?.output_tokens_details?.reasoning_tokens),
+    maxOutputTokens: tokenCount(response.max_output_tokens),
+  });
+  const result = spec.kind === "image" ? "image" : spec.kind === "draft" ? "slide draft" : spec.kind === "slide-revision" ? "slide revision" : "review";
+  const action = spec.kind === "image" ? "Retry this image" : spec.kind === "draft" ? "Retry generation" : spec.kind === "slide-revision" ? "Retry revising this slide" : "Retry checking";
+  if (code === "model_not_found" || code === "unsupported_image_model") throw new SlideRequestError(`The selected ${result} model is unavailable. Choose another model or ask the platform administrator to update its model configuration; your current draft is unchanged.`, 503);
+  if (reason === "max_output_tokens") throw new SlideRequestError(`The ${result} reached its generation limit before finishing. ${action}; your current draft is unchanged.`, 502);
+  if (refused || reason === "content_filter" || code === "image_content_policy_violation" || code === "invalid_prompt") throw new SlideRequestError(`The model could not use this ${result} request. Adjust the description and try again; your current draft is unchanged.`, 502);
+  if (code === "rate_limit_exceeded") throw new SlideRequestError(`The generation service is busy. Wait a moment and ${action.toLowerCase()}; your current draft is unchanged.`, 502);
+  throw new SlideRequestError(`The model did not return a complete ${result}. ${action}; your current draft is unchanged.`, 502);
+}
+
 /** Validate completed provider output using the same contracts as synchronous routes. */
 export function finishSlideJob(response: OpenAI.Responses.Response, spec: SlideJobSpec): Record<string, unknown> {
   const output = Array.isArray(response.output) ? response.output : [];
   const refused = output.some(item => item.type === "message" && item.content.some(part => part.type === "refusal"));
   if (response.status !== "completed" || response.error || response.incomplete_details || refused) {
-    throw new SlideRequestError("The model did not return a complete slide result. Please try again.", 502);
+    incompleteResult(response, spec, refused);
   }
   if (spec.kind === "image") {
     const images = output.filter(item => item.type === "image_generation_call");
@@ -86,6 +125,10 @@ export function finishSlideJob(response: OpenAI.Responses.Response, spec: SlideJ
   let parsed: unknown;
   try { parsed = JSON.parse(content); }
   catch { throw new SlideRequestError("The model returned an unreadable slide result. Please try again.", 502); }
+  if (spec.kind === "slide-revision") {
+    try { return { slide: parseSlideRevision(parsed, spec.draft, spec.strategy, spec.slideIndex, spec.lessonNumber), slideIndex: spec.slideIndex, model: spec.model }; }
+    catch { throw new SlideRequestError("The revised slide did not meet its content requirements. Your original draft is unchanged. Retry revising this slide.", 502); }
+  }
   if (spec.kind === "draft") {
     // Retain bounded editable text for repair; export remains strict.
     const draft = requestDraft(parsed, spec.strategy, true, spec.analogyMethod);

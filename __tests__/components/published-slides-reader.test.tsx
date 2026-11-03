@@ -95,7 +95,8 @@ it("requires a typed prediction before rendering any future evidence and compare
   fireEvent.click(screen.getByRole("button", { name: "Previous slide" }));
   expect((screen.getByLabelText("Your prediction") as HTMLTextAreaElement).readOnly).toBe(true);
   next(); next(); next();
-  fireEvent.click(screen.getByRole("button", { name: "Write your scientific question" }));
+  expect(screen.queryByRole("button", { name: "Next slide" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Write your question" }));
   expect(onQuestion).toHaveBeenCalledOnce();
   expect(screen.queryByRole("textbox")).toBeNull();
 });
@@ -148,7 +149,7 @@ it("closes and unmounts an enlarged question page before focusing the existing q
   await screen.findByText("Slide 1 of 5");
   next(); next(); next(); next();
   fireEvent.click(screen.getByRole("button", { name: "Enlarge slides" }));
-  fireEvent.click(screen.getByRole("button", { name: "Write your scientific question" }));
+  fireEvent.click(screen.getByRole("button", { name: "Write your question" }));
   expect(HTMLDialogElement.prototype.close).toHaveBeenCalledOnce();
   expect(onQuestion).toHaveBeenCalledOnce();
   expect(document.activeElement).toBe(screen.getByLabelText("Existing question form"));

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextResponse } from "next/server";
-import { conflictActivity, bridgingActivity } from "../fixtures/material-activities";
+import { conflictActivity, bridgingActivity, critiquingActivity } from "../fixtures/material-activities";
 import { buildMaterialVideoInstructions } from "@/lib/material-video";
 
 vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null), workspaceRequestUser: vi.fn(async () => ({ role: "teacher", geniusId: "teacher" })) }));
@@ -22,7 +22,7 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe("strategy-aware material videos", () => {
-  it.each([["cognitive conflict", conflictActivity], ["experience bridging", bridgingActivity]] as const)("passes the actual %s activity to the video provider", async (strategy, activity) => {
+  it.each([["cognitive conflict", conflictActivity], ["experience bridging", bridgingActivity], ["engaged critiquing", critiquingActivity]] as const)("passes the actual %s activity to the video provider", async (strategy, activity) => {
     const item = { id: "material-1", type: "Inquiry activity", title: "Look closely", body: "Student task", strategy, activity };
     const response = await POST(request({ item, imageUrl: "https://example.org/source.webp" }));
     expect(response.status).toBe(200);
@@ -37,6 +37,9 @@ describe("strategy-aware material videos", () => {
     if (strategy === "cognitive conflict") {
       expect(sent.prompt).toContain(activity.observedOutcome);
       expect(sent.prompt).toContain("AFTER the application has collected");
+    } else if (strategy === "engaged critiquing") {
+      expect(sent.prompt).toContain("AFTER learners consider the initial claim");
+      expect(sent.prompt).not.toContain(activity.stages.find(stage => stage.id === "revise")!.text);
     } else {
       expect(sent.prompt).toContain("BEFORE the concept is named in stage 3");
       expect(sent.prompt).not.toContain(activity.stages.find(stage => stage.id === "name")!.text);
@@ -52,6 +55,7 @@ describe("strategy-aware material videos", () => {
       { item: null, imageUrl: "https://example.org/image.webp" },
       { item: { id: "bad" }, imageUrl: {} },
       { item: { id: "bad", strategy: "cognitive conflict", activity: { ...conflictActivity, image: { ...conflictActivity.image, revealAt: 0 } } }, imageUrl: "https://example.org/image.webp" },
+      { item: { id: "bad", strategy: "engaged critiquing", activity: { ...critiquingActivity, image: { ...critiquingActivity.image, revealAt: 0 } } }, imageUrl: "https://example.org/image.webp" },
     ]) expect((await POST(request(body))).status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
   });

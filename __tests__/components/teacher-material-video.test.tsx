@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { UserContext } from "@/lib/auth";
 import type { ContentItem, ImageState, Plan } from "@/lib/types";
@@ -44,6 +44,7 @@ function seedDraft(content: ContentItem[] = [], images: Record<string, ImageStat
 
 function installApi(imageResponse: () => Promise<Response> = async () => reply({ url: sourceImage })) {
   fetchMock.mockImplementation(async (path) => {
+    if (path.startsWith("/api/material-gallery")) return reply({ items: [] });
     if (path.startsWith("/api/lessons/")) {
       const number = Number(path.split("/").pop());
       return reply({ lesson_number: number, lesson_title: `Lesson ${number}`, learning_objective: "Observe changes in shape.", quiz_items: [] });
@@ -64,7 +65,7 @@ const requestBody = (path: string) => JSON.parse(String(callsTo(path)[0][1]?.bod
 
 async function openMaterials() {
   render(<TeacherView user={teacher} />);
-  await waitFor(() => expect((screen.getByRole("button", { name: "Generate materials" }) as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() => expect((screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ }) as HTMLButtonElement).disabled).toBe(false));
 }
 
 beforeEach(() => {
@@ -82,7 +83,7 @@ it("explicit Video generation runs content, image, then one video with the nativ
   await openMaterials();
   fireEvent.click(screen.getByRole("radio", { name: "Video" }));
   expect(posts()).toHaveLength(0);
-  fireEvent.click(screen.getByRole("button", { name: "Generate materials" }));
+  fireEvent.click(screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ }));
 
   await waitFor(() => expect(callsTo("/api/engagement-image")).toHaveLength(1));
   expect(callsTo("/api/engagement-content")).toHaveLength(1);
@@ -125,14 +126,14 @@ it("does not start a queued video when both source-image attempts fail", async (
   seedDraft();
   await openMaterials();
   fireEvent.click(screen.getByRole("radio", { name: "Video" }));
-  fireEvent.click(screen.getByRole("button", { name: "Generate materials" }));
+  fireEvent.click(screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ }));
 
   await screen.findByText("Image provider unavailable.");
   expect(callsTo("/api/engagement-content")).toHaveLength(1);
   expect(callsTo("/api/engagement-image")).toHaveLength(2);
   expect(callsTo("/api/engagement-video")).toHaveLength(0);
   expect(screen.queryByRole("button", { name: /Generate video/ })).toBeNull();
-  expect((screen.getByRole("button", { name: "Generate materials" }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ }) as HTMLButtonElement).disabled).toBe(false);
 });
 
 it("manually generates a video from a restored image without paying for content or image regeneration", async () => {
@@ -148,4 +149,39 @@ it("manually generates a video from a restored image without paying for content 
     item: saved, imageUrl: sourceImage, classId: teacher.classId,
     assignmentId: teacher.assignmentId, lessonNumber: 3, studentId: "cohort",
   });
+});
+
+it("keeps a restored Gallery video's original lesson, focus and source when saving the teacher draft", async () => {
+  const saved: ContentItem = {
+    ...activity, id: "gallery-video-copy", lessonNumber: 3, focus: { coreIdeas: [0] },
+    gallerySource: { templateId: "shared-video", revision: 2, title: "Original shared video", mode: "adapt" },
+  };
+  seedDraft([saved], { [saved.id]: { status: "ready", url: sourceImage } });
+  await openMaterials();
+  fireEvent.click(screen.getByRole("button", { name: /^Select$/ }));
+  await waitFor(() => {
+    const draft = JSON.parse(localStorage.getItem(`engage-agent:draft:v3:${teacher.classId}:${teacher.assignmentId}`)!);
+    expect(draft.selectedForPublish).toContain(saved.id);
+    expect(draft.content[0]).toMatchObject(saved);
+  });
+  expect(posts()).toHaveLength(0);
+});
+
+it("uses saved classroom edits when generating a video for an adapted material", async () => {
+  HTMLDialogElement.prototype.showModal = vi.fn(function(this: HTMLDialogElement) { this.setAttribute("open", ""); });
+  HTMLDialogElement.prototype.close = vi.fn(function(this: HTMLDialogElement) { this.removeAttribute("open"); this.dispatchEvent(new Event("close")); });
+  const saved: ContentItem = { ...activity, id: "adapted-video", lessonNumber: 3, focus: { coreIdeas: [0] } };
+  seedDraft([saved], { [saved.id]: { status: "ready", url: sourceImage } });
+  await openMaterials();
+  fireEvent.click(screen.getByRole("button", { name: "Edit material" }));
+  const editor = within(screen.getByRole("dialog", { name: "Edit video material" }));
+  fireEvent.change(editor.getByLabelText("Material title"), { target: { value: "Our adapted activity" } });
+  fireEvent.change(editor.getByLabelText("Activity text"), { target: { value: "Compare our classroom models." } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  fireEvent.click(screen.getByRole("button", { name: /Generate video/ }));
+  await waitFor(() => expect(callsTo("/api/engagement-video")).toHaveLength(1));
+  expect(requestBody("/api/engagement-video")).toMatchObject({
+    item: { ...saved, title: "Our adapted activity", body: "Compare our classroom models." }, imageUrl: sourceImage,
+  });
+  expect(posts().map(([path]) => path)).toEqual(["/api/engagement-video"]);
 });

@@ -4,7 +4,7 @@ import { createRef } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { UserContext } from "@/lib/auth";
 import type { SlideDeck } from "@/lib/slides/model";
-import { deckFixture, slideFixture } from "../fixtures/slides";
+import { cognitiveConflictOpeningDeck, deckFixture, slideFixture } from "../fixtures/slides";
 import { INITIAL_MODEL_CATALOG } from "@/lib/slides/models";
 const mocks = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), fetch: vi.fn(), download: vi.fn() }));
 vi.mock("@/lib/slides/draft-storage", async importOriginal => ({ ...await importOriginal<object>(), loadSlideDraft: mocks.load, saveSlideDraft: mocks.save }));
@@ -154,4 +154,62 @@ it("keeps the restored draft when an asynchronous revision fails at the provider
   expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe(saved.draft.slides[0].title);
   expect(posts().filter(body => body.operation === "review")).toHaveLength(1);
   expect(posts().filter(body => body.jobId === "job-failed" && !body.operation)).toHaveLength(1);
+});
+
+
+it("imports a Gallery copy without generation and ignores an older pending draft restore", async () => {
+  let restore!: (value: SlideDeck) => void;
+  mocks.load.mockImplementationOnce(() => new Promise(resolve => { restore = resolve; }));
+  const view = render(<SlidesWorkspace user={user} embeddedContext={context} />);
+  await waitFor(() => expect(mocks.load).toHaveBeenCalledOnce());
+  const incoming = deckFixture(context.strategy);
+  incoming.id = "new-gallery-copy";
+  incoming.focus = { misconceptions: ["a"] };
+  incoming.gallerySource = { templateId: "template", revision: 1, title: "Shared bounce", mode: "use" };
+  incoming.draft.slides[0].title = "Copied opening";
+  view.rerender(<SlidesWorkspace user={user} embeddedContext={context} incomingDeck={incoming} />);
+  await screen.findByText(/Gallery material copied into this task/);
+  await act(async () => restore(deckFixture(context.strategy)));
+  expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe("Copied opening");
+  expect(posts()).toHaveLength(0);
+  await waitFor(() => expect(mocks.save.mock.calls.at(-1)![1].gallerySource).toEqual(incoming.gallerySource));
+  expect(mocks.save.mock.calls.at(-1)![1].focus).toEqual(incoming.focus);
+  await act(async () => {
+    fireEvent.change(screen.getByLabelText("Slide title"), { target: { value: "My class copy" } });
+    view.rerender(<SlidesWorkspace user={user} embeddedContext={{ ...context }} incomingDeck={{ ...incoming }} />);
+  });
+  expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe("My class copy");
+  expect(incoming.draft.slides[0].title).toBe("Copied opening");
+});
+
+it("passes the teacher's focus into new generation and persists it with the deck", async () => {
+  const ref = createRef<SlidesWorkspaceHandle>(); const ready = vi.fn();
+  const focus = { misconceptions: ["a"] };
+  render(<SlidesWorkspace ref={ref} user={user} embeddedContext={{ ...context, focus }} onReadyChange={ready} />);
+  await waitFor(() => expect(ready).toHaveBeenLastCalledWith(context.strategy, true));
+  act(() => ref.current?.generate());
+  await screen.findByText("5 slides ready to send.");
+  expect(posts().find(body => body.operation === "generate")?.focus).toEqual(focus);
+  await waitFor(() => expect(mocks.save.mock.calls.at(-1)![1].focus).toEqual(focus));
+});
+
+
+it("retains old model images and uses the current supported model when recovering a saved draft", async () => {
+  const saved = cognitiveConflictOpeningDeck();
+  saved.modelSelection = { textModel: "current", imageModel: "gpt-image-1" };
+  saved.assets.phenomenon.model = "gpt-image-1";
+  delete saved.assets.evidence;
+  mocks.load.mockResolvedValue(saved);
+  render(<SlidesWorkspace user={user} embeddedContext={context} />);
+  await screen.findByText(/Saved draft restored/);
+  expect(posts()).toHaveLength(0);
+  await waitFor(() => expect(mocks.save).toHaveBeenCalled());
+  expect(mocks.save.mock.calls.at(-1)![1].assets.phenomenon).toEqual(saved.assets.phenomenon);
+  fireEvent.click(screen.getByRole("button", { name: "Regenerate evidence image" }));
+  await screen.findByText("Image updated. Review suggestions are optional.");
+  const images = mocks.fetch.mock.calls.filter(([path]) => path === "/api/slides/image");
+  expect(images).toHaveLength(1);
+  expect(JSON.parse(images[0][1].body)).toMatchObject({ imageModel: "current", visualId: "evidence" });
+  await waitFor(() => expect(mocks.save.mock.calls.at(-1)![1].modelSelection.imageModel).toBe("current"));
+  expect(mocks.save.mock.calls.at(-1)![1].assets.phenomenon).toEqual(saved.assets.phenomenon);
 });

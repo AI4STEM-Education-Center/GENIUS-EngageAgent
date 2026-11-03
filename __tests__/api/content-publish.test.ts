@@ -3,6 +3,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // Route behavior below assumes an authorized request. Signed native/GENIUS
 // access and role isolation are exercised in workspace-access and embedded-workflow-access.
 vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null), workspaceRequestUser: vi.fn(async () => ({ role: "teacher" })) }));
+vi.mock("@/lib/material-gallery-server", () => ({ resolveGalleryContentMedia: vi.fn(async () => undefined) }));
+import { resolveGalleryContentMedia } from "@/lib/material-gallery-server";
+import { guardWorkspaceRequest } from "@/lib/workspace-access";
 import { GET, POST } from "@/app/api/content-publish/route";
 
 vi.mock("@/lib/nosql", () => {
@@ -45,6 +48,8 @@ const { __resetStore, __setMedia } = await import("@/lib/nosql") as unknown as {
 
 beforeEach(() => {
   __resetStore();
+  vi.mocked(resolveGalleryContentMedia).mockReset().mockResolvedValue(undefined);
+  vi.mocked(guardWorkspaceRequest).mockClear();
 });
 
 describe("POST /api/content-publish", () => {
@@ -138,6 +143,25 @@ describe("POST /api/content-publish", () => {
 });
 
 describe("GET /api/content-publish", () => {
+  it("authorizes the task before resolving any copied Gallery media", async () => {
+    vi.mocked(guardWorkspaceRequest).mockResolvedValueOnce(Response.json({ error: "No access" }, { status: 403 }) as never);
+    expect((await GET(new Request("http://localhost:3000/api/content-publish?classId=c1&assignmentId=a1"))).status).toBe(403);
+    expect(resolveGalleryContentMedia).not.toHaveBeenCalled();
+  });
+  it("renews Gallery fallback links while preferring regenerated task media and preserving material provenance", async () => {
+    const id = "gallery-copy-97fc4703-f7ab-4395-a223-2f1c634ec99b";
+    const gallerySource = { templateId: "original-template", revision: 1, title: "Contact", mode: "adapt" };
+    await POST(new Request("http://localhost:3000/api/content-publish", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ classId: "c1", assignmentId: "a1", contentItems: [{ id, type: "Video", title: "Adapted contact", body: "Observe", strategy: "cognitive conflict",
+        lessonNumber: 3, focus: { misconceptions: ["a"] }, gallerySource, media: { video: "https://saved.example/expired" } }] }) }));
+    vi.mocked(resolveGalleryContentMedia).mockResolvedValue({ video: "https://gallery.example/renewed", image: "https://gallery.example/image" });
+    __setMedia([{ class_id: "c1", assignment_id: "a1", student_id: "cohort", content_item_id: id, media_type: "video", data_url: "https://generated.example/new-video" }]);
+    const response = await GET(new Request("http://localhost:3000/api/content-publish?classId=c1&assignmentId=a1"));
+    const row = (await response.json()).items[0];
+    expect(row.media).toEqual({ video: "https://generated.example/new-video", image: "https://gallery.example/image" });
+    expect(JSON.parse(row.content_json)).toMatchObject({ lessonNumber: 3, focus: { misconceptions: ["a"] }, gallerySource });
+    expect(resolveGalleryContentMedia).toHaveBeenCalledWith("c1", "a1", id);
+  });
   it("should list published content", async () => {
     await POST(new Request("http://localhost:3000/api/content-publish", {
       method: "POST",

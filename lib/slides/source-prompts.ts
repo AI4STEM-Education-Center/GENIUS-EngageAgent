@@ -6,6 +6,7 @@ import type { SlideStrategy } from "./model";
 
 const FILES: Record<SlideStrategy, string> = {
   analogy: "analogy.txt",
+  "engaged critiquing": "engaged-critiquing-v84-20261103.txt",
   "cognitive conflict": "cognitive-conflict-20261005.txt",
   "experience bridging": "experience-bridging-20261005.txt",
 };
