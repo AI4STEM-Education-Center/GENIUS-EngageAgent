@@ -17,7 +17,7 @@ beforeEach(() => {
     ok: true,
     json: async () => input.startsWith("/api/lessons/")
       ? { lesson_number: Number(input.split("/").pop()), lesson_title: `Lesson ${input.split("/").pop()}`, quiz_items: [], learning_objective: "Test objective" }
-      : {},
+      : input.startsWith("/api/material-gallery") ? { items: [] } : {},
   })));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -78,7 +78,7 @@ it.each([true, false])("shows response loading failures without claiming zero su
   expect((screen.getByRole("button", { name: "Analyze 1 students" }) as HTMLButtonElement).disabled).toBe(false);
 });
 
-it("shows the v8.3 header and four teacher steps, with the dashboard as Step 4 (#172)", async () => {
+it("shows the v8.3 header and four teacher steps, with the dashboard as its own view (#172, #182)", async () => {
   render(<TeacherView user={{ ...teacher, classId: "ea-class-native", className: "Physics · Period 3" }} shell={{ taskTitle: "Collisions" }} />);
   await screen.findByRole("button", { name: /Lesson 1 0 questions/ });
   const steps = within(screen.getByRole("navigation", { name: "Teacher steps" })).getAllByRole("button");
@@ -97,8 +97,17 @@ it("shows the v8.3 header and four teacher steps, with the dashboard as Step 4 (
 
   fireEvent.click(header.getByRole("button", { name: "Dashboard" }));
   expect(await screen.findByText("Assignment summary")).toBeTruthy();
-  expect(stepTab(/Questions & discussion/).getAttribute("aria-current")).toBe("step");
+  expect(within(screen.getByRole("navigation", { name: "Teacher steps" })).queryByRole("button", { current: "step" })).toBeNull();
   expect(screen.queryByText("Back to workflow")).toBeNull();
+  fireEvent.click(header.getByRole("button", { name: "Gallery" }));
+  expect(await screen.findByRole("heading", { name: "Engagement materials" })).toBeTruthy();
+  expect(screen.queryByText("Assignment summary")).toBeNull();
+  expect(stepTab(/Engagement materials/).getAttribute("aria-current")).toBe("step");
+  expect(await screen.findByRole("textbox", { name: "Search shared materials" })).toBeTruthy();
+  // Step 4 is the questions page; choosing a step leaves the dashboard.
+  fireEvent.click(stepTab(/Questions & discussion/));
+  expect(await screen.findByRole("heading", { name: "Questions & discussion" })).toBeTruthy();
+  expect(screen.queryByText("Assignment summary")).toBeNull();
 });
 
 it("opens Step 4 when asked to, even with a saved draft on another step", async () => {
@@ -109,5 +118,35 @@ it("opens Step 4 when asked to, even with a saved draft on another step", async 
   }));
   render(<TeacherView user={scopedTeacher} initialStep={4} />);
   await waitFor(() => expect(stepTab(/Questions & discussion/).getAttribute("aria-current")).toBe("step"));
+  expect(await screen.findByRole("heading", { name: "Questions & discussion" })).toBeTruthy();
+  // Questions come from Content Review, so they wait for materials.
+  expect(screen.getByText("Available after materials are sent in Step 3")).toBeTruthy();
+});
+
+it("opens the assignment dashboard for old dashboard links", async () => {
+  render(<TeacherView user={{ ...teacher, classId: "ea-class-dash" }} initialView="dashboard" />);
   expect(await screen.findByText("Assignment summary")).toBeTruthy();
+});
+
+it("unlocks discussion questions after slides are published without a video", async () => {
+  const fetchMock = vi.mocked(fetch);
+  const originalFetch = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.startsWith("/api/content-publish")) return { ok: true, json: async () => ({ items: [{
+      content_item_id: "published-slides", content_json: JSON.stringify({
+        id: "published-slides", type: "Slides", title: "Published lesson slides", body: "", strategy: "analogy",
+        slides: { publicationId: "4e96360b-17a4-4a54-84da-df0c5d2ef012", lessonNumber: 1, slideCount: 6 },
+      }),
+    }] }) } as Response;
+    if (url.startsWith("/api/question-analysis")) return { ok: true, json: async () => ({ lessonNumber: 1, total: 0, students: 0, analysisError: null, groups: [] }) } as Response;
+    return originalFetch(input, init);
+  });
+  render(<TeacherView user={{ ...teacher, classId: "ea-class-slides" }} />);
+  await screen.findByRole("button", { name: /Lesson 1 0 questions/ });
+  fireEvent.click(stepTab(/Engagement materials/));
+  expect(await screen.findByRole("button", { name: "Read slides" })).toBeTruthy();
+  fireEvent.click(stepTab(/Questions & discussion/));
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/question-analysis"))).toBe(true));
+  expect(screen.queryByText("Available after materials are sent in Step 3")).toBeNull();
 });

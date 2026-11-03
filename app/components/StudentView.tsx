@@ -19,13 +19,17 @@ import {
 } from "@/lib/student-progress";
 import type { ActivityStatus } from "@/lib/activity-status";
 import { notifyTaskCompleted, notifyTaskReopened } from "@/lib/genius-notify";
+import type { QuestionBoard } from "@/lib/class-questions";
+import type { QuizReport } from "@/lib/quiz-report";
+import StudentClassQuestions from "./discussion/StudentClassQuestions";
+import QuizReportView from "./discussion/QuizReportView";
 
 type Props = {
   user: UserContext;
   shell?: TaskShell;
 };
 
-// Class questions and the quiz report are built in #182; until then they show locked.
+// Class questions and the quiz report (#182) open once the teacher publishes the board or releases reports.
 type StudentTabId = StudentViewStepId | "class-questions" | "report";
 
 const STATUS_POLL_MS = 15000;
@@ -78,7 +82,9 @@ function buildDisplayStates(
 }
 
 function StudentWorkspace({ user, shell }: Props) {
-  const [activeStep, setActiveStep] = useState<StudentViewStepId>("assessment");
+  const [activeStep, setActiveStep] = useState<StudentTabId>("assessment");
+  const [board, setBoard] = useState<QuestionBoard | null>(null);
+  const [report, setReport] = useState<QuizReport | null>(null);
   const [serverStatus, setServerStatus] = useState<Record<StudentStepId, ActivityStatus>>(INITIAL_SERVER_STATUS);
   const activeStepRef = useRef(activeStep);
   useEffect(() => {
@@ -158,6 +164,8 @@ function StudentWorkspace({ user, shell }: Props) {
         // Open published material when the current activity is unavailable.
         // A student already working in an available activity keeps that view.
         const currentIndex = STUDENT_VIEW_STEPS.findIndex((step) => step.id === activeStepRef.current);
+        // The class questions and report tabs are read-only; a student reading them stays there.
+        if (currentIndex < 0) return;
         const currentStep = STUDENT_VIEW_STEPS[currentIndex];
         if (next[currentStep.activityIds[0]] === "locked") {
           const availableStep = STUDENT_VIEW_STEPS.find((step) => next[step.activityIds[0]] !== "locked");
@@ -190,6 +198,30 @@ function StudentWorkspace({ user, shell }: Props) {
     };
   }, [classId, assignmentId, studentId, statusRefreshToken, user.geniusId]);
 
+  // The board and the report follow the same refresh as the step status.
+  useEffect(() => {
+    if (!classId || !assignmentId || !studentId) return;
+    let cancelled = false;
+    const get = async <T,>(path: string) => {
+      const res = await fetch(path, { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" }).catch(() => null);
+      return res?.ok ? ((await res.json()) as T) : undefined;
+    };
+    const query = new URLSearchParams({ classId, assignmentId }).toString();
+    // A tab that is taken back (the board unpublished) returns the student to the task.
+    const leave = (tab: StudentTabId) => setActiveStep((current) => (current === tab ? "assessment" : current));
+    void get<{ board: QuestionBoard | null }>(`/api/question-board?${query}`).then((data) => {
+      if (!data || cancelled) return;
+      setBoard(data.board ?? null);
+      if (!data.board) leave("class-questions");
+    });
+    void get<{ report: QuizReport | null }>(`/api/quiz-report?${query}&studentId=${encodeURIComponent(studentId)}`).then((data) => {
+      if (!data || cancelled) return;
+      setReport(data.report ?? null);
+      if (!data.report) leave("report");
+    });
+    return () => { cancelled = true; };
+  }, [classId, assignmentId, studentId, statusRefreshToken]);
+
   // Children re-create their `onProgress` closure on every StudentView render
   // (it's an inline arrow in the JSX below) and re-report their current kind
   // whenever that happens, not just on real transitions. Tracking the last
@@ -220,8 +252,9 @@ function StudentWorkspace({ user, shell }: Props) {
       done: displayStates[step.id].status === "completed",
       locked: displayStates[step.id].status === "locked",
     })),
-    { id: "class-questions", title: "Class questions", status: "Your teacher will share these", marker: <Users size={13} />, locked: true },
-    { id: "report", title: "My quiz report", status: "After the lesson", marker: <FileText size={13} />, locked: true },
+    { id: "class-questions", title: "Class questions", status: board ? `${board.questions.length} question${board.questions.length === 1 ? "" : "s"}` : "Your teacher will share these",
+      marker: <Users size={13} />, locked: !board },
+    { id: "report", title: "My quiz report", status: report ? "Available" : "After the lesson", marker: <FileText size={13} />, locked: !report },
   ];
 
   return (
@@ -229,7 +262,7 @@ function StudentWorkspace({ user, shell }: Props) {
       header={<AppHeader userName={user.name} homeHref={shell?.homeHref} context={taskContext(user, shell)} canSignOut={shell?.canSignOut} showName
         actions={studentNavActions({ homeHref: shell?.homeHref, classHref: shell?.classHref })} />}
       tabs={<StepTabs label="Student steps" tabs={tabs} activeId={activeStep}
-        onSelect={(id) => { if (id === "assessment" || id === "explore-and-ask") setActiveStep(id); }} />}>
+        onSelect={setActiveStep} />}>
       <div className="flex flex-col gap-6">
         {/* The assessment and content-review views stay mounted (hidden when
             inactive) so they keep polling/reporting progress regardless of
@@ -247,6 +280,8 @@ function StudentWorkspace({ user, shell }: Props) {
             onRatingProgress={(p) => reportProgress("content-rating", p)}
           />
         </div>
+        {activeStep === "class-questions" && board && <StudentClassQuestions board={board} />}
+        {activeStep === "report" && report && <QuizReportView report={report} />}
       </div>
     </AppFrame>
   );

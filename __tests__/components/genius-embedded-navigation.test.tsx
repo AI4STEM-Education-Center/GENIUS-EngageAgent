@@ -81,7 +81,8 @@ it.each(["teacher", "student"] as const)("keeps %s lesson steps usable while rem
   expect(next.getAttribute("aria-current")).toBe("step");
   if (role === "teacher") {
     fireEvent.click(steps.getByRole("button", { name: /Questions & discussion/ }));
-    expect(await screen.findByRole("heading", { name: "Assignment summary" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Questions & discussion" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Assignment summary" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Back to workflow" })).toBeNull();
   }
 
@@ -103,7 +104,7 @@ it.each(["teacher", "student"] as const)("preserves the %s app header and lesson
   const header = within(await screen.findByRole("banner"));
   expect(header.getByRole("navigation", { name: "EngageAgent" })).toBeTruthy();
   expect(header.getByRole("button", { name: "Sign out of EngageAgent" })).toBeTruthy();
-  expect(header.getByRole("link", { name: role === "teacher" ? "Gallery" : "My classes" })).toBeTruthy();
+  expect(header.getByRole(role === "teacher" ? "button" : "link", { name: role === "teacher" ? "Gallery" : "My classes" })).toBeTruthy();
   const steps = within(screen.getByRole("navigation", { name: role === "teacher" ? "Teacher steps" : "Student steps" }));
   expect(steps.getAllByRole("button")).toHaveLength(4);
   expect(fetchMock.mock.calls.some(([url]) => url === "/api/auth/me")).toBe(true);

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BarChart3, LayoutGrid, MessageCircle, Users } from "lucide-react";
 import SurveyBuilderView from "./SurveyBuilderView";
 import TeacherDashboardView from "./TeacherDashboardView";
+import DiscussionStep from "./discussion/DiscussionStep";
 import AppFrame from "./layout/AppFrame";
 import AppHeader, { taskContext, type TaskShell } from "./layout/AppHeader";
 import StepTabs, { type StepTab } from "./layout/StepTabs";
@@ -55,6 +56,8 @@ type Props = {
   initialMaterialFormat?: MaterialFormat;
   /** Opens a specific step, e.g. 4 for old `?view=dashboard` links. */
   initialStep?: number;
+  /** Opens the assignment dashboard (the header's Dashboard), e.g. for `?view=dashboard` links. */
+  initialView?: "dashboard";
   shell?: TaskShell;
 };
 
@@ -312,7 +315,7 @@ const stepLabels = [
   "Questions & discussion",
 ];
 
-export default function TeacherView({ user, initialMaterialFormat, initialStep, shell }: Props) {
+export default function TeacherView({ user, initialMaterialFormat, initialStep, initialView, shell }: Props) {
   const downloadRef = useRef<HTMLAnchorElement>(null);
   const isMountedRef = useRef(true);
   const activeVideoPollersRef = useRef<Set<string>>(new Set());
@@ -403,6 +406,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const [selectedForPublish, setSelectedForPublish] = useState<Set<string>>(new Set());
   const [publishingContent, setPublishingContent] = useState(false);
   const [publishedContentIds, setPublishedContentIds] = useState<Set<string>>(new Set());
+  // The assignment dashboard is its own view from the header, not a step (#182).
+  const [showDashboard, setShowDashboard] = useState(initialView === "dashboard");
+  const [discussionStatus, setDiscussionStatus] = useState("Class results");
 
   // Strategy
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
@@ -1733,12 +1739,12 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     requestAnimationFrame(() => (copy.format === "slides" ? materialsReviewRef : videoMaterialsReviewRef).current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   };
 
+  const visibleStep = showDashboard ? 0 : currentStep;
   const stepStatus = [
     quizStatus === "published" ? "Published" : quizStatus === "closed" ? "Closed" : selectedLesson ? "In progress" : "Not started",
     selectedStrategies.length ? getEngagementStrategyLabel(selectedStrategies[0]) : "Not chosen yet",
     publishedContentIds.size || publishedSlideCount ? "Sent to students" : content.length ? "Draft ready" : "Not started",
-    // Shows the assignment dashboard until #182 builds this step.
-    "Class results",
+    discussionStatus,
   ];
   const stepDone = [quizStatus !== "draft", selectedStrategies.length > 0, publishedContentIds.size > 0 || publishedSlideCount > 0, false];
   const stepTabs: StepTab<string>[] = stepLabels.map((title, index) => ({
@@ -1750,14 +1756,14 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
       header={<AppHeader userName={user.name} homeHref={shell?.homeHref} context={taskContext(user, shell)} canSignOut={shell?.canSignOut}
         actions={[
           { label: "Class profile", icon: <Users size={15} />, comingSoon: true },
-          { label: "Dashboard", icon: <BarChart3 size={15} />, onClick: () => setCurrentStep(4), active: currentStep === 4 },
-          { label: "Gallery", icon: <LayoutGrid size={15} />, onClick: () => { setCurrentStep(3); setGalleryBrowseRequest(value => value + 1); } },
+          { label: "Dashboard", icon: <BarChart3 size={15} />, onClick: () => setShowDashboard(true), active: showDashboard },
+          { label: "Gallery", icon: <LayoutGrid size={15} />, onClick: () => { setShowDashboard(false); setCurrentStep(3); setGalleryBrowseRequest(value => value + 1); } },
           { label: "Ask EngageAgent", icon: <MessageCircle size={15} />, comingSoon: true },
         ]} />}
-      tabs={<StepTabs label="Teacher steps" tabs={stepTabs} activeId={String(currentStep)} onSelect={(id) => setCurrentStep(Number(id))} />}>
+      tabs={<StepTabs label="Teacher steps" tabs={stepTabs} activeId={showDashboard ? "" : String(currentStep)} onSelect={(id) => { setShowDashboard(false); setCurrentStep(Number(id)); }} />}>
         <section className="grid gap-6">
           {/* Step 1: Assessment */}
-          {currentStep === 1 && (
+          {visibleStep === 1 && (
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 1</p>
@@ -1895,7 +1901,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           )}
 
           {/* Step 2: Strategy */}
-          {currentStep === 2 && (
+          {visibleStep === 2 && (
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div className="flex flex-col gap-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 2</p>
@@ -2097,7 +2103,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           )}
 
           {/* Step 3: Content generation */}
-          <div hidden={currentStep !== 3} className={currentStep === 3 ? "" : "hidden"}>
+          <div hidden={visibleStep !== 3} className={visibleStep === 3 ? "" : "hidden"}>
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div className="flex flex-col gap-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 3</p>
@@ -2127,7 +2133,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                 <p className="text-sm text-slate-600">{materialFormats.find((format) => format.id === materialFormat)?.description}</p>
               </fieldset>
 
-              {currentStep === 3 && isHydrated && hasAssignmentContext && (
+              {visibleStep === 3 && isHydrated && hasAssignmentContext && (
                 <ActivityContextSuggestion
                   key={materialWorkspace}
                   classId={classId}
@@ -2147,7 +2153,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                 <span className="font-normal text-slate-500">Include familiar activities reported in student surveys, if available. Use what you know about this class; no survey results are assumed.</span>
               </label>
 
-              {isHydrated && hasAssignmentContext && currentStep === 3 && (selectedStrategies[0] || galleryBrowseRequest > 0) && <MaterialGalleryPanel
+              {isHydrated && hasAssignmentContext && visibleStep === 3 && (selectedStrategies[0] || galleryBrowseRequest > 0) && <MaterialGalleryPanel
                 key={`${classId}:${assignmentId}:${selectedLesson}`} scope={{ classId, assignmentId }} lessonNumber={selectedLesson ?? 0}
                 strategy={selectedStrategies[0] ?? ""} format={materialFormat} focus={selectedFocus} disabled={generationBusy}
                 refreshKey={galleryRefresh} browseRequest={galleryBrowseRequest} onUse={useGalleryMaterial} />}
@@ -2368,7 +2374,10 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             </div>
           </div>
 
-          {currentStep === 4 && <TeacherDashboardView user={user} embedded />}
+          {visibleStep === 4 && classId && assignmentId && (
+            <DiscussionStep classId={classId} assignmentId={assignmentId} materialsSent={publishedContentIds.size > 0 || publishedSlideCount > 0} onStatusChange={setDiscussionStatus} />
+          )}
+          {showDashboard && <TeacherDashboardView user={user} embedded />}
 
           {error && (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>

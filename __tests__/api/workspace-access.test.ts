@@ -75,6 +75,28 @@ describe("native class authorization", () => {
     vi.mocked(sessionUser).mockResolvedValue(student);
     expect((await guardWorkspaceRequest(request("survey-analysis")))?.status).toBe(403);
   });
+  it("lets students read the Class Question Board and their own report, but not questions or releases (#182)", async () => {
+    vi.mocked(sessionUser).mockResolvedValue(student);
+    vi.mocked(workspaceContext).mockResolvedValue(student);
+    expect(await guardWorkspaceRequest(request("question-board"))).toBeNull();
+    expect(await guardWorkspaceRequest(request("quiz-report", "GET", { studentId: "s1" }))).toBeNull();
+    expect((await guardWorkspaceRequest(request("quiz-report", "GET", { studentId: "s2" })))?.status).toBe(403);
+    expect((await guardWorkspaceRequest(request("quiz-report")))?.status).toBe(403);
+    expect((await guardWorkspaceRequest(request("quiz-report", "POST", { studentId: "s1" })))?.status).toBe(403);
+    expect((await guardWorkspaceRequest(request("question-board", "PUT", { questions: [] })))?.status).toBe(403);
+    expect((await guardWorkspaceRequest(request("question-board", "DELETE")))?.status).toBe(403);
+    // Who asked what stays with the teacher.
+    expect((await guardWorkspaceRequest(request("question-analysis")))?.status).toBe(403);
+    expect((await guardWorkspaceRequest(request("quiz-report-release", "POST", { reason: "early" })))?.status).toBe(403);
+  });
+  it("lets teachers sort questions, publish the board and release reports (#182)", async () => {
+    expect(await guardWorkspaceRequest(request("question-analysis"))).toBeNull();
+    expect(await guardWorkspaceRequest(request("question-board", "PUT", { questions: [] }))).toBeNull();
+    expect(await guardWorkspaceRequest(request("question-board", "DELETE"))).toBeNull();
+    expect(await guardWorkspaceRequest(request("quiz-report"))).toBeNull();
+    expect(await guardWorkspaceRequest(request("quiz-report", "GET", { studentId: "s9" }))).toBeNull();
+    expect(await guardWorkspaceRequest(request("quiz-report-release", "POST", { reason: "taught" }))).toBeNull();
+  });
   it("does not consume the request body needed by the original handler", async () => {
     const req = request("quiz-status", "POST");
     await guardWorkspaceRequest(req);

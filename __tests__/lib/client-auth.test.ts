@@ -31,6 +31,22 @@ it("preserves request headers while authenticating matching task API requests", 
   expect(init.headers).not.toHaveProperty("Authorization");
 });
 
+it.each(["question-analysis", "question-board", "quiz-report", "quiz-report-release"])("authenticates the %s task API only for the verified class and assignment", async path => {
+  const transport = vi.fn(async () => new Response("{}"));
+  vi.stubGlobal("fetch", transport);
+  setVerifiedClientAuth("host-token", user);
+  const input = `/api/${path}?classId=host-class&assignmentId=host-task`;
+  await scopedTaskFetch(user, input, { headers: { "X-Request-ID": "discussion" } });
+  const sent = transport.mock.calls[0] as unknown as [string, RequestInit];
+  expect(sent[0]).toBe(input);
+  expect(new Headers(sent[1].headers).get("Authorization")).toBe("Bearer host-token");
+  expect(new Headers(sent[1].headers).get("X-Request-ID")).toBe("discussion");
+
+  await scopedTaskFetch({ ...user, assignmentId: "other-task" }, `/api/${path}`);
+  const differentTask = transport.mock.calls[1] as unknown as [string, RequestInit];
+  expect(new Headers(differentTask[1].headers).has("Authorization")).toBe(false);
+});
+
 it("never leaks the launch credential to external, media, download, or different-task requests", async () => {
   const transport = vi.fn(async () => new Response("{}"));
   vi.stubGlobal("fetch", transport);
