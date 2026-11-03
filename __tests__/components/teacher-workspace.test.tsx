@@ -93,7 +93,7 @@ it("shows the v8.3 header and four teacher steps, with the dashboard as its own 
   expect(header.getByText("Physics · Period 3")).toBeTruthy();
   expect(header.getByText("Collisions")).toBeTruthy();
   expect(header.getByRole("button", { name: "Gallery" })).toBeTruthy();
-  expect((header.getByRole("button", { name: "Class profile" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((header.getByRole("button", { name: "Class profile" }) as HTMLButtonElement).disabled).toBe(false);
   expect((header.getByRole("button", { name: "Ask EngageAgent" }) as HTMLButtonElement).disabled).toBe(true);
   // Inside GENIUS there is no shell to link back to or sign out of.
   expect(header.queryByRole("link", { name: "EngageAgent" })).toBeNull();

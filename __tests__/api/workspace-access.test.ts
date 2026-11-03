@@ -97,6 +97,13 @@ describe("native class authorization", () => {
     expect(await guardWorkspaceRequest(request("quiz-report", "GET", { studentId: "s9" }))).toBeNull();
     expect(await guardWorkspaceRequest(request("quiz-report-release", "POST", { reason: "taught" }))).toBeNull();
   });
+  it("keeps the class profile teacher-only (#173)", async () => {
+    expect(await guardWorkspaceRequest(request("class-profile"))).toBeNull();
+    expect(await guardWorkspaceRequest(request("class-profile", "POST", { profile: {} }))).toBeNull();
+    vi.mocked(sessionUser).mockResolvedValue(student);
+    expect((await guardWorkspaceRequest(request("class-profile")))?.status).toBe(403);
+    expect((await guardWorkspaceRequest(request("class-profile", "POST", { profile: {} })))?.status).toBe(403);
+  });
   it("does not consume the request body needed by the original handler", async () => {
     const req = request("quiz-status", "POST");
     await guardWorkspaceRequest(req);
