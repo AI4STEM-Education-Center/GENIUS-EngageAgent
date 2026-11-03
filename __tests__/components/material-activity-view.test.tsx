@@ -4,11 +4,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import MaterialActivityView from "@/app/components/MaterialActivityView";
 import { parseMaterialActivity } from "@/lib/material-activities";
+import { buildPublishedContentState } from "@/lib/published-content";
 import { analogyActivity, conflictActivity, bridgingActivity } from "../fixtures/material-activities";
 
 beforeEach(() => sessionStorage.clear());
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe("student-facing inquiry text and image", () => {
+  it("reads an already-published video through the prediction and question steps without exposing its schema key", () => {
+    const question = "Write one scientific question that came from comparing your prediction with the observedOutcome. Start your question with Why, How, or Under what conditions.";
+    const activity = { ...conflictActivity, stages: conflictActivity.stages.map(stage => stage.id === "question" ? { ...stage, text: question } : stage) };
+    const published = buildPublishedContentState([{ content_item_id: "video", content_json: JSON.stringify({ title: "Ball during contact", body: question, strategy: "cognitive conflict", activity, media: { video: "https://example.org/contact.mp4" } }) }], []);
+    render(<MaterialActivityView activity={published.contentItems[0].activity!} media={published.mediaByItemId.video} />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.queryByLabelText("Activity video")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "It stays round." } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByLabelText("Activity video")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByText(question.replace("observedOutcome", "observed result"))).toBeTruthy();
+    expect(screen.getByLabelText("Your scientific question")).toBeTruthy();
+    expect(screen.queryByText(/observedOutcome/)).toBeNull();
+  });
   it("requires a written prediction before revealing the discrepant result and preserves it for comparison", () => {
     render(<MaterialActivityView activity={conflictActivity} media={{ image: "https://example.org/result.webp" }} />);
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));

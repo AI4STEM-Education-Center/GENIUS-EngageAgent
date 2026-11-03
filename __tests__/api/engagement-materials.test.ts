@@ -36,6 +36,23 @@ it("uses lesson-owned focus wording in text generation and blocks forged focus",
 });
 
 describe("source-aligned material APIs", () => {
+  it("keeps the schema field out of returned student stages and body even when review repeats the production leak", async () => {
+    const question = "Write one scientific question that came from comparing your prediction with the observedOutcome. Start your question with Why, How, or Under what conditions.";
+    const activity = { ...conflictActivity, stages: conflictActivity.stages.map(stage => stage.id === "question" ? { ...stage, text: question } : stage) };
+    complete.mockResolvedValue(completion([{ title: "Ball during contact", activity }]));
+    const response = await content(request({ lessonNumber: 3, selectedStrategies: ["cognitive conflict"] }));
+    expect(response.status).toBe(200);
+    const { items } = await response.json();
+    expect(items[0].activity.stages.at(-1).text).toBe(question.replace("observedOutcome", "observed result"));
+    expect(items[0].body).toContain("comparing your prediction with the observed result");
+    expect(items[0].body).not.toContain("observedOutcome");
+    expect(items[0].activity.observedOutcome).toBe(conflictActivity.observedOutcome);
+    expect(complete).toHaveBeenCalledTimes(2);
+    for (const [input] of complete.mock.calls) {
+      expect(input.messages[0].content).toContain("SCHEMA KEYS ARE NOT STUDENT WORDS");
+      expect(input.response_format.json_schema.schema.properties.items.items.properties.activity.properties.observedOutcome.description).toContain("This key is internal");
+    }
+  });
   it("uses the reviewed draft, shares a bounded timeout, and never returns an unreviewed draft on review failure", async () => {
     complete.mockResolvedValueOnce(completion([{ title: "Unreviewed", activity: analogyActivity }]))
       .mockResolvedValueOnce(completion([{ title: "Reviewed", activity: analogyActivity }]));

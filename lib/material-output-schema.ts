@@ -23,7 +23,7 @@ export function materialOutputFormat(strategy: string): ResponseFormatJSONSchema
         visualBrief: text,
         activity: object({
           version: { type: "integer", enum: [1] },
-          ...(strategy === "cognitive conflict" ? { observedOutcome: { type: "string", description: "One concrete declarative sentence stating the scientifically accurate result AND its source: an inspectable schematic or explicitly hypothetical data provided in discrepant text. Keep the SAME predicted feature and conditions. This result is revealed with comparison, never as the opening or prediction. Not a question, explanation, invented learner prediction, invented citation or unsupported claim about real measurements." } } : {}),
+          ...(strategy === "cognitive conflict" ? { observedOutcome: { type: "string", description: "One concrete declarative sentence stating the scientifically accurate result AND its source: an inspectable schematic or explicitly hypothetical data provided in discrepant text. Keep the SAME predicted feature and conditions. This result is revealed with comparison, never as the opening or prediction. Not a question, explanation, invented learner prediction, invented citation or unsupported claim about real measurements. This key is internal: student-facing fields must say observed result or name the concrete event, never observedOutcome or activity.observedOutcome." } } : {}),
           stages: { type: "array", minItems: ["cognitive conflict", "engaged critiquing"].includes(strategy) ? 5 : 4, maxItems: 5, items: object({
             id: { type: "string", enum: [...new Set(stageSequences[strategy].flat())] }, title: studentTitle, text: studentText,
           }) },
