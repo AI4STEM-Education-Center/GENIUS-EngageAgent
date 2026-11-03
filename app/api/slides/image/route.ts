@@ -22,13 +22,14 @@ export async function POST(request: Request) {
     const variation = strategy === "analogy" && body.visualId === "variation";
     const targetContinuation = strategy === "analogy" && resolveAnalogyMethod(draft.analogyMethod) === "six-step" && body.visualId === "target";
     const evidenceContinuation = strategy === "cognitive conflict" && body.visualId === "evidence" && imageReferenceId(draft, body.visualId) === "phenomenon";
+    const critiqueContinuation = strategy === "engaged critiquing" && body.visualId === "evidence" && imageReferenceId(draft, body.visualId) === "claim";
     let reference: string | undefined;
-    if (variation || targetContinuation || evidenceContinuation) {
-      if (!isSlideAsset(body.referenceAsset) || body.referenceAsset.data.length > 4_500_024 || !body.referenceAsset.data.startsWith("data:image/jpeg;base64,")) throw new SlideRequestError(evidenceContinuation ? "Generate the opening phenomenon image before its evidence image." : targetContinuation ? "Generate the phenomenon image before its target continuation." : "Generate the baseline target image before its variation.", 422);
+    if (variation || targetContinuation || evidenceContinuation || critiqueContinuation) {
+      if (!isSlideAsset(body.referenceAsset) || body.referenceAsset.data.length > 4_500_024 || !body.referenceAsset.data.startsWith("data:image/jpeg;base64,")) throw new SlideRequestError(critiqueContinuation ? "Generate the claim scene before its evidence image." : evidenceContinuation ? "Generate the opening phenomenon image before its evidence image." : targetContinuation ? "Generate the phenomenon image before its target continuation." : "Generate the baseline target image before its variation.", 422);
       const bytes = Buffer.from(body.referenceAsset.data.split(",")[1], "base64");
-      if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) throw new SlideRequestError(targetContinuation || evidenceContinuation ? "Invalid phenomenon JPEG." : "Invalid baseline JPEG.", 422);
+      if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) throw new SlideRequestError(targetContinuation || evidenceContinuation || critiqueContinuation ? "Invalid opening scene JPEG." : "Invalid baseline JPEG.", 422);
       reference = body.referenceAsset.data;
-    } else if (body.referenceAsset !== undefined) throw new SlideRequestError("A reference image is only used for an analogy variation, six-step target continuation, or cognitive-conflict evidence continuation.");
+    } else if (body.referenceAsset !== undefined) throw new SlideRequestError("A reference image is only used for an analogy variation, six-step target continuation, or evidence continuation.");
     const model = resolveSlideModel("image", body.imageModel);
     const imageTool = { type: "image_generation" as const, model, size: "1536x1024" as const, quality: "high" as const,
       output_format: "jpeg" as const, output_compression: 85, action: reference ? "edit" as const : "generate" as const };

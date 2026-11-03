@@ -22,11 +22,15 @@ export async function GET(request: Request) {
   const classId = params.get("classId")!, assignmentId = params.get("assignmentId")!, studentId = params.get("studentId");
   const user = await workspaceRequestUser(request);
   const teacher = user?.role === "teacher";
-  const [release, quiz] = await Promise.all([
+  const [storedRelease, quiz] = await Promise.all([
     getTaskDoc<ReportRelease>(classId, assignmentId, "report_release"),
     getQuizStatus(classId, assignmentId),
   ]);
   const lesson = quiz?.lesson_number ? getLesson(quiz.lesson_number) : undefined;
+  // A task can move to another lesson. Its earlier release must not unlock
+  // that lesson's answer key or appear as released on the teacher's card.
+  const release = lesson && quiz?.status !== "draft" && storedRelease?.lessonNumber === lesson.lesson_number
+    ? storedRelease : null;
 
   if (!studentId) {
     if (!teacher) return json({ error: "Teacher access required." }, 403);

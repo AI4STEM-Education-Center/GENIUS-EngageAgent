@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { loadSlideDraft, restoreSlideDraft, saveSlideDraft, slideDraftKey, type SlideDraftScope } from "@/lib/slides/draft-storage";
+import { defaultStrategyFocus, focusForStrategy } from "@/lib/strategy-focus";
+import { projectPublishedSlides } from "@/lib/slides/publication";
 import { STRATEGIES } from "@/lib/slides/model";
 import { imageCheckKey, textCheckKey } from "@/lib/slides/quality";
 import { deckFixture } from "../fixtures/slides";
@@ -112,4 +114,49 @@ it("serializes writes per scope and waits for transaction commit before reportin
   await vi.waitFor(() => expect(pending).toHaveLength(1));
   pending.shift()!(); await secondSave;
   expect((await loadSlideDraft(scope))?.draft.slides[0].title).toBe("Latest teacher edit");
+});
+
+
+it.each(STRATEGIES)("restores %s focus and Gallery origin without exposing them in student publication", strategy => {
+  const deck = deckFixture(strategy);
+  deck.focus = focusForStrategy(defaultStrategyFocus(deck.lessonNumber), strategy);
+  deck.gallerySource = { templateId: "8d1ff342-9946-46d5-92f6-556c22b9c680", revision: 2, title: "Teacher-reviewed shared opening", mode: "adapt" };
+  deck.classroomContext = "Teacher-only prior-knowledge context";
+  deck.checks!.text = { key: textCheckKey(deck), issues: [], model: "review-model" };
+  const context = { ...scope, lessonNumber: deck.lessonNumber, strategy };
+  const restored = restoreSlideDraft(structuredClone({ version: 1, key: slideDraftKey(context), deck }), context)!;
+  expect(restored.focus).toEqual(deck.focus);
+  expect(restored.gallerySource).toEqual(deck.gallerySource);
+  expect(restored.checks!.text!.key).toBe(textCheckKey(restored));
+  const serialized = JSON.stringify(projectPublishedSlides(restored));
+  expect(serialized).not.toMatch(/gallerySource|templateId|coreIdeas|misconceptions|Teacher-only|Teacher-reviewed/);
+  // A different selected focus needs a fresh semantic review even if wording is unchanged.
+  expect(textCheckKey({ ...restored, focus: undefined })).not.toBe(textCheckKey(restored));
+});
+
+it("keeps legacy drafts without focus readable and omits an explicit absent focus", () => {
+  const value = stored();
+  expect(restoreSlideDraft(value, scope)!.focus).toBeUndefined();
+  Object.assign(value.deck, { focus: null });
+  expect(restoreSlideDraft(value, scope)!.focus).toBeUndefined();
+});
+
+it.each([
+  { misconceptions: [] }, { misconceptions: ["not-a-lesson-code"] },
+  { misconceptions: ["a", "a"] }, { coreIdeas: [0] },
+  { misconceptions: ["a"], coreIdeas: [0] },
+])("rejects a corrupt saved focus instead of silently retargeting a restored draft: %j", focus => {
+  const value = stored(); Object.assign(value.deck, { focus });
+  expect(() => restoreSlideDraft(value, scope)).toThrow();
+});
+
+it("retains only valid bounded Gallery origin fields", () => {
+  const value = stored();
+  const source = { templateId: "8d1ff342-9946-46d5-92f6-556c22b9c680", revision: 1, title: "A shared opening", mode: "use", ownerId: "private-source-owner" };
+  Object.assign(value.deck, { gallerySource: source });
+  expect(restoreSlideDraft(value, scope)!.gallerySource).toEqual({ templateId: source.templateId, revision: 1, title: source.title, mode: "use" });
+  for (const change of [{ revision: 0 }, { revision: 1.2 }, { mode: "overwrite" }, { templateId: "" }, { title: "x".repeat(241) }]) {
+    Object.assign(value.deck, { gallerySource: { ...source, ...change } });
+    expect(() => restoreSlideDraft(value, scope)).toThrow("Gallery source");
+  }
 });

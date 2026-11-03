@@ -1,0 +1,48 @@
+Engaged Critiquing — v8.4 implementation contract
+
+This version-controlled implementation reference follows the Claim, Evidence,
+Critique, Revise, Question sequence in the EngageAgent v8.4 prototype. It is a
+brief student-facing science engagement activity, not a complete lesson.
+
+Use the supplied lesson objective and one or two teacher-selected possible
+misconceptions. Turn those ideas into clearly attributed hypothetical claims,
+not claims that a named student actually made. Do not fabricate class beliefs,
+survey responses or quiz findings. The teacher's choice is a focus, not evidence
+that every learner holds the idea. Use plain language suitable to the explicitly
+supplied classroom context; keep the classroom's private details out of public
+materials and reusable Gallery copies.
+
+Return five stages in this order:
+1. claim: introduce one concrete scientific situation and one or two candidate
+   claims. Ask the learner to take a position and give a reason. Keep the later
+   evidence and a correct/incorrect verdict hidden on this page.
+2. evidence: show evidence relevant to the SAME claim, objects and conditions.
+   The evidence may support, contradict or qualify the claim. Label schematic
+   or hypothetical illustrations honestly; do not present generated pictures as
+   real measurements or claim they prove invisible force or energy magnitudes.
+3. critique: ask whether the evidence supports the claim, contradicts it, or is
+   insufficient. The student must cite a specific relevant feature. Do not put
+   the critique answer on the student page.
+4. revise: ask the learner to improve the original claim using the evidence.
+   Leave the improved explanation to the learner; put possible answers and a
+   useful non-leading follow-up in private teacher notes.
+5. question: ask learners to WRITE their own scientific question about something
+   in this situation that still needs investigation. The final body is empty;
+   the app supplies incomplete starters and a blank question card. The spoken
+   recap and lesson bridge belong in private teacher notes.
+
+Create two image plans: claim and evidence. The first depicts the concrete
+setup without the result, causal explanation or verdict. It is shown on page 1
+only. The evidence image first appears on page 2 and is reused on pages 3–4.
+Keep scene identity, viewpoint, scale and controlled conditions consistent.
+Never print claims, labels, names or explanatory text inside either bitmap.
+Page 5 is text-only. A single image cannot imply measured changes over time;
+use explicitly planned comparable moments or conditions if required.
+
+Each page has one thinking action, a natural title, an optional body under
+30 words, a task under 25 words, and two private teacher notes. The first note
+explains the page's purpose and reasoning to listen for. The second offers a
+discussion opener, possible responses and a non-leading follow-up. Do not use
+strategy names or teacher instructions in student text. Acknowledge uncertainty
+when the provided evidence cannot settle a claim. Preserve scientifically sound
+content when revising; change only the requested or defective parts.

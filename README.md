@@ -73,7 +73,7 @@ GROK_API_KEY=your_grok_api_key_here
 
 # Optional — model overrides
 OPENAI_MODEL=gpt-5-nano
-OPENAI_IMAGE_MODEL=gpt-image-1
+OPENAI_IMAGE_MODEL=gpt-image-2
 
 # Optional — AWS-backed persistence
 # If these are omitted, the app falls back to local JSON storage in `data/engage-nosql.json`.
@@ -87,6 +87,8 @@ COHORT_ANALYSIS_QUEUE_URL=
 # Optional — script tuning
 FEEDBACK_TICKET_CONCURRENCY=6
 ```
+
+Existing deployments must also update `OPENAI_IMAGE_MODEL` if it is still `gpt-image-1`; OpenAI retired that model on October 23, 2026. The app rejects the retired choice before starting a paid generation request. See [OpenAI’s retirement notice](https://developers.openai.com/api/docs/models/gpt-image-1).
 
 Set `ENGAGE_AWS_REGION` to the actual region where your DynamoDB table and S3 bucket live. For the current shared AWS setup, that is `us-east-2`.
 
@@ -106,6 +108,14 @@ The app starts on `http://localhost:3000` (or `:3001` if 3000 is taken).
 npm test            # single run
 npm run test:watch  # watch mode
 ```
+
+### Materials and Gallery
+
+Step 3 supports four strategies, one or two lesson-specific focus items, independent Gallery copies, slide revisions, and editing a copied video's activity text. Sharing to the Gallery and sending to students are separate actions. The sharing dialog lets a teacher review and edit the shared copy, including notes and image descriptions. Classroom context and generation diagnostics are not shared. Class-profile and GENIUS experience check-in integrations remain empty until their upstream services are available; existing task-survey suggestions are clearly identified and opt-in.
+
+The Gallery uses the existing DynamoDB workspace table and private S3 bucket; no new table, GSI or secret is required. A restricted deployment role needs `GetObject` and `PutObject` for `material-gallery/*`, plus `GetObject` for the existing `media/*` source videos. Copies retain their own assets after the source is withdrawn. Production refuses to fall back to local files if cloud storage is missing.
+
+For local browser acceptance, use Node 24, a throwaway `SSO_SECRET`, and an isolated `ENGAGE_LOCAL_DATA_DIR` containing `qa`. Set `ENGAGE_APP_URL=http://localhost:3210`, `GENIUS_URL=http://localhost:3211`, `GENIUS_EMBED_ORIGIN=http://localhost:3211`, `ALLOWED_ORIGINS=http://localhost:3210,http://localhost:3211`, and `ENGAGE_LOCAL_MATERIAL_STORAGE=1`; leave `DYNAMODB_TABLE` and `ENGAGE_S3_BUCKET` unset. Run `npm run dev -- --port 3210` and, in another terminal, `node scripts/materials-qa-host.mjs`. Open `http://localhost:3211` for synthetic teacher/student sessions and an iframe completion monitor. This loopback-only host refuses production mode. Real generation uses the configured provider and incurs its usual usage charges; unit tests use mocks and live suites are opt-in.
 
 ## Running with the GENIUS Learning Platform
 

@@ -1,5 +1,6 @@
 import OpenAI, { toFile } from "openai";
 import { buildMaterialImageInstructions } from "@/lib/material-prompts";
+import { DEFAULT_IMAGE_MODEL, RETIRED_IMAGE_MODEL_MESSAGE } from "@/lib/slides/models";
 import type { MaterialActivity } from "@/lib/material-activities";
 import { NextResponse } from "next/server";
 
@@ -156,7 +157,8 @@ export async function POST(request: Request) {
       annotatedImageUrl?: string;
     };
 
-    const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+    const model = process.env.OPENAI_IMAGE_MODEL?.trim() || DEFAULT_IMAGE_MODEL;
+    if (model === "gpt-image-1") return NextResponse.json({ error: RETIRED_IMAGE_MODEL_MESSAGE }, { status: 503 });
     const trimmedRefine = refinementPrompt?.trim().slice(0, MAX_REFINEMENT_PROMPT_LENGTH);
     const isRefine = !!(trimmedRefine && previousImageUrl);
 

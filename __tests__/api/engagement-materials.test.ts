@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextResponse } from "next/server";
-import { analogyActivity, conflictActivity, bridgingActivity } from "../fixtures/material-activities";
+import { analogyActivity, conflictActivity, bridgingActivity, critiquingActivity } from "../fixtures/material-activities";
 
 const { complete, generate, edit } = vi.hoisted(() => ({ complete: vi.fn(), generate: vi.fn(), edit: vi.fn() }));
 vi.mock("openai", () => ({ default: class { chat = { completions: { create: complete } }; images = { generate, edit }; }, toFile: vi.fn(async () => "image-input") }));
@@ -24,7 +24,35 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 
+it("uses lesson-owned focus wording in text generation and blocks forged focus", async () => {
+  complete.mockResolvedValue(completion([{ title: "Observe", activity: conflictActivity }]));
+  const response = await content(request({ lessonNumber: 1, selectedStrategies: ["cognitive conflict"], focus: { misconceptions: ["a"] } }));
+  expect(response.status).toBe(200);
+  expect(complete.mock.calls[0][0].messages[1].content).toContain("If nothing looks damaged");
+  expect(complete.mock.calls[0][0].messages[1].content).toContain("not evidence that every learner holds it");
+  complete.mockClear();
+  expect((await content(request({ lessonNumber: 1, selectedStrategies: ["cognitive conflict"], focus: { misconceptions: ["invented"] } }))).status).toBe(400);
+  expect(complete).not.toHaveBeenCalled();
+});
+
 describe("source-aligned material APIs", () => {
+  it("keeps the schema field out of returned student stages and body even when review repeats the production leak", async () => {
+    const question = "Write one scientific question that came from comparing your prediction with the observedOutcome. Start your question with Why, How, or Under what conditions.";
+    const activity = { ...conflictActivity, stages: conflictActivity.stages.map(stage => stage.id === "question" ? { ...stage, text: question } : stage) };
+    complete.mockResolvedValue(completion([{ title: "Ball during contact", activity }]));
+    const response = await content(request({ lessonNumber: 3, selectedStrategies: ["cognitive conflict"] }));
+    expect(response.status).toBe(200);
+    const { items } = await response.json();
+    expect(items[0].activity.stages.at(-1).text).toBe(question.replace("observedOutcome", "observed result"));
+    expect(items[0].body).toContain("comparing your prediction with the observed result");
+    expect(items[0].body).not.toContain("observedOutcome");
+    expect(items[0].activity.observedOutcome).toBe(conflictActivity.observedOutcome);
+    expect(complete).toHaveBeenCalledTimes(2);
+    for (const [input] of complete.mock.calls) {
+      expect(input.messages[0].content).toContain("SCHEMA KEYS ARE NOT STUDENT WORDS");
+      expect(input.response_format.json_schema.schema.properties.items.items.properties.activity.properties.observedOutcome.description).toContain("This key is internal");
+    }
+  });
   it("uses the reviewed draft, shares a bounded timeout, and never returns an unreviewed draft on review failure", async () => {
     complete.mockResolvedValueOnce(completion([{ title: "Unreviewed", activity: analogyActivity }]))
       .mockResolvedValueOnce(completion([{ title: "Reviewed", activity: analogyActivity }]));
@@ -97,13 +125,16 @@ describe("source-aligned material APIs", () => {
       expect(generate.mock.calls[0][0].prompt).toContain("do not invent a visibly dented cart body");
     }
   });
-  it("retains the legacy fourth strategy and client-driven fallback model", async () => {
+  it("generates a structured fourth-strategy activity with the client-driven fallback model", async () => {
     vi.stubEnv("OPENAI_FALLBACK_MODEL", "fallback-test");
-    complete.mockResolvedValue(completion([{ title: "Critique", body: "Compare these claims.", type: "Questions" }]));
-    const response = await content(request({ lessonNumber: 1, selectedStrategies: ["engaged critiquing"], fallback: true }));
+    complete.mockResolvedValue(completion([{ title: "Critique", type: "Inquiry activity", activity: critiquingActivity }]));
+    const response = await content(request({ lessonNumber: 1, selectedStrategies: ["engaged critiquing"], fallback: true, focus: { misconceptions: ["a", "b"] } }));
     expect(response.status).toBe(200);
-    expect((await response.json()).items[0].activity).toBeUndefined();
+    expect((await response.json()).items[0].activity).toEqual(critiquingActivity);
     expect(complete.mock.calls[0][0].model).toBe("fallback-test");
+    expect(complete.mock.calls[0][0].response_format.type).toBe("json_schema");
+    expect(complete.mock.calls[0][0].messages[1].content).toContain("Heavier objects always cause more damage");
+    expect(complete.mock.calls[1][0].messages[0].content).toContain("claim -> evidence -> critique -> revise -> question");
   });
   it("does not return success for empty, incomplete, or wrong-order generation", async () => {
     for (const items of [[], [{ body: "Text but no stages" }], [{ title: "Invalid", activity: { ...analogyActivity, stages: [...analogyActivity.stages].reverse() } }]]) {
@@ -182,6 +213,22 @@ describe("source-aligned material APIs", () => {
     expect(generate).not.toHaveBeenCalled();
     expect(listStudentAnswers).not.toHaveBeenCalled();
   });
+  it("uses the supported image default and blocks a retired configured model before generation or edit", async () => {
+    const item = { id: "source-image", type: "Inquiry", title: "Contact", body: "Observe the contact", strategy: "cognitive conflict", activity: conflictActivity };
+    vi.stubEnv("OPENAI_IMAGE_MODEL", "");
+    expect((await image(request({ item, lessonNumber: 3 }))).status).toBe(200);
+    expect(generate.mock.calls[0][0].model).toBe("gpt-image-2");
+    generate.mockClear();
+    vi.stubEnv("OPENAI_IMAGE_MODEL", "gpt-image-1");
+    for (const fields of [{ item, lessonNumber: 3 }, { item, refinementPrompt: "Make the ball red", previousImageUrl: "data:image/webp;base64,dGVzdA==" }]) {
+      const response = await image(request(fields));
+      expect(response.status).toBe(503);
+      expect((await response.json()).error).toContain("no longer available");
+    }
+    expect(generate).not.toHaveBeenCalled();
+    expect(edit).not.toHaveBeenCalled();
+  });
+
   it("preserves image refinement instead of replacing it with initial generation", async () => {
     expect((await image(request({ item: { id: "a1" }, refinementPrompt: "Make the ball red", previousImageUrl: "data:image/webp;base64,dGVzdA==" }))).status).toBe(200);
     expect(edit.mock.calls[0][0].prompt).toBe("Make the ball red");

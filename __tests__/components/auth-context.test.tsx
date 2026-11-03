@@ -54,7 +54,7 @@ describe("AuthProvider", () => {
     window.sessionStorage.setItem(storageKey, "old-token");
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: teacher }) });
     mount();
-    expect(await settled()).toEqual({ user: teacher, loading: false, error: null });
+    expect(await settled()).toEqual({ user: teacher, loading: false, error: null, isGeniusEmbed: true });
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/verify", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: "fresh-token" }),
@@ -70,7 +70,7 @@ describe("AuthProvider", () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 401 });
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: teacher }) });
     mount();
-    expect((await settled()).user).toEqual(teacher);
+    expect(await settled()).toEqual({ user: teacher, loading: false, error: null, isGeniusEmbed: true });
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ token: "stored-token" });
   });
 
@@ -91,6 +91,33 @@ describe("AuthProvider", () => {
     expect(window.sessionStorage.getItem(storageKey)).toBeNull();
   });
 
+  it("marks a GENIUS session embedded only after the token is verified", async () => {
+    window.history.replaceState({}, "", "/?sso_token=pending-token");
+    let verify!: (response: object) => void;
+    fetchMock.mockReturnValue(new Promise(resolve => { verify = resolve; }));
+    mount();
+    expect(JSON.parse(screen.getByTestId("auth-state").textContent!)).toEqual({
+      user: null, loading: true, error: null,
+    });
+    verify({ ok: true, json: async () => ({ user: teacher }) });
+    expect(await settled()).toEqual({ user: teacher, loading: false, error: null, isGeniusEmbed: true });
+  });
+
+  it("keeps standalone cookie sessions unmarked even with GENIUS class identifiers", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: teacher }) });
+    mount();
+    expect(await settled()).toEqual({ user: teacher, loading: false, error: null });
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/me", { cache: "no-store" });
+  });
+
+  it("keeps development mock sessions unmarked", async () => {
+    window.history.replaceState({}, "", "/?mock_user=teacher");
+    mount();
+    const state = await settled();
+    expect(state.user.role).toBe("teacher");
+    expect(state.isGeniusEmbed).toBeUndefined();
+  });
+
   it("shows normal signed-out state when browser storage is unavailable", async () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage denied"); });
     mount();
@@ -104,7 +131,7 @@ describe("AuthProvider", () => {
     const identity = { ...teacher, classId: undefined, assignmentId: undefined };
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: identity }) });
     mount();
-    expect((await settled()).user).toEqual(identity);
+    expect(await settled()).toEqual({ user: identity, loading: false, error: null });
     expect(window.sessionStorage.getItem(storageKey)).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(scopedClientAuthHeaders(teacher)).toEqual({});
@@ -125,7 +152,7 @@ it("keeps verified embedded API auth working in memory when third-party storage 
   vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage denied"); });
   fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: teacher }) });
   const view = mount();
-  expect((await settled()).user).toEqual(teacher);
+  expect(await settled()).toEqual({ user: teacher, loading: false, error: null, isGeniusEmbed: true });
   expect(scopedClientAuthHeaders(teacher)).toEqual({ Authorization: "Bearer memory-only-token" });
   expect(window.location.search).toBe("");
   view.unmount();
@@ -137,7 +164,7 @@ it("verifies the original URL token during React effect replay without reviving 
   window.history.replaceState({}, "", "/?sso_token=replay-token");
   fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: teacher }) });
   render(<StrictMode><AuthProvider><AuthProbe /></AuthProvider></StrictMode>);
-  expect((await settled()).user).toEqual(teacher);
+  expect(await settled()).toEqual({ user: teacher, loading: false, error: null, isGeniusEmbed: true });
   expect(scopedClientAuthHeaders(teacher)).toEqual({ Authorization: "Bearer replay-token" });
   expect(window.location.search).toBe("");
   expect(fetchMock.mock.calls.every(([url]) => url === "/api/auth/verify")).toBe(true);
@@ -147,7 +174,7 @@ async function verifiedEmbeddedVisit() {
   window.history.replaceState({ existingFrameworkState: true }, "", "/?sso_token=embedded-launch-token");
   fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: teacher }) });
   const view = mount();
-  expect((await settled()).user).toEqual(teacher);
+  expect(await settled()).toEqual({ user: teacher, loading: false, error: null, isGeniusEmbed: true });
   view.unmount();
   fetchMock.mockReset();
 }
@@ -157,7 +184,7 @@ it("keeps a verified GENIUS launch scoped on top-level reload despite an unrelat
   const unrelated = { ...teacher, geniusId: "different-native-teacher", classId: undefined, assignmentId: undefined };
   fetchMock.mockImplementation(async url => ({ ok: true, json: async () => ({ user: url === "/api/auth/me" ? unrelated : teacher }) }));
   mount();
-  expect((await settled()).user).toEqual(teacher);
+  expect(await settled()).toEqual({ user: teacher, loading: false, error: null, isGeniusEmbed: true });
   expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/auth/verify"]);
   expect(scopedClientAuthHeaders(teacher)).toEqual({ Authorization: "Bearer embedded-launch-token" });
   expect(window.history.state.existingFrameworkState).toBe(true);
@@ -172,7 +199,7 @@ it.each(["/teacher/classes", "/student/classes"])("uses the standalone cookie fo
   const native = { ...teacher, geniusId: "native-user", classId: undefined, assignmentId: undefined };
   fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: native }) });
   mount();
-  expect((await settled()).user).toEqual(native);
+  expect(await settled()).toEqual({ user: native, loading: false, error: null });
   expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/auth/me"]);
   expect(window.history.state).toEqual({ existingFrameworkState: true });
   expect(window.sessionStorage.getItem(storageKey)).toBeNull();
@@ -207,7 +234,7 @@ it("does not give a stale token priority during a separate standalone root visit
   const native = { ...teacher, classId: undefined, assignmentId: undefined };
   fetchMock.mockResolvedValue({ ok: true, json: async () => ({ user: native }) });
   mount();
-  expect((await settled()).user).toEqual(native);
+  expect(await settled()).toEqual({ user: native, loading: false, error: null });
   expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/auth/me"]);
   expect(window.history.state).toEqual({});
 });

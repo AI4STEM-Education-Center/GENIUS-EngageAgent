@@ -84,6 +84,42 @@ describe("quiz reports", () => {
     expect((await (await readReport(get("quiz-report"))).json()).students).toEqual([]);
   });
 
+  it("holds a new lesson's reports until that lesson is released, while keeping teacher previews available", async () => {
+    expect((await release(send("quiz-report-release", "POST", { reason: "taught" }))).status).toBe(200);
+    db.quiz = { lesson_number: 4, status: "published" };
+    const nextQuestion = getLesson(4)!.quiz_items[0];
+    db.answers = [{ student_id: "s1", student_name: "Jayden R.", lesson_number: 4,
+      answers: { [nextQuestion.item_id]: nextQuestion.correct_answer! } }];
+
+    expect(await (await readReport(get("quiz-report"))).json()).toEqual({
+      release: null, lessonNumber: 4, students: [{ id: "s1", name: "Jayden R." }],
+    });
+    const preview = await (await readReport(get("quiz-report", { studentId: "s1" }))).json();
+    expect(preview.release).toBeNull();
+    expect(preview.report).toMatchObject({ lessonNumber: 4, correct: 1 });
+
+    db.role = "student";
+    expect(await (await readReport(get("quiz-report", { studentId: "s1" }))).json()).toEqual({ release: null, report: null });
+
+    db.role = "teacher";
+    const released = await release(send("quiz-report-release", "POST", { reason: "early" }));
+    expect(released.status).toBe(200);
+    expect((await released.json()).release).toMatchObject({ reason: "early", lessonNumber: 4 });
+    expect((await (await readReport(get("quiz-report"))).json()).release).toMatchObject({ lessonNumber: 4 });
+    db.role = "student";
+    expect(await (await readReport(get("quiz-report", { studentId: "s1" }))).json()).toMatchObject({
+      release: { reason: "early", lessonNumber: 4 }, report: { lessonNumber: 4, correct: 1 },
+    });
+  });
+
+  it("does not expose a saved release while the quiz is a draft", async () => {
+    await release(send("quiz-report-release", "POST", { reason: "taught" }));
+    db.quiz!.status = "draft";
+    expect((await (await readReport(get("quiz-report"))).json()).release).toBeNull();
+    db.role = "student";
+    expect(await (await readReport(get("quiz-report", { studentId: "s1" }))).json()).toEqual({ release: null, report: null });
+  });
+
   it("releases only with a known reason and a published quiz", async () => {
     expect((await release(send("quiz-report-release", "POST", { reason: "whenever" }))).status).toBe(400);
     db.quiz = { lesson_number: 3, status: "draft" };
