@@ -18,6 +18,9 @@ export type TextMode = "questions" | "phenomenon" | "dialogue";
 
 export type ContentItem = {
   id: string;
+  lessonNumber?: number;
+  focus?: Partial<import("./strategy-focus").StrategyFocus>;
+  gallerySource?: import("./material-gallery").GalleryProvenance;
   type: string;
   title: string;
   body: string;

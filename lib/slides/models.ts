@@ -1,6 +1,10 @@
 export const CURRENT_MODEL = "current";
 export const TEXT_MODELS = ["gpt-6-astra", "gpt-6.1-sol", "gpt-4.1", "gpt-5-mini"] as const;
-export const IMAGE_MODELS = ["gpt-image-1", "gpt-image-1.5", "gpt-image-2"] as const;
+// GPT Image 1 was retired on 2026-10-23. Keep saved asset metadata readable,
+// but never offer the retired model for a new paid request.
+export const DEFAULT_IMAGE_MODEL = "gpt-image-2";
+export const RETIRED_IMAGE_MODEL_MESSAGE = "GPT Image 1 is no longer available. Choose another image model or update OPENAI_IMAGE_MODEL to gpt-image-2.";
+export const IMAGE_MODELS = ["gpt-image-1.5", "gpt-image-2"] as const;
 export type SlideModelOption = { id: string; label: string };
 export type SlideModelCatalog = { text: SlideModelOption[]; image: SlideModelOption[] };
 export type SlideModelSelection = { textModel: string; imageModel: string };

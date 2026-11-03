@@ -73,7 +73,7 @@ function seedDraft(overrides: Record<string, unknown> = {}) {
 
 async function ready() {
   await screen.findByText("Lesson 8: Energy");
-  return screen.getByRole("button", { name: "Generate materials" });
+  return screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ });
 }
 
 const strategyRadio = (name: string) => within(screen.getByRole("radiogroup", { name: "Strategy" })).getByRole("radio", { name });
@@ -90,6 +90,7 @@ beforeEach(() => {
   vi.stubGlobal("URL", Object.assign(class extends URL {}, { revokeObjectURL: mocks.revoke }));
   mocks.download.mockResolvedValue({ url: "blob:material", dataUri: "data:text/html;charset=utf-8;base64,aGVsbG8=", fileName: "Shared-activity.html" });
   mocks.fetch.mockImplementation(async (input: string, init?: RequestInit) => {
+    if (input.startsWith("/api/material-gallery")) return reply({ items: [] });
     if (input.startsWith("/api/lessons/")) {
       const lesson = Number(input.split("/").pop());
       return reply({ lesson_number: lesson, lesson_title: lesson === 8 ? "Energy" : `Lesson ${lesson}`, learning_objective: "Track energy", core_ideas: [], misconceptions: {}, quiz_items: [] });
@@ -170,15 +171,15 @@ it.each([undefined, "text-image"])("migrates legacy format %s to Slides while pr
 
 it("generates the selected slide strategy with inherited context and retains its edited draft across formats and steps", async () => {
   const strategy = "experience bridging";
-  seedDraft({ selectedStrategies: [strategy] });
+  seedDraft({ selectedStrategies: [strategy], focusByLesson: { 8: { misconceptions: ["1&2-a"], coreIdeas: [0] } } });
   render(<TeacherView user={user} />);
   await ready();
   fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
-  const generate = screen.getByRole("button", { name: "Generate materials" });
+  const generate = screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ });
   await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
   expect(mocks.generate.mock.calls.map(([context]) => context)).toEqual([{
-    lessonNumber: 8, strategy, classroomContext: "", classId: user.classId, assignmentId: user.assignmentId,
+    lessonNumber: 8, strategy, classroomContext: "", focus: { coreIdeas: [0] }, classId: user.classId, assignmentId: user.assignmentId,
   }]);
   fireEvent.change(screen.getByRole("textbox", { name: `Draft for ${strategy}` }), { target: { value: `Teacher edit: ${strategy}` } });
   fireEvent.click(screen.getByRole("radio", { name: "Video" }));
@@ -315,18 +316,13 @@ it("restores published materials from multiple strategies while selecting only o
   expect(postCalls()).toHaveLength(0);
 });
 
-it("blocks Slides when the single restored strategy is unsupported", async () => {
-  seedDraft({ selectedStrategies: ["analogy", "engaged critiquing"], materialFormat: "slides" });
+it("supports Engaged Critiquing slides with the selected lesson focus", async () => {
+  seedDraft({ selectedStrategies: ["analogy", "engaged critiquing"], materialFormat: "slides", focusByLesson: { 8: { misconceptions: ["1&2-a"], coreIdeas: [0] } } });
   render(<TeacherView user={user} />);
   const generate = await ready();
-  expect(screen.getByRole("status")).toHaveTextContent("Slides do not yet support Engaged Critiquing");
-  expect(generate).toBeDisabled();
+  await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
-  expect(mocks.generate).not.toHaveBeenCalled();
-  expect(postCalls()).toHaveLength(0);
-  expect(screen.getByRole("status")).not.toHaveTextContent("Text + Image");
-  fireEvent.click(screen.getByRole("radio", { name: "Video" }));
-  expect(generate).toBeEnabled();
+  expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ strategy: "engaged critiquing", focus: { misconceptions: ["1&2-a"] } }));
   expect(postCalls()).toHaveLength(0);
 });
 
@@ -355,7 +351,7 @@ it("preserves teacher-supplied experience context for this task and sends it for
   render(<TeacherView user={user} />);
   await ready();
   expect(screen.getByRole("textbox", { name: "Classroom context (optional)" })).toHaveValue(context);
-  const generate = screen.getByRole("button", { name: "Generate materials" });
+  const generate = screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ });
   await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
   expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ classroomContext: context }));
@@ -382,7 +378,7 @@ it("uses the survey's top activity only after teacher opt-in, preserving it for 
   const checkIn = await screen.findByRole("region", { name: "From the experience check-in" });
   expect(await within(checkIn).findByText("Soccer")).toBeVisible();
   fireEvent.click(stepTab(/Engagement materials/));
-  const useActivity = await screen.findByRole("button", { name: "Use top activity" });
+  const useActivity = await screen.findByRole("button", { name: "Use top activity (optional)" });
   const contextField = screen.getByRole("textbox", { name: "Classroom context (optional)" });
   expect(contextField).toHaveValue(manualContext);
   const generate = await ready();
@@ -482,7 +478,7 @@ it("shares the current classroom context with the selected Slides editor", async
   await ready();
   fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Classroom context (optional)" }), { target: { value: "Grade 9; students describe riding bicycles." } });
-  const generate = screen.getByRole("button", { name: "Generate materials" });
+  const generate = screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ });
   await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
   for (const [context] of mocks.generate.mock.calls) expect(context.classroomContext).toBe("Grade 9; students describe riding bicycles.");
@@ -494,11 +490,11 @@ it("uses new content identities when regenerating a material with the same title
   render(<TeacherView user={user} />);
   await ready();
   vi.useFakeTimers();
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Generate materials" })); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ })); });
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(postCalls("/api/engagement-image")).toHaveLength(1);
-  expect(screen.getByRole("button", { name: "Generate materials" })).toBeEnabled();
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Generate materials" })); });
+  expect(screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ })).toBeEnabled();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ })); });
   await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
   expect(postCalls("/api/engagement-image")).toHaveLength(2);
   vi.useRealTimers();
@@ -579,7 +575,7 @@ it("aborts preparation when its content is replaced and discards a late file wit
   await waitFor(() => expect(download).toBeEnabled()); fireEvent.click(download);
   const signal = mocks.download.mock.calls[0][2] as AbortSignal;
   fireEvent.click(screen.getByRole("radio", { name: "Video" }));
-  fireEvent.click(screen.getByRole("button", { name: "Generate materials" }));
+  fireEvent.click(screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ }));
   await waitFor(() => expect(signal.aborted).toBe(true));
   await act(async () => finish({ url: "blob:late", dataUri: "data:text/html;base64,b2xk", fileName: "Old.html" }));
   expect(screen.queryByRole("link", { name: "Save material file" })).toBeNull();
@@ -627,7 +623,7 @@ it("carries the actual class rule-based recommendation into the shared material 
   expect(annotation).toMatchObject({ decision: "agree", reason: null, lessonNumber: 8, selectedStrategies: ["cognitive conflict"] });
   expect(annotation.focus.misconceptions.length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
-  const generate = screen.getByRole("button", { name: "Generate materials" });
+  const generate = screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ });
   await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
   expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ lessonNumber: 8, strategy: "cognitive conflict", focus: { misconceptions: annotation.focus.misconceptions } }));
@@ -637,7 +633,7 @@ it("carries the actual class rule-based recommendation into the shared material 
 it("uses the existing material selector, slide editor and publication list for a GENIUS class task", async () => {
   const host: UserContext = { ...user, classId: "genius-class", assignmentId: "genius-task" };
   setVerifiedClientAuth("host-class-token", host);
-  seedDraft({ classId: host.classId, assignmentId: host.assignmentId, materialFormat: "slides", classroomContext: "Grade 8 GENIUS class" });
+  seedDraft({ classId: host.classId, assignmentId: host.assignmentId, materialFormat: "slides", classroomContext: "Grade 8 GENIUS class", focusByLesson: { 8: { misconceptions: ["1&2-a"], coreIdeas: [0] } } });
   localStorage.setItem(`engage-agent:draft:v3:${host.classId}:${host.assignmentId}`, localStorage.getItem(draftKey)!);
   const originalFetch = mocks.fetch.getMockImplementation()!;
   mocks.fetch.mockImplementation(async (input: string, init?: RequestInit) => input.startsWith("/api/content-publish") ? reply({ items: [{
@@ -651,10 +647,10 @@ it("uses the existing material selector, slide editor and publication list for a
   expect(screen.getByText("Slide context: lesson 8, analogy")).toBeVisible();
   expect(await screen.findByRole("button", { name: "Read slides" })).toBeEnabled();
   expect(mocks.fetch.mock.calls.some(([url, init]) => url.startsWith("/api/content-publish") && init?.headers?.Authorization === "Bearer host-class-token")).toBe(true);
-  const generate = screen.getByRole("button", { name: "Generate materials" });
+  const generate = screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ });
   await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
-  expect(mocks.generate).toHaveBeenCalledWith({ lessonNumber: 8, strategy: "analogy", classroomContext: "Grade 8 GENIUS class", classId: host.classId, assignmentId: host.assignmentId });
+  expect(mocks.generate).toHaveBeenCalledWith({ lessonNumber: 8, strategy: "analogy", classroomContext: "Grade 8 GENIUS class", focus: { coreIdeas: [0] }, classId: host.classId, assignmentId: host.assignmentId });
   expect(screen.getByRole("textbox", { name: "Draft for analogy" })).toHaveValue("Generated analogy draft");
 });
 
@@ -671,7 +667,7 @@ it("hydrates an embedded teacher workflow and generates in memory when browser s
     useStrategy("Analogy");
     await ready();
     fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
-    const generate = screen.getByRole("button", { name: "Generate materials" });
+    const generate = screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ });
     await waitFor(() => expect(generate).toBeEnabled());
     fireEvent.click(generate);
     expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ classId: host.classId, assignmentId: host.assignmentId, lessonNumber: 8, strategy: "analogy" }));
@@ -679,4 +675,38 @@ it("hydrates an embedded teacher workflow and generates in memory when browser s
   } finally {
     getItem.mockRestore(); setItem.mockRestore(); warn.mockRestore();
   }
+});
+
+
+it("requires a teacher focus, limits it to two, and restores the chosen IDs for generation", async () => {
+  seedDraft({ currentStep: 2, selectedStrategies: ["cognitive conflict"] });
+  const view = render(<TeacherView user={user} />);
+  const group = await screen.findByRole("group", { name: /Misconception to target/ });
+  const boxes = within(group).getAllByRole("checkbox");
+  fireEvent.click(boxes[0]);
+  expect(screen.getByRole("button", { name: "Use Cognitive Conflict" })).toBeDisabled();
+  fireEvent.click(boxes[1]); fireEvent.click(boxes[2]);
+  expect(boxes[0]).toBeDisabled();
+  expect(boxes[1]).toBeChecked(); expect(boxes[2]).toBeChecked();
+  await waitFor(() => expect(JSON.parse(localStorage.getItem(draftKey)!).focusByLesson?.[8]?.misconceptions).toHaveLength(2));
+  const saved = JSON.parse(localStorage.getItem(draftKey)!).focusByLesson[8];
+  expect(saved.misconceptions).toHaveLength(2);
+  view.unmount(); render(<TeacherView user={user} />);
+  const restored = await screen.findByRole("group", { name: /Misconception to target/ });
+  expect(within(restored).getAllByRole("checkbox").filter(box => (box as HTMLInputElement).checked)).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: "Use Cognitive Conflict" }));
+  const generate = await ready();
+  await waitFor(() => expect(generate).toBeEnabled());
+  fireEvent.click(generate);
+  expect(mocks.generate).toHaveBeenLastCalledWith(expect.objectContaining({ focus: { misconceptions: saved.misconceptions } }));
+});
+
+it("drops unknown saved focus IDs so the teacher can choose valid lesson options", async () => {
+  seedDraft({ currentStep: 2, selectedStrategies: ["cognitive conflict"], focusByLesson: { 8: { misconceptions: ["unknown-a", "unknown-b"], coreIdeas: [999] } } });
+  render(<TeacherView user={user} />);
+  const group = await screen.findByRole("group", { name: /Misconception to target/ });
+  const boxes = within(group).getAllByRole("checkbox");
+  expect(boxes.every(box => !(box as HTMLInputElement).checked && !(box as HTMLInputElement).disabled)).toBe(true);
+  fireEvent.click(boxes[0]);
+  expect(screen.getByRole("button", { name: "Use Cognitive Conflict" })).toBeEnabled();
 });

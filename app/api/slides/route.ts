@@ -1,3 +1,4 @@
+import { slideRevisionOutputFormat, slideRevisionPrompt, validSlideRevisionIndex } from "@/lib/slides/slide-revision";
 import { getAllLessons } from "@/lib/quiz-data";
 import { slideOutputFormat, slidePrompt } from "@/lib/slides/prompts";
 import { authorizeSlides, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, requestFocus, slideContext, slideDiagnosticContext, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
@@ -26,15 +27,28 @@ export async function POST(request: Request) {
     const promptVersion = body.promptVersion === undefined ? "optimized" : body.promptVersion;
     if (!isSlidePromptVersion(promptVersion)) throw new SlideRequestError("Unknown slide prompt version.");
     const operation = body.operation ?? "generate";
-    if (operation !== "generate" && operation !== "review") throw new SlideRequestError("Unknown slide operation.");
-    const draft = operation === "review" ? requestDraft(body.draft, strategy, true) : undefined;
+    if (operation !== "generate" && operation !== "review" && operation !== "review-slide") throw new SlideRequestError("Unknown slide operation.");
+    const draft = operation !== "generate" ? requestDraft(body.draft, strategy, true) : undefined;
+    if (operation === "review-slide" ? !draft || !validSlideRevisionIndex(draft, body.slideIndex) : body.slideIndex !== undefined) throw new SlideRequestError("Choose one valid slide to revise.");
     const analogyMethod = requestAnalogyMethod(body.analogyMethod, strategy, draft);
     if (body.feedback !== undefined && (typeof body.feedback !== "string" || body.feedback.length > 6000)) throw new SlideRequestError("Revision feedback must be at most 6000 characters.");
     const model = resolveSlideModel("text", body.textModel);
+    const focus = requestFocus(lesson.lessonNumber, strategy, body.focus);
     existingGenerationKey();
+    if (operation === "review-slide" && draft) {
+      const slideIndex = Number(body.slideIndex);
+      const prompt = slideRevisionPrompt(lesson, strategy, draft, slideIndex, body.feedback as string | undefined, classroomContext, focus);
+      const format = slideRevisionOutputFormat(draft, strategy, slideIndex).json_schema;
+      const { reasoning_effort } = slideTextSettings(model);
+      return await beginSlideJob(request, authorized, {
+        model, ...(reasoning_effort ? { reasoning: { effort: reasoning_effort } } : {}),
+        instructions: prompt.system, input: [{ role: "user", content: prompt.user }],
+        text: { format: { ...format, type: "json_schema", schema: format.schema! } },
+        max_output_tokens: slideTextRequestLimits(model, "generate").maxCompletionTokens,
+      }, { kind: "slide-revision", model, strategy, lessonNumber: lesson.lessonNumber, slideIndex, draft });
+    }
     const diagnostic = await slideDiagnosticContext(authorized, lesson.lessonNumber);
     const source = await loadSlideSource(strategy, analogyMethod);
-    const focus = requestFocus(lesson.lessonNumber, strategy, body.focus);
     const prompt = slidePrompt(lesson, strategy, draft, body.feedback as string | undefined, diagnostic, { version: promptVersion, referenceText: source.text, classroomContext, analogyMethod, focus });
     const limits = slideTextRequestLimits(model, "generate");
     const format = slideOutputFormat(strategy, analogyMethod).json_schema;

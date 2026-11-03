@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import type { MaterialActivity } from "@/lib/material-activities";
 
@@ -9,16 +9,44 @@ type Props = {
   media?: { image?: string; video?: string };
   preview?: boolean;
   questionInput?: boolean;
+  /** Session-only key scoped by the caller to learner, class, task and material. */
+  predictionKey?: string;
+  onVideoError?: (url: string) => void;
 };
 
-export default function MaterialActivityView({ activity, media, preview = false, questionInput = true }: Props) {
+function readPrediction(key?: string): { draft: string; recorded: string } {
+  try {
+    const saved = key ? JSON.parse(sessionStorage.getItem(key) ?? "null") : null;
+    return {
+      draft: typeof saved?.draft === "string" && saved.draft.length <= 2000 ? saved.draft : "",
+      recorded: typeof saved?.recorded === "string" && saved.recorded.trim() && saved.recorded.length <= 2000 ? saved.recorded : "",
+    };
+  } catch { return { draft: "", recorded: "" }; }
+}
+
+function ActivityReader({ activity, media, preview = false, questionInput = true, predictionKey, onVideoError }: Props) {
+  const storageKey = !preview && activity.stages.some(stage => stage.id === "prediction") ? predictionKey : undefined;
+  const [initialPrediction] = useState(() => readPrediction(storageKey));
   const [visibleCount, setVisibleCount] = useState(1);
-  const [prediction, setPrediction] = useState("");
+  const [prediction, setPrediction] = useState(initialPrediction.draft);
+  const [recordedPrediction, setRecordedPrediction] = useState(initialPrediction.recorded);
   const [question, setQuestion] = useState("");
   const fieldId = useId();
   const count = preview ? activity.stages.length : visibleCount;
   const currentStage = activity.stages[count - 1];
-  const canAdvance = currentStage.id !== "prediction" || prediction.trim().length > 0;
+  const canAdvance = currentStage.id !== "prediction" || (recordedPrediction || prediction).trim().length > 0;
+
+  useEffect(() => {
+    if (!storageKey) return;
+    try { sessionStorage.setItem(storageKey, JSON.stringify({ draft: prediction, recorded: recordedPrediction })); }
+    catch { /* Keep the active reader usable when browser storage is blocked. */ }
+  }, [storageKey, prediction, recordedPrediction]);
+
+  function advance() {
+    if (!canAdvance) return;
+    if (currentStage.id === "prediction" && !recordedPrediction) setRecordedPrediction(prediction.trim());
+    setVisibleCount(count + 1);
+  }
 
   return (
     <section className="mt-3 min-w-0 space-y-4" aria-label="Inquiry activity">
@@ -29,8 +57,8 @@ export default function MaterialActivityView({ activity, media, preview = false,
         return (
         <section key={stage.id} aria-label={stage.title} className="min-w-0 border-l-2 border-slate-200 pl-3">
           <h4 className="break-words text-sm font-semibold text-slate-900">{stage.title}</h4>
-          {!preview && stage.id === "compare" && prediction && (
-            <div className="mt-3 text-sm text-slate-700"><p className="font-semibold">Your prediction</p><p className="whitespace-pre-wrap break-words">{prediction}</p></div>
+          {!preview && stage.id === "compare" && recordedPrediction && (
+            <div className="mt-3 text-sm text-slate-700"><p className="font-semibold">Your prediction</p><p className="whitespace-pre-wrap break-words">{recordedPrediction}</p></div>
           )}
           <p className="mt-1 whitespace-pre-line break-words text-sm leading-6 text-slate-700">{stage.text}</p>
           {showImage && media?.image && (
@@ -48,25 +76,31 @@ export default function MaterialActivityView({ activity, media, preview = false,
               </figcaption>
             </figure>
           )}
-          {index === activity.image.revealAt && media?.video && <video src={media.video} controls playsInline preload="metadata" aria-label="Activity video" className="mt-3 aspect-square w-full max-w-md rounded-md bg-black" />}
+          {index === activity.image.revealAt && media?.video && <video src={media.video} controls playsInline preload="metadata" aria-label="Activity video" className="mt-3 aspect-square w-full max-w-md rounded-md bg-black" onError={event => onVideoError?.(event.currentTarget.getAttribute("src") ?? "")} />}
           {!preview && stage.id === "question" && !questionInput && <p className="mt-3 text-sm font-medium text-slate-700">Record your scientific question in Your questions below.</p>}
           {!preview && (stage.id === "prediction" || (stage.id === "question" && questionInput)) && (
             <div className="mt-3">
               <label htmlFor={`${fieldId}-${stage.id}`} className="text-sm font-medium text-slate-700">{stage.id === "prediction" ? "Your prediction" : "Your scientific question"}</label>
-              <textarea id={`${fieldId}-${stage.id}`} value={stage.id === "prediction" ? prediction : question} maxLength={2000} rows={3}
-                readOnly={stage.id === "prediction" && count > index + 1}
-                onChange={event => stage.id === "prediction" ? setPrediction(event.target.value) : setQuestion(event.target.value)}
+              <textarea id={`${fieldId}-${stage.id}`} value={stage.id === "prediction" ? recordedPrediction || prediction : question} maxLength={2000} rows={3}
+                readOnly={stage.id === "prediction" && !!recordedPrediction}
+                onChange={event => { if (stage.id === "prediction") { if (!recordedPrediction) setPrediction(event.target.value); } else setQuestion(event.target.value); }}
                 className="mt-1 block w-full resize-y rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 focus:outline-rose-600 read-only:bg-slate-50" />
             </div>
           )}
         </section>
       ); })}
       {!preview && count < activity.stages.length && (
-        <button type="button" title={!canAdvance ? "Write your prediction first" : "Continue"} disabled={!canAdvance} onClick={() => setVisibleCount(count + 1)}
+        <button type="button" title={!canAdvance ? "Write your prediction first" : "Continue"} disabled={!canAdvance} onClick={advance}
           className="inline-flex min-h-9 items-center gap-1 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:text-slate-400">
           Continue <ChevronRight size={18} aria-hidden="true" />
         </button>
       )}
     </section>
   );
+}
+
+export default function MaterialActivityView(props: Props) {
+  // Polling may replace the activity object. Reset only when its learner scope
+  // or preview mode changes, so predictions never cross accounts or materials.
+  return <ActivityReader key={JSON.stringify([props.predictionKey, !!props.preview])} {...props} />;
 }

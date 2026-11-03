@@ -1,10 +1,10 @@
-import { CURRENT_MODEL, TEXT_MODELS, IMAGE_MODELS, slideTextModelLabel, type SlideModelCatalog } from "./models";
+import { DEFAULT_IMAGE_MODEL, RETIRED_IMAGE_MODEL_MESSAGE, CURRENT_MODEL, TEXT_MODELS, IMAGE_MODELS, slideTextModelLabel, type SlideModelCatalog } from "./models";
 import { SlideRequestError } from "./server";
 
 function configuredModels() {
   return {
     text: process.env.OPENAI_SLIDES_MODEL?.trim() || "gpt-6.1-sol",
-    image: process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1",
+    image: process.env.OPENAI_IMAGE_MODEL?.trim() || DEFAULT_IMAGE_MODEL,
   };
 }
 
@@ -17,7 +17,12 @@ export function slideModelCatalog(): SlideModelCatalog {
 }
 
 export function resolveSlideModel(kind: "text" | "image", selection: unknown): string {
-  if (selection === undefined || selection === CURRENT_MODEL) return configuredModels()[kind];
+  if (selection === undefined || selection === CURRENT_MODEL) {
+    const model = configuredModels()[kind];
+    if (kind === "image" && model === "gpt-image-1") throw new SlideRequestError(RETIRED_IMAGE_MODEL_MESSAGE, 503);
+    return model;
+  }
+  if (kind === "image" && selection === "gpt-image-1") throw new SlideRequestError(RETIRED_IMAGE_MODEL_MESSAGE);
   const allowed: readonly string[] = kind === "text" ? TEXT_MODELS : IMAGE_MODELS;
   if (typeof selection !== "string" || !allowed.includes(selection)) throw new SlideRequestError(`Choose a supported ${kind} model.`);
   return selection;

@@ -4,6 +4,13 @@ import { imageCheckKey, imageReferenceId, imageSourcePrompt, textCheckKey } from
 
 const slide = (title: string, body: string, task: string): Omit<TeachingSlide, "stage"> => ({ title, body, task, teacherNotes: ["Allow time for students to write before advancing."] });
 const contents: Record<SlideStrategy, Omit<TeachingSlide, "stage">[]> = {
+  "engaged critiquing": [
+    slide("A claim about a steel ball", 'Someone claims, "Steel never changes shape when it hits something."', "Do you agree with the claim and why?"),
+    slide("Look at the contact", "This schematic illustrates a small temporary shape change during contact.", "Which visible detail bears on the claim?"),
+    slide("Judge the claim", "Return to the claim about steel and the illustrated contact.", "Does the evidence support the claim or contradict it?"),
+    slide("Improve the claim", "Keep the illustrated contact in mind.", "Rewrite the claim so it fits the evidence."),
+    slide("Your next question", "", "Write one scientific question about the contact that you still want to investigate."),
+  ],
   analogy: [
     slide("Tracking energy transfers", "A spring can launch a cart, but its energy is invisible; moving counters between trays may help us follow the transfer.", "Point to where the counters are now and where they could move."),
     slide("Connect the trays to a launcher", "A compressed spring can launch a cart; consider energy in the spring and cart alongside the counters and trays.", "Which parts of the counter example could help you track energy?"),
@@ -28,7 +35,10 @@ const contents: Record<SlideStrategy, Omit<TeachingSlide, "stage">[]> = {
 };
 
 export function slideFixture(strategy: SlideStrategy): SlideDraft {
-  const visuals = strategy === "analogy" ? [
+  const visuals = strategy === "engaged critiquing" ? [
+    { id: "claim", prompt: "A steel ball just above a steel plate before contact. One scene without text or outcome.", caption: "A steel ball before contact", alt: "A round steel ball is held just above a steel plate." },
+    { id: "evidence", prompt: "Schematic close-up of the same steel ball and plate during contact, with a small exaggerated flattening at contact. No text.", caption: "Schematic: a shape change during contact", alt: "The steel ball and plate deform slightly where they touch." },
+  ] : strategy === "analogy" ? [
     { id: "analogue", prompt: "Nine counters distributed between two shallow trays, five on the left and four on the right. One scene.", caption: "Nine counters shared between two trays", alt: "Two trays contain nine counters altogether." },
     { id: "target", prompt: "Side view: a blue cart held still against a spring attached to a fixed wall at left on a horizontal track. The spring has six coils, slightly compressed to 60 mm. Single setup, no time panels, no text or movement arrows.", caption: "Spring slightly compressed; cart held still", alt: "A blue cart is held against a slightly compressed spring attached to the left wall." },
     { id: "variation", prompt: "Same side view, blue cart, horizontal track and fixed wall on the left as baseline. The same six-coil spring is compressed further, to 30 mm; cart remains held still against it. Only initial compression changes. No text or movement arrows.", caption: "Same spring compressed further; cart held still", alt: "The same cart is held closer to the wall with the same spring more compressed." },
@@ -43,7 +53,7 @@ export const tinyImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB
 export function deckFixture(strategy: SlideStrategy): SlideDeck {
   const draft = slideFixture(strategy);
   const deck: SlideDeck = { id: "test-deck", lessonNumber: strategy === "analogy" ? 8 : 3, strategy, draft,
-    assets: Object.fromEntries(draft.visuals.map(visual => [visual.id, { data: tinyImage, width: 1536, height: 1024, sourcePrompt: imageSourcePrompt(draft, visual.id), ...(visual.id === "variation" ? { referenceData: tinyImage } : {}) }])) };
+    assets: Object.fromEntries(draft.visuals.map(visual => [visual.id, { data: tinyImage, width: 1536, height: 1024, sourcePrompt: imageSourcePrompt(draft, visual.id), ...(imageReferenceId(draft, visual.id) ? { referenceData: tinyImage } : {}) }])) };
   deck.checks = { text: { key: textCheckKey(deck), issues: [] }, images: Object.fromEntries(draft.visuals.map(visual => [visual.id, { key: imageCheckKey(deck, visual.id), imageData: tinyImage, issues: [] }])) };
   return deck;
 }

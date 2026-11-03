@@ -140,8 +140,8 @@ export async function POST(request: Request) {
     }
 
     // The client can retry a failed or timed-out request with `fallback: true`.
-    // Source-aligned materials use gpt-4.1; the legacy fourth strategy retains
-    // gpt-4o-mini. Separate HTTP requests allow a retry after an upstream proxy
+    // All four strategies use a structured activity and semantic review.
+    // Separate HTTP requests allow a retry after an upstream proxy
     // has closed the first response; the actual hosting timeout is external.
     const primaryModel = process.env.OPENAI_MODEL ?? "gpt-5-mini";
     if (!Array.isArray(selectedStrategies) || selectedStrategies.some(strategy => typeof strategy !== "string") ||
@@ -150,7 +150,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid strategy or class context." }, { status: 400 });
     }
     const strategies = [...new Set(selectedStrategies.filter(Boolean))];
-    if (strategies.some(strategy => !MATERIAL_STRATEGIES.includes(strategy) && strategy !== "engaged critiquing")) {
+    if (strategies.some(strategy => !MATERIAL_STRATEGIES.includes(strategy))) {
       return NextResponse.json({ error: "Unsupported engagement strategy." }, { status: 400 });
     }
     if (strategies.length === 0) {

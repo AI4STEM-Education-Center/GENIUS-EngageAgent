@@ -169,6 +169,10 @@ describe("teaching slide contract", () => {
       expect(prompt.system).toContain("exactly FIVE pages: phenomenon, prediction, discrepant, compare, question");
       expect(prompt.system).not.toContain("load_paths_analogy_soc.pptx");
     }
+    else if (strategy === "engaged critiquing") {
+      expect(prompt.system).toContain("claim -> evidence -> critique -> revise -> question");
+      expect(prompt.system).not.toContain("load_paths_analogy_soc.pptx");
+    }
     else {
       expect(prompt.system).toContain("load_paths_analogy_soc.pptx");
       expect(prompt.system).toContain("Five content slides TOTAL");
@@ -244,7 +248,7 @@ describe("teaching slide contract", () => {
       expect(prompt.system).toContain("briefly recalls the concrete unresolved observation");
     }
     const generated = slidePrompt(lesson, strategy);
-    expect(generated.system).toContain(`docs/references/strategy-prompts/${strategy.replaceAll(" ", "-")}${strategy === "analogy" ? "" : "-20261005"}.txt`);
+    expect(generated.system).toContain(`docs/references/strategy-prompts/${strategy === "engaged critiquing" ? "engaged-critiquing-v84-20261103" : `${strategy.replaceAll(" ", "-")}${strategy === "analogy" ? "" : "-20261005"}`}.txt`);
   });
   it("requires the source's explicit prediction/observation comparison without inventing the learner's answer", () => {
     const draft = slideFixture("cognitive conflict");

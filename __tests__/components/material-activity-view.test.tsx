@@ -1,13 +1,31 @@
 // @vitest-environment jsdom
 import React from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import MaterialActivityView from "@/app/components/MaterialActivityView";
 import { parseMaterialActivity } from "@/lib/material-activities";
+import { buildPublishedContentState } from "@/lib/published-content";
 import { analogyActivity, conflictActivity, bridgingActivity } from "../fixtures/material-activities";
 
-afterEach(cleanup);
+beforeEach(() => sessionStorage.clear());
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe("student-facing inquiry text and image", () => {
+  it("reads an already-published video through the prediction and question steps without exposing its schema key", () => {
+    const question = "Write one scientific question that came from comparing your prediction with the observedOutcome. Start your question with Why, How, or Under what conditions.";
+    const activity = { ...conflictActivity, stages: conflictActivity.stages.map(stage => stage.id === "question" ? { ...stage, text: question } : stage) };
+    const published = buildPublishedContentState([{ content_item_id: "video", content_json: JSON.stringify({ title: "Ball during contact", body: question, strategy: "cognitive conflict", activity, media: { video: "https://example.org/contact.mp4" } }) }], []);
+    render(<MaterialActivityView activity={published.contentItems[0].activity!} media={published.mediaByItemId.video} />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.queryByLabelText("Activity video")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "It stays round." } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByLabelText("Activity video")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByText(question.replace("observedOutcome", "observed result"))).toBeTruthy();
+    expect(screen.getByLabelText("Your scientific question")).toBeTruthy();
+    expect(screen.queryByText(/observedOutcome/)).toBeNull();
+  });
   it("requires a written prediction before revealing the discrepant result and preserves it for comparison", () => {
     render(<MaterialActivityView activity={conflictActivity} media={{ image: "https://example.org/result.webp" }} />);
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
@@ -95,5 +113,103 @@ describe("student-facing inquiry text and image", () => {
     expect(comparison.getByText(/Hypothetical positions/).textContent).not.toContain("observed in the illustration");
     expect(comparison.getByText("I think it stops.")).toBeDefined();
     expect((screen.getByLabelText("Your prediction") as HTMLTextAreaElement).readOnly).toBe(true);
+  });
+
+  it("restores a committed prediction after remount, locks it on revisit and replays it before the observed outcome", () => {
+    const predictionKey = `engage:material-prediction:${JSON.stringify(["student-a", "class-a", "task-a", "video-a"])}`;
+    const props = { activity: conflictActivity, predictionKey, media: { video: "https://example.org/result.mp4" } };
+    const view = render(<MaterialActivityView {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: " The ball stays round. " } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(JSON.parse(sessionStorage.getItem(predictionKey)!)).toEqual({ draft: " The ball stays round. ", recorded: "The ball stays round." });
+    view.unmount();
+    render(<MaterialActivityView {...props} />);
+    expect(screen.queryByLabelText("Activity video")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    const prediction = screen.getByLabelText("Your prediction") as HTMLTextAreaElement;
+    expect(prediction.value).toBe("The ball stays round.");
+    expect(prediction.readOnly).toBe(true);
+    fireEvent.change(prediction, { target: { value: "Changed after seeing the evidence" } });
+    expect(prediction.value).toBe("The ball stays round.");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    const compare = within(screen.getByRole("region", { name: "Compare your ideas" }));
+    const recorded = compare.getByText("The ball stays round.");
+    const outcome = compare.getByText(/What we observed in the activity:/);
+    expect(recorded.compareDocumentPosition(outcome) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("restores an unfinished prediction as editable and still requires an explicit continue before revealing evidence", () => {
+    const props = { activity: conflictActivity, predictionKey: "unfinished-prediction", media: { image: "https://example.org/result.webp" } };
+    const view = render(<MaterialActivityView {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "Maybe it changes shape." } });
+    view.unmount();
+    render(<MaterialActivityView {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    const prediction = screen.getByLabelText("Your prediction") as HTMLTextAreaElement;
+    expect(prediction.value).toBe("Maybe it changes shape.");
+    expect(prediction.readOnly).toBe(false);
+    expect(screen.queryByRole("img")).toBeNull();
+    fireEvent.change(prediction, { target: { value: " " } });
+    expect(screen.getByRole("button", { name: "Continue" })).toHaveProperty("disabled", true);
+  });
+
+  it.each([0, 1, 2, 3])("isolates predictions when scope dimension %s changes without remounting the parent", dimension => {
+    const scope = ["student-a", "class-a", "task-a", "video-a"];
+    const key = (parts: string[]) => `engage:material-prediction:${JSON.stringify(parts)}`;
+    const originalKey = key(scope);
+    sessionStorage.setItem(originalKey, JSON.stringify({ draft: "My private prediction.", recorded: "My private prediction." }));
+    const view = render(<MaterialActivityView activity={conflictActivity} predictionKey={originalKey} />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByLabelText("Your prediction")).toHaveProperty("value", "My private prediction.");
+    const otherScope = scope.map((value, index) => index === dimension ? "other" : value);
+    view.rerender(<MaterialActivityView activity={conflictActivity} predictionKey={key(otherScope)} />);
+    expect(screen.queryByLabelText("Your prediction")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByLabelText("Your prediction")).toHaveProperty("value", "");
+    expect(screen.getByRole("button", { name: "Continue" })).toHaveProperty("disabled", true);
+    expect(JSON.parse(sessionStorage.getItem(originalKey)!).recorded).toBe("My private prediction.");
+    view.rerender(<MaterialActivityView activity={conflictActivity} predictionKey={originalKey} />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByLabelText("Your prediction")).toHaveProperty("value", "My private prediction.");
+  });
+
+  it("keeps the prediction gate and comparison usable in memory when session storage is blocked", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new DOMException("Storage blocked", "SecurityError"); });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("Storage blocked", "SecurityError"); });
+    render(<MaterialActivityView activity={conflictActivity} predictionKey="blocked-storage" />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("button", { name: "Continue" })).toHaveProperty("disabled", true);
+    fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "It changes shape." } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByLabelText("Your prediction")).toHaveProperty("readOnly", true);
+    expect(within(screen.getByRole("region", { name: "Compare your ideas" })).getByText("It changes shape.")).toBeTruthy();
+  });
+
+  it("does not access prediction storage during teacher preview or when no scope is supplied", () => {
+    const read = vi.spyOn(Storage.prototype, "getItem");
+    const write = vi.spyOn(Storage.prototype, "setItem");
+    const view = render(<MaterialActivityView activity={conflictActivity} predictionKey="student-scope" preview />);
+    expect(read).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    view.rerender(<MaterialActivityView activity={conflictActivity} />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "A temporary prediction." } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(read).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it.each(["not-json", JSON.stringify({ draft: 123, recorded: " " }), JSON.stringify({ draft: "x".repeat(2001), recorded: "x".repeat(2001) })])("ignores malformed or oversized saved prediction %s", saved => {
+    sessionStorage.setItem("invalid-prediction", saved);
+    render(<MaterialActivityView activity={conflictActivity} predictionKey="invalid-prediction" />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByLabelText("Your prediction")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("Your prediction")).toHaveProperty("readOnly", false);
+    expect(screen.getByRole("button", { name: "Continue" })).toHaveProperty("disabled", true);
   });
 });

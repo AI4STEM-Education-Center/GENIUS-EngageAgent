@@ -77,8 +77,10 @@ describe("resolveStrategyFocus", () => {
   it("returns null when no focus is sent", () => {
     expect(resolveStrategyFocus(8, "analogy", undefined)).toBeNull();
     expect(resolveStrategyFocus(8, "analogy", null)).toBeNull();
-    // Only the other kind was sent: nothing applies to this strategy.
-    expect(resolveStrategyFocus(8, "analogy", { misconceptions: ["3-a"] })).toBeNull();
+  });
+
+  it("rejects focus that does not match the selected strategy", () => {
+    expect(() => resolveStrategyFocus(8, "analogy", { misconceptions: ["3-a"] })).toThrow(FocusError);
   });
 
   it("turns codes and indexes into the lesson's own wording", () => {

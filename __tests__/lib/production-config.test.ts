@@ -11,6 +11,12 @@ describe("Amplify production configuration preflight", () => {
   it("accepts the canonical defaults and an AWS runtime identity without static keys", () => {
     expect(productionConfigErrors(ready)).toEqual([]);
   });
+  it("rejects a retired production image-model override before publishing a broken build", () => {
+    expect(productionConfigErrors({ ...ready, OPENAI_IMAGE_MODEL: " gpt-image-1 " }))
+      .toEqual([expect.stringContaining("OPENAI_IMAGE_MODEL uses the retired gpt-image-1")]);
+    expect(productionConfigErrors({ ...ready, OPENAI_IMAGE_MODEL: "gpt-image-2" })).toEqual([]);
+    expect(productionConfigErrors({ ...ready, OPENAI_IMAGE_MODEL: " " })).toEqual([]);
+  });
   it("accepts a complete credential pair and matching custom HTTPS domains", () => {
     expect(productionConfigErrors({ ...ready, ENGAGE_AWS_ACCESS_KEY_ID: "key", ENGAGE_AWS_SECRET_ACCESS_KEY: "secret",
       ENGAGE_APP_URL: "https://engage.example.edu", GENIUS_URL: "https://learn.example.edu",

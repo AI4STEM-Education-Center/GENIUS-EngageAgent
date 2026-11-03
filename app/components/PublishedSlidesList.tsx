@@ -7,8 +7,8 @@ import type { ContentItem } from "@/lib/types";
 import PublishedSlidesReader from "./PublishedSlidesReader";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
 
-export default function PublishedSlidesList({ classId, assignmentId, refreshVersion }: {
-  classId: string; assignmentId: string; refreshVersion: number;
+export default function PublishedSlidesList({ classId, assignmentId, refreshVersion, onCountChange }: {
+  classId: string; assignmentId: string; refreshVersion: number; onCountChange?: (count: number) => void;
 }) {
   const [items, setItems] = useState<ContentItem[]>([]);
   const [opened, setOpened] = useState<string | null>(null);
@@ -23,7 +23,9 @@ export default function PublishedSlidesList({ classId, assignmentId, refreshVers
         if (!response.ok) throw new Error("Published slides could not be loaded.");
         const data = await response.json() as { items?: PublishedItemResponse[] };
         if (controller.signal.aborted) return;
-        setItems(buildPublishedContentState(data.items ?? [], []).contentItems.filter((item) => Boolean(item.slides)));
+        const slides = buildPublishedContentState(data.items ?? [], []).contentItems.filter((item) => Boolean(item.slides));
+        setItems(slides);
+        onCountChange?.(slides.length);
         setError("");
       } catch {
         if (!controller.signal.aborted) setError("Published slides could not be loaded. Please try again.");
@@ -31,7 +33,7 @@ export default function PublishedSlidesList({ classId, assignmentId, refreshVers
     }
     void load();
     return () => controller.abort();
-  }, [classId, assignmentId, refreshVersion, retry]);
+  }, [classId, assignmentId, refreshVersion, retry, onCountChange]);
 
   if (!items.length && !error) return null;
   return <section aria-label="Published slides" className="space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 sm:p-6">

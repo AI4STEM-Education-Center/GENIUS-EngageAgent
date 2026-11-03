@@ -6,7 +6,7 @@ it("uses the Slides Sol default without changing or inheriting the generic proje
   vi.stubEnv("OPENAI_MODEL", "gpt-5-nano"); vi.stubEnv("OPENAI_SLIDES_MODEL", "   ");
   expect(resolveSlideModel("text", "current")).toBe("gpt-6.1-sol");
   expect(resolveSlideModel("text", undefined)).toBe("gpt-6.1-sol");
-  expect(resolveSlideModel("image", undefined)).toBe("gpt-image-1");
+  expect(resolveSlideModel("image", undefined)).toBe("gpt-image-2");
   expect(process.env.OPENAI_MODEL).toBe("gpt-5-nano");
   expect(resolveSlideModel("text", "gpt-4.1")).toBe("gpt-4.1");
   expect(slideModelCatalog().text[0].label).toBe("Slides default (gpt-6.1-sol)");
@@ -37,4 +37,12 @@ it("requires the EXISTING key and keeps it out of the catalog", () => {
   vi.stubEnv("OPENAI_API_KEY", "existing-project-key");
   expect(existingGenerationKey()).toBe("existing-project-key");
   expect(JSON.stringify(slideModelCatalog())).not.toContain("existing-project-key");
+});
+
+it("rejects a retired configured image model without silently substituting a different one", () => {
+  vi.stubEnv("OPENAI_IMAGE_MODEL", "gpt-image-1");
+  expect(() => resolveSlideModel("image", "current")).toThrow("no longer available");
+  expect(() => resolveSlideModel("image", "gpt-image-1")).toThrow("no longer available");
+  expect(resolveSlideModel("image", "gpt-image-2")).toBe("gpt-image-2");
+  expect(slideModelCatalog().image.map(option => option.id)).not.toContain("gpt-image-1");
 });

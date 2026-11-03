@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     if (!item || typeof item !== "object" || !validVideoScopeId(item.id)) {
       return NextResponse.json({ error: "A content item is required." }, { status: 400 });
     }
-    if ((item.strategy === "cognitive conflict" || item.strategy === "experience bridging") &&
+    if ((item.strategy === "cognitive conflict" || item.strategy === "experience bridging" || item.strategy === "engaged critiquing") &&
         item.activity !== undefined && !parseMaterialActivity(item.activity, item.strategy)) {
       return NextResponse.json({ error: "The activity does not meet its stage and media requirements." }, { status: 400 });
     }

@@ -1,5 +1,19 @@
 import type { MaterialActivity } from "@/lib/material-activities";
 
+export const critiquingActivity: MaterialActivity = {
+  version: 1,
+  stages: [
+    { id: "claim", title: "A claim about a steel ball", text: 'Someone claims, "Steel never changes shape when it hits something." Do you agree, and why?' },
+    { id: "evidence", title: "Look at the contact", text: "This schematic illustrates a small shape change where the ball touches the plate. Which visible detail bears on the claim?" },
+    { id: "critique", title: "Judge the claim", text: "Does the evidence support the claim, contradict it, or leave it unsettled? Use a detail from the illustration." },
+    { id: "revise", title: "Improve the claim", text: "Rewrite the claim so that it fits the evidence about the contact." },
+    { id: "question", title: "Your next question", text: "Write one scientific question about the contact that you still want to investigate." },
+  ],
+  image: { revealAt: 1, scene: "A schematic close-up of a steel ball touching a steel plate.", panels: [
+    { description: "One schematic contact moment showing the same steel ball and plate, with a small exaggerated flattening at their contact point. No text, arrows or verdict.", caption: "Schematic: a shape change during contact", alt: "The steel ball and plate deform slightly where they touch." },
+  ] },
+};
+
 // Authored fixtures, not claims about live model output.
 export const analogyActivity: MaterialActivity = {
   version: 1,

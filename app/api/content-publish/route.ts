@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { upsertContentPublish, listMedia, listPublishedContent } from "@/lib/nosql";
+import { resolveGalleryContentMedia } from "@/lib/material-gallery-server";
 
 type SharedContentMedia = {
   image?: string;
@@ -95,10 +96,13 @@ export async function GET(request: Request) {
   }, {});
 
   return NextResponse.json({
-    items: items.map((item) => {
+    items: await Promise.all(items.map(async (item) => {
       const embeddedMedia = extractEmbeddedMedia(item.content_json);
       const mergedMedia = {
         ...(embeddedMedia ?? {}),
+        ...(await resolveGalleryContentMedia(classId, assignmentId, item.content_item_id) ?? {}),
+        // A teacher may regenerate an adapted copy. Saved task media wins over
+        // the immutable Gallery source; the latter only refreshes fallback URLs.
         ...(mediaByItem[item.content_item_id] ?? {}),
       };
 
@@ -106,7 +110,7 @@ export async function GET(request: Request) {
         ...item,
         ...(Object.keys(mergedMedia).length > 0 ? { media: mergedMedia } : {}),
       };
-    }),
+    })),
   });
 }
 
