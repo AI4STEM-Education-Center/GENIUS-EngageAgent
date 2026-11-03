@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import TeacherView from "@/app/components/TeacherView";
 import type { UserContext } from "@/lib/auth";
 
@@ -99,6 +99,16 @@ it("shows the v8.3 header and four teacher steps, with the dashboard as Step 4 (
   expect(await screen.findByText("Assignment summary")).toBeTruthy();
   expect(stepTab(/Questions & discussion/).getAttribute("aria-current")).toBe("step");
   expect(screen.queryByText("Back to workflow")).toBeNull();
+});
+
+it("leaves out the top menu inside the GENIUS iframe, which has its own (#172)", async () => {
+  const top = vi.spyOn(window, "top", "get").mockReturnValue({} as Window);
+  onTestFinished(() => top.mockRestore());
+  render(<TeacherView user={{ ...teacher, classId: "ea-class-native" }} shell={{ taskTitle: "Collisions" }} />);
+  await screen.findByRole("button", { name: /Lesson 1 0 questions/ });
+  expect(screen.queryByRole("banner")).toBeNull();
+  fireEvent.click(stepTab(/Questions & discussion/));
+  expect(await screen.findByText("Assignment summary")).toBeTruthy();
 });
 
 it("opens Step 4 when asked to, even with a saved draft on another step", async () => {
