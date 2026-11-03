@@ -66,9 +66,10 @@ export async function guardWorkspaceRequest(request: Request, context?: { classI
     // Native guests still require the native workspace membership policy above.
     const embeddedGuest = user.role === "guest" && request.headers.has("authorization") && !isWorkspaceClass(classId);
     if (user.role !== "student" && !embeddedGuest) return deny("Student or teacher account required.", 403);
-    const ownRecords = ["/api/student-answers", "/api/content-rating", "/api/review-questions", "/api/activity-status", "/api/survey-responses"].includes(url.pathname);
+    const ownRecords = ["/api/student-answers", "/api/content-rating", "/api/review-questions", "/api/activity-status", "/api/survey-responses", "/api/quiz-report"].includes(url.pathname);
     if (ownRecords && fields.studentId !== user.geniusId) return deny("You can only access your own responses.", 403);
-    if (!ownRecords && (write || !["/api/quiz-status", "/api/content-publish", "/api/surveys"].includes(url.pathname))) return deny("Teacher access required.", 403);
+    if (!ownRecords && (write || !["/api/quiz-status", "/api/content-publish", "/api/surveys", "/api/question-board"].includes(url.pathname))) return deny("Teacher access required.", 403);
+    if (write && url.pathname === "/api/quiz-report") return deny("Teacher access required.", 403);
     if (write && url.pathname === "/api/survey-responses" && fields.studentName !== undefined && fields.studentName !== user.name) return deny("Invalid student identity.", 403);
     if (write && url.pathname === "/api/student-answers") {
       const quiz = await getQuizStatus(classId, assignmentId);

@@ -68,6 +68,8 @@ export type QuizItem = {
   correct_answer?: string;
   matched_misconception?: string;
   distractor_misconception_map?: Partial<Record<string, string>>;
+  /** Why the correct answer is right, shown in the student's feedback report (#182). */
+  explanation?: string;
 };
 
 export type SurveyResponseField = {

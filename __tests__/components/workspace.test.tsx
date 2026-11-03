@@ -7,9 +7,9 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push, replac
 const teacher = { geniusId: "teacher", userId: "teacher", role: "teacher", name: "Teacher", email: null };
 const student = { ...teacher, geniusId: "student", userId: "student", role: "student" };
 vi.mock("@/app/components/AuthContext", () => ({ useAuth: () => ({ user: mocks.role === "teacher" ? teacher : student, loading: false, error: null }) }));
-type ViewProps = { user: { classId: string; assignmentId: string }; initialMaterialFormat?: string; initialStep?: number; shell?: { homeHref?: string; classHref?: string; canSignOut?: boolean } };
-vi.mock("@/app/components/TeacherView", () => ({ default: ({ user, initialMaterialFormat, initialStep, shell }: ViewProps) => <p data-class-id={user.classId}
-  data-initial-material-format={initialMaterialFormat} data-initial-step={initialStep} data-home-href={shell?.homeHref} data-class-href={shell?.classHref}
+type ViewProps = { user: { classId: string; assignmentId: string }; initialMaterialFormat?: string; initialStep?: number; initialView?: string; shell?: { homeHref?: string; classHref?: string; canSignOut?: boolean } };
+vi.mock("@/app/components/TeacherView", () => ({ default: ({ user, initialMaterialFormat, initialStep, initialView, shell }: ViewProps) => <p data-class-id={user.classId}
+  data-initial-material-format={initialMaterialFormat} data-initial-step={initialStep} data-initial-view={initialView} data-home-href={shell?.homeHref} data-class-href={shell?.classHref}
   data-can-sign-out={String(!!shell?.canSignOut)}>Teacher workflow {user.assignmentId}</p> }));
 vi.mock("@/app/components/StudentView", () => ({ default: () => <p>Student workflow</p> }));
 beforeEach(() => { mocks.query = ""; mocks.role = "teacher"; mocks.fetch.mockReset(); mocks.push.mockReset(); mocks.replace.mockReset(); vi.stubGlobal("fetch", mocks.fetch); });
@@ -51,11 +51,13 @@ it("renders the existing workflow only after the server verifies the selected co
   expect(workflow.getAttribute("data-can-sign-out")).toBe("true");
   expect(screen.queryByRole("banner")).toBeNull();
 });
-it("opens old dashboard links on Step 4 of the teacher workflow", async () => {
+it("opens old dashboard links on the teacher's assignment dashboard", async () => {
   mocks.query = "classId=ea-class-a&assignmentId=ea-task-a&view=dashboard";
   mocks.fetch.mockResolvedValue(reply({ user: { ...teacher, classId: "ea-class-a", assignmentId: "ea-task-a" } }));
   render(<Workspace />);
-  expect((await screen.findByText("Teacher workflow ea-task-a")).getAttribute("data-initial-step")).toBe("4");
+  const workflow = await screen.findByText("Teacher workflow ea-task-a");
+  expect(workflow.getAttribute("data-initial-view")).toBe("dashboard");
+  expect(workflow.getAttribute("data-initial-step")).toBeNull();
 });
 it("opens old slides links inside the teacher workflow with Slides selected", async () => {
   mocks.query = "classId=ea-class-a&assignmentId=ea-task-a&view=slides";

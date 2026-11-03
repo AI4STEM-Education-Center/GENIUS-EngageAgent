@@ -142,6 +142,21 @@ type Store = {
   surveys: SurveyRecord[];
   survey_responses: SurveyResponseRecord[];
   survey_analyses: SurveyAnalysisRecord[];
+  task_docs: TaskDocRecord[];
+};
+
+/**
+ * One small document per learning task and kind, for state that is a single
+ * value per task (#182): the question analysis, the Class Question Board and
+ * the quiz-report release. Writing replaces the whole document.
+ */
+export type TaskDocKind = "question_analysis" | "question_board" | "report_release";
+type TaskDocRecord = {
+  class_id: string;
+  assignment_id: string;
+  kind: TaskDocKind;
+  data: unknown;
+  updated_at: string;
 };
 
 type TeacherAnnotation = {
@@ -180,6 +195,7 @@ const emptyStore: Store = {
   surveys: [],
   survey_responses: [],
   survey_analyses: [],
+  task_docs: [],
 };
 const dataDir = process.env.ENGAGE_LOCAL_DATA_DIR || path.join(process.cwd(), "data");
 const storePath = path.join(dataDir, "engage-nosql.json");
@@ -312,6 +328,9 @@ const loadStore = async () => {
       }
       if (!Array.isArray(parsed.survey_analyses)) {
         parsed.survey_analyses = [];
+      }
+      if (!Array.isArray(parsed.task_docs)) {
+        parsed.task_docs = [];
       }
       storeCache = parsed;
       return parsed;
@@ -2302,4 +2321,50 @@ export const getSurveyAnalysis = async (
         a.survey_id === surveyId,
     ) ?? null
   );
+};
+
+/* ------------------------------------------------------------------ */
+/*  Per-task documents (#182)                                          */
+/* ------------------------------------------------------------------ */
+
+const taskDocSortKey = (assignmentId: string, kind: TaskDocKind) => `TASK_DOC#ASSIGN#${assignmentId}#KIND#${kind}`;
+
+export const getTaskDoc = async <T>(classId: string, assignmentId: string, kind: TaskDocKind): Promise<T | null> => {
+  if (useDynamoDb) {
+    const client = getDynamoClient();
+    if (!client) return null;
+    const result = await client.send(new GetCommand({
+      TableName: dynamoTableName,
+      Key: { [pkField]: `CLASS#${classId}`, [skField]: taskDocSortKey(assignmentId, kind) },
+    }));
+    return (result.Item?.data as T | undefined) ?? null;
+  }
+  const store = await loadStore();
+  const doc = store.task_docs.find(d => d.class_id === classId && d.assignment_id === assignmentId && d.kind === kind);
+  return (doc?.data as T | undefined) ?? null;
+};
+
+/** Saves the document, or removes it when `data` is null. */
+export const putTaskDoc = async (classId: string, assignmentId: string, kind: TaskDocKind, data: unknown): Promise<void> => {
+  const updatedAt = new Date().toISOString();
+  // Plain JSON only: no undefined values or class instances in either store.
+  data = data === null ? null : JSON.parse(JSON.stringify(data));
+  if (useDynamoDb) {
+    const client = getDynamoClient();
+    if (!client) return;
+    await client.send(new PutCommand({
+      TableName: dynamoTableName,
+      Item: {
+        [pkField]: `CLASS#${classId}`, [skField]: taskDocSortKey(assignmentId, kind), record_type: "task_doc",
+        assignment_id: assignmentId, kind, data, updated_at: updatedAt,
+      },
+    }));
+    return;
+  }
+  await withWriteLock(async () => {
+    const store = await loadStore();
+    store.task_docs = store.task_docs.filter(d => !(d.class_id === classId && d.assignment_id === assignmentId && d.kind === kind));
+    if (data !== null) store.task_docs.push({ class_id: classId, assignment_id: assignmentId, kind, data, updated_at: updatedAt });
+    await persistStore(store);
+  });
 };

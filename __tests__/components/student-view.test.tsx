@@ -38,6 +38,8 @@ const expectActive = async (button: () => HTMLButtonElement) => {
   await waitFor(() => expect(button().getAttribute("aria-current")).toBe("step"));
 };
 const refresh = () => fireEvent.focus(window);
+// The board and the report (#182) refresh alongside; these tests count the status polls.
+const statusCalls = () => mocks.fetch.mock.calls.filter(([url]) => String(url).startsWith("/api/activity-status"));
 
 it("opens published material without a quiz and keeps the unpublished assessment locked", async () => {
   statuses["content-review"] = "available";
@@ -61,11 +63,11 @@ it("keeps normal quiz and material navigation with two available activities", as
   fireEvent.click(materials());
   await expectActive(materials);
   refresh();
-  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(statusCalls()).toHaveLength(2));
   await expectActive(materials);
   fireEvent.click(assessment());
   refresh();
-  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(statusCalls()).toHaveLength(3));
   await expectActive(assessment);
 });
 
@@ -77,13 +79,13 @@ it("does not bounce away from a completed quiz the student deliberately revisits
   fireEvent.click(assessment());
   await expectActive(assessment);
   refresh();
-  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(statusCalls()).toHaveLength(2));
   await expectActive(assessment);
 });
 
 it("opens materials published after the student entered a task with no available activity", async () => {
   render(<StudentView user={student} />);
-  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
+  await waitFor(() => expect(statusCalls()).toHaveLength(1));
   expect(materials().disabled).toBe(true);
   statuses["content-review"] = "available";
   refresh();
@@ -106,7 +108,7 @@ it("does not interrupt an available quiz when the teacher publishes material", a
 
 it("keeps every tab locked while nothing is available", async () => {
   render(<StudentView user={student} />);
-  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
+  await waitFor(() => expect(statusCalls()).toHaveLength(1));
   expect(assessment().disabled).toBe(true);
   expect(assessment().textContent).toContain("Not available yet");
   expect(materials().disabled).toBe(true);
@@ -157,7 +159,7 @@ it("completes the sole material activity only after questions and all ratings ar
   expect(assessment().textContent).toContain("Not available yet");
   expect(mocks.completed).toHaveBeenCalledExactlyOnceWith(student.classId, student.assignmentId, student.geniusId);
   refresh();
-  await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(statusCalls()).toHaveLength(3));
   expect(mocks.completed).toHaveBeenCalledOnce();
 });
 
@@ -183,4 +185,45 @@ it("reopens a completed material task when more material arrives and notifies ag
   refresh();
   await expectStatus(materials, "Completed");
   expect(mocks.completed).toHaveBeenCalledTimes(2);
+});
+
+it("opens Class questions and My quiz report once the teacher shares them (#182)", async () => {
+  statuses = { assessment: "completed", "content-review": "available", "content-rating": "locked" };
+  let board: unknown = null;
+  let report: unknown = null;
+  mocks.fetch.mockImplementation(async (url: string) => {
+    if (url.startsWith("/api/question-board")) return { ok: true, json: async () => ({ board }) };
+    if (url.startsWith("/api/quiz-report")) return { ok: true, json: async () => ({ release: report ? {} : null, report }) };
+    return { ok: true, json: async () => ({ activities: Object.entries(statuses).map(([id, status]) => ({ id, status })) }) };
+  });
+  render(<StudentView user={student} />);
+  const questions = () => tab(/Class questions/);
+  const myReport = () => tab(/My quiz report/);
+  await expectActive(materials);
+  expect(questions().disabled).toBe(true);
+  expect(myReport().disabled).toBe(true);
+  expect(mocks.fetch.mock.calls.some(([url]) => String(url).includes("/api/quiz-report?") && String(url).includes("studentId=student"))).toBe(true);
+
+  board = { publishedAt: "now", questions: [{ id: "1".repeat(16), text: "Does the post bend?", theme: "Forces we can't see" }] };
+  report = { lessonNumber: 3, lessonTitle: "Deformation", correct: 0, total: 1, items: [{ number: 1, stem: "Did the plate deform?", answer: null, correctAnswer: { key: "D", text: "Yes." }, isCorrect: false, confidence: null }] };
+  refresh();
+  await expectStatus(questions, "1 question");
+  await expectStatus(myReport, "Available");
+  fireEvent.click(questions());
+  expect(await screen.findByText("Questions we’ll explore together")).toBeTruthy();
+  expect(screen.getByText("Does the post bend?")).toBeTruthy();
+  // A student reading the board stays there through status polls.
+  refresh();
+  await waitFor(() => expect(statusCalls().length).toBeGreaterThanOrEqual(3));
+  await expectActive(questions);
+
+  fireEvent.click(myReport());
+  expect(await screen.findByText("0 of 1 correct")).toBeTruthy();
+  expect(screen.getByText("No answer")).toBeTruthy();
+
+  fireEvent.click(questions());
+  board = null;
+  refresh();
+  await expectActive(assessment);
+  await waitFor(() => expect(questions().disabled).toBe(true));
 });

@@ -81,7 +81,8 @@ it.each(["teacher", "student"] as const)("keeps %s lesson steps usable while rem
   expect(next.getAttribute("aria-current")).toBe("step");
   if (role === "teacher") {
     fireEvent.click(steps.getByRole("button", { name: /Questions & discussion/ }));
-    expect(await screen.findByRole("heading", { name: "Assignment summary" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Questions & discussion" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Assignment summary" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Back to workflow" })).toBeNull();
   }
 

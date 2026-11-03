@@ -84,7 +84,7 @@ export default function Workspace() {
     return teacher
       ? <TeacherView key={`${classId}:${assignmentId}`} user={data.user} shell={shell} classSize={data.classSize}
           initialMaterialFormat={params.get("view") === "slides" ? "slides" : undefined}
-          initialStep={params.get("view") === "dashboard" ? 4 : undefined} />
+          initialView={params.get("view") === "dashboard" ? "dashboard" : undefined} />
       : <StudentView key={`${classId}:${assignmentId}`} user={data.user} shell={shell} />;
   }
 
