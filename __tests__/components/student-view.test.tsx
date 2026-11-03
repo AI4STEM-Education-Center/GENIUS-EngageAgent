@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import type { ActivityStatus } from "@/lib/activity-status";
 import type { UserContext } from "@/lib/auth";
 import type { StudentStepId } from "@/lib/student-progress";
@@ -133,6 +133,16 @@ it("shows the student's name in the shared header and links back to the class wh
   expect(header.getByText("Student")).toBeTruthy();
   expect(header.getByRole("link", { name: "Physics · Period 3" }).getAttribute("href")).toBe("/student/classes?classId=ea-class-one");
   expect(header.getByRole("button", { name: "Sign out of EngageAgent" })).toBeTruthy();
+});
+
+it("leaves out the top menu inside the GENIUS iframe, which has its own (#172)", async () => {
+  const top = vi.spyOn(window, "top", "get").mockReturnValue({} as Window);
+  onTestFinished(() => top.mockRestore());
+  statuses["content-review"] = "available";
+  render(<StudentView user={{ ...student, className: "Physics · Period 3" }} shell={{ taskTitle: "Collisions" }} />);
+  await expectActive(materials);
+  expect(screen.queryByRole("banner")).toBeNull();
+  expect(screen.getByRole("navigation", { name: "Student steps" })).toBeTruthy();
 });
 
 it("completes the sole material activity only after questions and all ratings are complete", async () => {

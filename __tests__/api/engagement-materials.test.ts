@@ -249,3 +249,26 @@ describe("source-aligned material APIs", () => {
     expect((await image(request({ item, lessonNumber: 3 }))).status).toBe(500);
   });
 });
+
+describe("Step 2 focus in material generation (#178)", () => {
+  const misconception = "Same force always means the same deformation regardless of area.";
+  it("puts the teacher's focus, in the lesson's words, into the generation prompt", async () => {
+    complete.mockResolvedValueOnce(completion([{ title: "Contact", activity: conflictActivity }]))
+      .mockResolvedValueOnce(completion([{ title: "Contact", activity: conflictActivity }]));
+    const response = await content(request({ lessonNumber: 3, selectedStrategies: ["cognitive conflict"], focus: { misconceptions: ["b"] } }));
+    expect(response.status).toBe(200);
+    const prompt = JSON.stringify(complete.mock.calls[0][0].messages);
+    expect(prompt).toContain("Teacher-chosen focus");
+    expect(prompt).toContain(JSON.stringify(JSON.stringify([misconception])).slice(1, -1));
+  });
+  it("leaves the prompt unchanged without a focus", async () => {
+    complete.mockResolvedValue(completion([{ title: "Contact", activity: conflictActivity }]));
+    await content(request({ lessonNumber: 3, selectedStrategies: ["cognitive conflict"] }));
+    expect(JSON.stringify(complete.mock.calls[0][0].messages)).not.toContain("Teacher-chosen focus");
+  });
+  it.each([{ misconceptions: ["z"] }, { misconceptions: [] }, [0]])("rejects an invalid focus %j before calling the model", async focus => {
+    const response = await content(request({ lessonNumber: 3, selectedStrategies: ["cognitive conflict"], focus }));
+    expect(response.status).toBe(400);
+    expect(complete).not.toHaveBeenCalled();
+  });
+});

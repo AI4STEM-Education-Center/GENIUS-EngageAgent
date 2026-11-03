@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import TeacherView from "@/app/components/TeacherView";
 import type { UserContext } from "@/lib/auth";
 
@@ -58,24 +58,28 @@ it.each([true, false])("shows response loading failures without claiming zero su
     return originalFetch(input, init);
   });
   render(<TeacherView user={scopedTeacher} />);
+  const analyze = () => screen.getByRole("button", { name: "Analyze 1 response and recommend" }) as HTMLButtonElement;
   if (!initiallyFails) {
-    await screen.findByText("Avery");
-    await waitFor(() => expect((screen.getByRole("button", { name: "Analyze 1 students" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(analyze().disabled).toBe(false));
+    expect(stepTab(/Strategy/).textContent).toContain("1 response in");
     fail = true;
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    // Polling refetches the answers; the Strategy tab click forces a reload here.
+    fireEvent.click(stepTab(/Assessment/));
+    fireEvent.click(stepTab(/Strategy/));
   }
-  expect((await screen.findByRole("alert")).textContent).toContain("Responses temporarily unavailable. Select Refresh to try again.");
-  if (initiallyFails) expect(screen.queryByText(/students have answered so far/)).toBeNull();
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("Responses temporarily unavailable.");
+  // A failed load is not "0 submitted".
+  expect(screen.queryByText(/submitted/)).toBeNull();
+  if (initiallyFails) expect(screen.queryByRole("button", { name: /^Analyze 1 response/ })).toBeNull();
   else {
-    expect(screen.getByText("Avery")).toBeTruthy();
-    expect(screen.getByRole("alert").textContent).toContain("Showing previously loaded responses.");
-    expect((screen.getByRole("button", { name: "Analyze 1 students" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(alert.textContent).toContain("Showing previously loaded responses.");
+    expect(analyze().disabled).toBe(true);
   }
   fail = false;
-  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-  expect(screen.getByText("Avery")).toBeTruthy();
-  expect((screen.getByRole("button", { name: "Analyze 1 students" }) as HTMLButtonElement).disabled).toBe(false);
+  expect(analyze().disabled).toBe(false);
 });
 
 it("shows the v8.3 header and four teacher steps, with the dashboard as its own view (#172, #182)", async () => {
@@ -83,7 +87,7 @@ it("shows the v8.3 header and four teacher steps, with the dashboard as its own 
   await screen.findByRole("button", { name: /Lesson 1 0 questions/ });
   const steps = within(screen.getByRole("navigation", { name: "Teacher steps" })).getAllByRole("button");
   expect(steps.map(step => step.textContent)).toEqual([
-    "1AssessmentNot started", "2StrategyNot chosen yet", "3Engagement materialsNot started", "4Questions & discussionClass results",
+    "1AssessmentNot started", "2StrategyWaiting for responses", "3Engagement materialsNot started", "4Questions & discussionClass results",
   ]);
   const header = within(screen.getByRole("banner"));
   expect(header.getByText("Physics · Period 3")).toBeTruthy();
@@ -108,6 +112,18 @@ it("shows the v8.3 header and four teacher steps, with the dashboard as its own 
   fireEvent.click(stepTab(/Questions & discussion/));
   expect(await screen.findByRole("heading", { name: "Questions & discussion" })).toBeTruthy();
   expect(screen.queryByText("Assignment summary")).toBeNull();
+});
+
+it("leaves out the top menu inside the GENIUS iframe, which has its own (#172)", async () => {
+  const top = vi.spyOn(window, "top", "get").mockReturnValue({} as Window);
+  onTestFinished(() => top.mockRestore());
+  render(<TeacherView user={{ ...teacher, classId: "ea-class-native" }} shell={{ taskTitle: "Collisions" }} />);
+  await screen.findByRole("button", { name: /Lesson 1 0 questions/ });
+  expect(screen.queryByRole("banner")).toBeNull();
+  fireEvent.click(stepTab(/Questions & discussion/));
+  expect(await screen.findByRole("heading", { name: "Questions & discussion" })).toBeTruthy();
+  expect(screen.queryByRole("banner")).toBeNull();
+  expect(stepTab(/Questions & discussion/).getAttribute("aria-current")).toBe("step");
 });
 
 it("opens Step 4 when asked to, even with a saved draft on another step", async () => {

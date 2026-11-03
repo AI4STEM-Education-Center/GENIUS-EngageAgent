@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { sessionUser, sameOriginRequest } from "@/lib/session";
-import { createWorkspaceAssignment, createWorkspaceClass, joinWorkspaceClass, listWorkspaceClasses, workspaceClassDetail, workspaceContext, WorkspaceError } from "@/lib/workspace";
+import { createWorkspaceAssignment, createWorkspaceClass, joinWorkspaceClass, listWorkspaceClasses, workspaceClassDetail, workspaceClassSize, workspaceContext, WorkspaceError } from "@/lib/workspace";
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 function failure(error: unknown) {
@@ -15,7 +15,10 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const classId = params.get("classId"), assignmentId = params.get("assignmentId");
   try {
-    if (classId && assignmentId) return json({ user: await workspaceContext(user, classId, assignmentId) });
+    if (classId && assignmentId) {
+      const context = await workspaceContext(user, classId, assignmentId);
+      return json({ user: context, ...(user.role === "teacher" ? { classSize: await workspaceClassSize(classId) } : {}) });
+    }
     if (classId) return json(await workspaceClassDetail(user, classId));
     return json({ classes: await listWorkspaceClasses(user) });
   } catch (error) { return failure(error); }
