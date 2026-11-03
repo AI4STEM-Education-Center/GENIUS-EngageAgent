@@ -6,6 +6,7 @@ import { reviewFields } from "./review";
 import { MATERIAL_SCIENCE_CHECKS, MATERIAL_LESSON_FOCUS, summarizeDiagnosticAnswers } from "../material-prompts";
 import { getLesson } from "../quiz-data";
 import { configuredLessonFocus } from "../lesson-context";
+import { focusPromptLine, type ResolvedFocus } from "../strategy-focus";
 import { imageContext } from "./quality";
 import { analogyPlanSchemaFor } from "./analogy";
 import { analogyMappingIndex, resolveAnalogyMethod, type AnalogyMethod } from "./analogy-methods";
@@ -124,7 +125,7 @@ const stageChecks: Record<SlideStrategy, string> = {
 - A four-page draft without connect is complete. When connect is included, use actual instances of the SAME concept, never analogy correspondences.`,
 };
 
-export function slidePrompt(lesson: SlideLesson, strategy: SlideStrategy, review?: SlideDraft, feedback = "", diagnostic = summarizeDiagnosticAnswers(lesson.lessonNumber, []), options: { version?: SlidePromptVersion; referenceText?: string; classroomContext?: string; analogyMethod?: AnalogyMethod } = {}) {
+export function slidePrompt(lesson: SlideLesson, strategy: SlideStrategy, review?: SlideDraft, feedback = "", diagnostic = summarizeDiagnosticAnswers(lesson.lessonNumber, []), options: { version?: SlidePromptVersion; referenceText?: string; classroomContext?: string; analogyMethod?: AnalogyMethod; focus?: ResolvedFocus | null } = {}) {
   const method = resolveAnalogyMethod(options.analogyMethod ?? review?.analogyMethod);
   const sixStep = strategy === "analogy" && method === "six-step";
   const prompt = optimizedSlidePrompt(lesson, strategy, review, feedback, diagnostic, method);
@@ -162,6 +163,12 @@ export function slidePrompt(lesson: SlideLesson, strategy: SlideStrategy, review
     context.referenceVariables.TOPIC = configured.topic;
     context.referenceVariables.TARGET_CONCEPT = configured.target;
   }
+  // The teacher's Step 2 focus (#178) narrows the lesson's full list to their choice.
+  if (options.focus) {
+    context.teacherFocus = options.focus;
+    if (options.focus.kind === "misconceptions") context.referenceVariables.MISCONCEPTION_OR_GAP = options.focus.items;
+    else context.referenceVariables.TARGET_UNDERSTANDING = options.focus.items.join(" ");
+  }
   if (options.version === "reference") {
     if (!options.referenceText?.trim()) throw new Error("Original method prompt is required for version A.");
     prompt.system = `Use the following complete, original team-authored prompt as the teaching foundation. It is quoted verbatim. Apply the explicit slide adaptation after it; its latest teacher direction overrides conflicting older reference instructions. Return the prescribed JSON, not prose about the instructions.\n<original_method_prompt>\n${options.referenceText}\n</original_method_prompt>\n${sourceAdaptation(strategy, method)}\n${slideScienceChecks}\n${coherenceCheck}\n${review ? "Correct the concrete findings in correctionRequest and any directly affected titles/captions. Preserve adequate content and unchanged image plans EXACTLY unless correcting a scientifically faulty core mapping requires revising the analogue. Return the complete draft, using the same original method and latest adaptation." : "Check the draft against the original method and latest adaptation before returning."}`;
@@ -170,6 +177,7 @@ export function slidePrompt(lesson: SlideLesson, strategy: SlideStrategy, review
     prompt.system += `\n${sixStep || strategy !== "analogy" ? "" : sourceAdaptation(strategy, method, false)}\n${coherenceCheck}`;
   }
   if (review) prompt.system += `\n${SLIDE_REVISION_RULES}`;
+  if (options.focus) prompt.system += `\n${focusPromptLine(options.focus)}`;
   prompt.user = JSON.stringify(context);
   return prompt;
 }

@@ -1,6 +1,6 @@
 import { getAllLessons } from "@/lib/quiz-data";
 import { slideOutputFormat, slidePrompt } from "@/lib/slides/prompts";
-import { authorizeSlides, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, slideContext, slideDiagnosticContext, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
+import { authorizeSlides, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, requestFocus, slideContext, slideDiagnosticContext, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
 import { existingGenerationKey, resolveSlideModel, slideModelCatalog, slideTextRequestLimits, slideTextSettings } from "@/lib/slides/model-config";
 import { analogyPromptRevision, isSlidePromptVersion, SLIDE_PROMPT_REVISION } from "@/lib/slides/prompt-versions";
 import { beginSlideJob } from "@/lib/slides/jobs";
@@ -34,7 +34,8 @@ export async function POST(request: Request) {
     existingGenerationKey();
     const diagnostic = await slideDiagnosticContext(authorized, lesson.lessonNumber);
     const source = await loadSlideSource(strategy, analogyMethod);
-    const prompt = slidePrompt(lesson, strategy, draft, body.feedback as string | undefined, diagnostic, { version: promptVersion, referenceText: source.text, classroomContext, analogyMethod });
+    const focus = requestFocus(lesson.lessonNumber, strategy, body.focus);
+    const prompt = slidePrompt(lesson, strategy, draft, body.feedback as string | undefined, diagnostic, { version: promptVersion, referenceText: source.text, classroomContext, analogyMethod, focus });
     const limits = slideTextRequestLimits(model, "generate");
     const format = slideOutputFormat(strategy, analogyMethod).json_schema;
     const { reasoning_effort } = slideTextSettings(model);

@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({ fetch: vi.fn(), generate: vi.fn(), mount: vi.f
 
 type EmbeddedProps = {
   user: UserContext;
-  embeddedContext?: { lessonNumber: number; strategy: SlideStrategy; classroomContext?: string };
+  embeddedContext?: { lessonNumber: number; strategy: SlideStrategy; classroomContext?: string; focus?: unknown };
   onReadyChange?: (strategy: SlideStrategy, ready: boolean) => void;
   onBusyChange?: (strategy: SlideStrategy, busy: boolean) => void;
 };
@@ -76,6 +76,9 @@ async function ready() {
   return screen.getByRole("button", { name: "Generate materials" });
 }
 
+const strategyRadio = (name: string) => within(screen.getByRole("radiogroup", { name: "Strategy" })).getByRole("radio", { name });
+const useStrategy = (name: string) => fireEvent.click(screen.getByRole("button", { name: `Use ${name}` }));
+
 async function openSavedActivities() {
   fireEvent.click(await screen.findByRole("button", { name: "View saved activities" }));
 }
@@ -122,8 +125,8 @@ it("defaults new material generation to Slides and offers only Slides and Video"
   render(<TeacherView user={user} />);
   fireEvent.click(await screen.findByRole("button", { name: /Energy/ }));
   fireEvent.click(stepTab(/Strategy/));
-  fireEvent.click(screen.getByRole("button", { name: "Analogy" }));
-  fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
+  fireEvent.click(strategyRadio("Analogy"));
+  useStrategy("Analogy");
   await ready();
   expect(screen.getAllByRole("radio").map(input => input.getAttribute("value"))).toEqual(["slides", "video"]);
   expect(screen.getByRole("radio", { name: "Slides" })).toBeChecked();
@@ -207,23 +210,23 @@ it("persists the chosen material format for the same class and task", async () =
 it("switches A to B exclusively, keeps B selected on another click, and restores only B for generation", async () => {
   seedDraft({ currentStep: 2 });
   const view = render(<TeacherView user={user} />);
-  const analogy = await screen.findByRole("button", { name: "Analogy · Selected" });
-  expect(analogy).toHaveAttribute("aria-pressed", "true");
-  fireEvent.click(screen.getByRole("button", { name: "Cognitive Conflict" }));
-  expect(analogy).toHaveAttribute("aria-pressed", "false");
-  const conflict = screen.getByRole("button", { name: "Cognitive Conflict · Selected" });
-  expect(conflict).toHaveAttribute("aria-pressed", "true");
+  await waitFor(() => expect(strategyRadio("Analogy")).toBeChecked());
+  const analogy = strategyRadio("Analogy");
+  fireEvent.click(strategyRadio("Cognitive Conflict"));
+  expect(analogy).not.toBeChecked();
+  const conflict = strategyRadio("Cognitive Conflict");
+  expect(conflict).toBeChecked();
   fireEvent.click(conflict);
-  expect(conflict).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByRole("button", { name: "Continue to material generation" })).toBeEnabled();
+  expect(conflict).toBeChecked();
+  expect(screen.getByRole("button", { name: "Use Cognitive Conflict" })).toBeEnabled();
   await waitFor(() => expect(JSON.parse(localStorage.getItem(draftKey)!).selectedStrategies).toEqual(["cognitive conflict"]));
   expect(postCalls()).toHaveLength(0);
 
   view.unmount();
   render(<TeacherView user={user} />);
-  expect(await screen.findByRole("button", { name: "Cognitive Conflict · Selected" })).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByRole("button", { name: "Analogy" })).toHaveAttribute("aria-pressed", "false");
-  fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
+  await waitFor(() => expect(strategyRadio("Cognitive Conflict")).toBeChecked());
+  expect(strategyRadio("Analogy")).not.toBeChecked();
+  useStrategy("Cognitive Conflict");
   const generate = await ready();
   fireEvent.click(screen.getByRole("radio", { name: "Video" }));
   await waitFor(() => expect(generate).toBeEnabled());
@@ -249,10 +252,10 @@ it("normalizes an old multi-strategy draft to its last valid selection without d
   seedDraft({ currentStep: 2, selectedStrategies: ["analogy", "experience bridging", "cognitive conflict", "retired strategy"], content,
     images: Object.fromEntries(content.map(item => [item.id, { status: "ready", url: `https://example.test/${item.id}.png` }])) });
   render(<TeacherView user={user} />);
-  expect(await screen.findByRole("button", { name: "Cognitive Conflict · Selected" })).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByRole("button", { name: "Analogy" })).toHaveAttribute("aria-pressed", "false");
-  expect(screen.getByRole("button", { name: "Experience Bridging" })).toHaveAttribute("aria-pressed", "false");
-  fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
+  await waitFor(() => expect(strategyRadio("Cognitive Conflict")).toBeChecked());
+  expect(strategyRadio("Analogy")).not.toBeChecked();
+  expect(strategyRadio("Experience Bridging")).not.toBeChecked();
+  fireEvent.click(stepTab(/Engagement materials/));
   await ready();
   await openSavedActivities();
   for (const item of content) {
@@ -266,6 +269,30 @@ it("normalizes an old multi-strategy draft to its last valid selection without d
   });
   expect(mocks.generate).not.toHaveBeenCalled();
   expect(postCalls()).toHaveLength(0);
+});
+
+it("suggests the default focus for a draft saved before #178 and sends it only after the teacher uses it", async () => {
+  seedDraft({ currentStep: 2, materialFormat: "slides", selectedStrategies: ["cognitive conflict"] });
+  render(<TeacherView user={user} />);
+  await waitFor(() => expect(strategyRadio("Cognitive Conflict")).toBeChecked());
+  const focus = within(screen.getByRole("group", { name: /Misconception to target/ }));
+  expect((focus.getAllByRole("checkbox") as HTMLInputElement[]).map(box => box.checked)).toEqual([true, false, false, false, false, false]);
+  expect(screen.getByRole("button", { name: "Use Cognitive Conflict" })).toBeEnabled();
+
+  // Skipping Step 2 keeps the old behavior: no focus in generation.
+  fireEvent.click(stepTab(/Engagement materials/));
+  const generate = await ready();
+  await waitFor(() => expect(generate).toBeEnabled());
+  fireEvent.click(generate);
+  expect(mocks.generate.mock.calls[0][0].focus).toBeUndefined();
+
+  fireEvent.click(stepTab(/Strategy/));
+  useStrategy("Cognitive Conflict");
+  const again = await ready();
+  await waitFor(() => expect(JSON.parse(localStorage.getItem(draftKey)!).strategyFocus).toEqual({ lessonNumber: 8, misconceptions: ["1&2-a"], coreIdeas: [0] }));
+  await waitFor(() => expect(again).toBeEnabled());
+  fireEvent.click(again);
+  expect(mocks.generate.mock.calls[1][0].focus).toEqual({ misconceptions: ["1&2-a"] });
 });
 
 it("restores published materials from multiple strategies while selecting only one for future generation", async () => {
@@ -283,8 +310,8 @@ it("restores published materials from multiple strategies while selecting only o
   await screen.findByText("Keep the published conflict.");
   expect(screen.getByText("Keep the published comparison.")).toBeVisible();
   fireEvent.click(stepTab(/Strategy/));
-  expect(screen.getByRole("button", { name: "Cognitive Conflict · Selected" })).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByRole("button", { name: "Analogy" })).toHaveAttribute("aria-pressed", "false");
+  expect(strategyRadio("Cognitive Conflict")).toBeChecked();
+  expect(strategyRadio("Analogy")).not.toBeChecked();
   expect(postCalls()).toHaveLength(0);
 });
 
@@ -351,9 +378,10 @@ it("uses the survey's top activity only after teacher opt-in, preserving it for 
   } }) : originalFetch(input, init));
 
   const view = render(<TeacherView user={user} />);
-  const continueButton = await screen.findByRole("button", { name: "Continue to material generation" });
-  expect(mocks.fetch.mock.calls.some(([input]) => input.startsWith("/api/survey-analysis?"))).toBe(false);
-  fireEvent.click(continueButton);
+  // Step 2 shows the check-in evidence, but nothing from it reaches the materials yet.
+  const checkIn = await screen.findByRole("region", { name: "From the experience check-in" });
+  expect(await within(checkIn).findByText("Soccer")).toBeVisible();
+  fireEvent.click(stepTab(/Engagement materials/));
   const useActivity = await screen.findByRole("button", { name: "Use top activity" });
   const contextField = screen.getByRole("textbox", { name: "Classroom context (optional)" });
   expect(contextField).toHaveValue(manualContext);
@@ -562,17 +590,18 @@ it("aborts preparation when its content is replaced and discards a late file wit
 it("lets a teacher manually generate draft materials before any student response without inventing a recommendation", async () => {
   seedDraft({ currentStep: 2, materialFormat: "video", selectedStrategies: [] });
   render(<TeacherView user={user} />);
-  await screen.findByRole("button", { name: "Analyze 0 students" });
-  expect(screen.getByRole("button", { name: "Analyze 0 students" })).toBeDisabled();
-  expect(screen.queryByText("Master plan")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Cognitive Conflict" }));
-  fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
+  expect(await screen.findByRole("button", { name: "Analyze 0 responses and recommend" })).toBeDisabled();
+  expect(screen.queryByRole("region", { name: "Recommended strategy" })).toBeNull();
+  fireEvent.click(strategyRadio("Cognitive Conflict"));
+  useStrategy("Cognitive Conflict");
   const generate = await ready();
   await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
   await waitFor(() => expect(postCalls("/api/engagement-content")).toHaveLength(1));
   expect(JSON.parse(postCalls("/api/engagement-content")[0][1].body).selectedStrategies).toEqual(["cognitive conflict"]);
   expect(mocks.fetch.mock.calls.some(([input]) => String(input).includes("cohort-analysis"))).toBe(false);
+  // With no recommendation there is nothing to agree or disagree with.
+  expect(postCalls("/api/teacher-annotation")).toHaveLength(0);
 });
 
 it("carries the actual class rule-based recommendation into the shared material generator", async () => {
@@ -587,15 +616,21 @@ it("carries the actual class rule-based recommendation into the shared material 
   });
   seedDraft({ currentStep: 2, selectedStrategies: [] });
   render(<TeacherView user={user} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Analyze 2 students" }));
-  expect(screen.getByRole("button", { name: "Cognitive Conflict · Recommended · Selected" })).toHaveAttribute("aria-pressed", "true");
-  fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
+  const analyze = await screen.findByRole("button", { name: "Analyze 2 responses and recommend" });
+  await waitFor(() => expect(analyze).toBeEnabled());
+  fireEvent.click(analyze);
+  expect(within(screen.getByRole("region", { name: "Recommended strategy" })).getByRole("heading", { name: "Cognitive Conflict" })).toBeVisible();
+  expect(strategyRadio("Cognitive Conflict")).toBeChecked();
+  useStrategy("Cognitive Conflict");
   await ready();
+  const annotation = JSON.parse(postCalls("/api/teacher-annotation")[0][1].body);
+  expect(annotation).toMatchObject({ decision: "agree", reason: null, lessonNumber: 8, selectedStrategies: ["cognitive conflict"] });
+  expect(annotation.focus.misconceptions.length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
   const generate = screen.getByRole("button", { name: "Generate materials" });
   await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
-  expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ lessonNumber: 8, strategy: "cognitive conflict" }));
+  expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ lessonNumber: 8, strategy: "cognitive conflict", focus: { misconceptions: annotation.focus.misconceptions } }));
   expect(mocks.fetch.mock.calls.some(([input]) => String(input).includes("cohort-analysis"))).toBe(false);
 });
 
@@ -632,8 +667,8 @@ it("hydrates an embedded teacher workflow and generates in memory when browser s
     render(<TeacherView user={host} />);
     fireEvent.click(await screen.findByRole("button", { name: /Energy/ }));
     fireEvent.click(stepTab(/Strategy/));
-    fireEvent.click(screen.getByRole("button", { name: "Analogy" }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue to material generation" }));
+    fireEvent.click(strategyRadio("Analogy"));
+    useStrategy("Analogy");
     await ready();
     fireEvent.click(screen.getByRole("radio", { name: "Slides" }));
     const generate = screen.getByRole("button", { name: "Generate materials" });

@@ -2,7 +2,7 @@
 
 import { scopedTaskFetch } from "@/lib/client-auth";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, LayoutGrid, MessageCircle, Users } from "lucide-react";
 import SurveyBuilderView from "./SurveyBuilderView";
 import TeacherDashboardView from "./TeacherDashboardView";
@@ -13,6 +13,7 @@ import ActivityContextSuggestion from "./ActivityContextSuggestion";
 import MaterialActivityView from "./MaterialActivityView";
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "./SlidesWorkspace";
 import PublishedSlidesList from "./PublishedSlidesList";
+import StrategyStep from "./StrategyStep";
 import { STRATEGIES as SLIDE_STRATEGIES, type SlideStrategy } from "@/lib/slides/model";
 import { parseMaterialActivity } from "@/lib/material-activities";
 import { downloadStudentMaterial, type PreparedMaterialFile } from "@/lib/material-export";
@@ -20,7 +21,6 @@ import type { UserContext } from "@/lib/auth";
 import { recommendWorkspaceCohort, workspaceQuizAnswers } from "@/lib/cohort-recommendation";
 import {
   engagementStrategies as strategies,
-  getEngagementStrategyDescription,
   getEngagementStrategyLabel,
 } from "@/lib/engagement-strategies";
 import type {
@@ -36,9 +36,9 @@ import type {
 } from "@/lib/types";
 import {
   buildClassPlan,
-  buildTeacherSummary,
   type StrategyRecommendation,
 } from "@/lib/strategy-recommendation";
+import { classQuizCounts, defaultStrategyFocus, EMPTY_FOCUS, focusForStrategy, type StrategyFocus } from "@/lib/strategy-focus";
 
 const MAX_IMAGE_VERSIONS = 10;
 
@@ -48,6 +48,8 @@ type Props = {
   /** Opens a specific step, e.g. 4 for old `?view=dashboard` links. */
   initialStep?: number;
   shell?: TaskShell;
+  /** Students in the class, for Step 2's "0 of n submitted" (EngageAgent classes only). */
+  classSize?: number;
 };
 
 type MaterialFormat = "slides" | "video";
@@ -104,6 +106,17 @@ const collectPublishedMedia = (
 };
 
 
+type SavedFocus = StrategyFocus & { lessonNumber: number | null };
+
+const isIndexList = (value: unknown): value is number[] => Array.isArray(value) && value.every(Number.isInteger);
+const isCodeList = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === "string");
+const restoreFocus = (value: unknown): SavedFocus => {
+  const saved = value as Partial<SavedFocus> | null;
+  return saved && typeof saved === "object" && typeof saved.lessonNumber === "number" && isCodeList(saved.misconceptions) && isIndexList(saved.coreIdeas)
+    ? { lessonNumber: saved.lessonNumber, misconceptions: saved.misconceptions, coreIdeas: saved.coreIdeas }
+    : { lessonNumber: null, ...EMPTY_FOCUS };
+};
+
 type PersistedDraft = {
   version: number;
   classId: string;
@@ -113,7 +126,11 @@ type PersistedDraft = {
   materialFormat?: MaterialFormat | "text-image";
   classroomContext?: string;
   plan: Plan | null;
+  /** The rule's result behind `plan`, for Step 2's "How we chose" (#178). */
+  recommendation?: StrategyRecommendation | null;
   selectedStrategies: string[];
+  /** The Step 2 focus, kept per lesson because its codes and indexes belong to one lesson. */
+  strategyFocus?: SavedFocus;
   annotationDecision: "agree" | "disagree" | null;
   annotationReason: string;
   annotationStatus: "idle" | "saved";
@@ -287,7 +304,7 @@ const stepLabels = [
   "Questions & discussion",
 ];
 
-export default function TeacherView({ user, initialMaterialFormat, initialStep, shell }: Props) {
+export default function TeacherView({ user, initialMaterialFormat, initialStep, shell, classSize }: Props) {
   const downloadRef = useRef<HTMLAnchorElement>(null);
   const isMountedRef = useRef(true);
   const activeVideoPollersRef = useRef<Set<string>>(new Set());
@@ -374,10 +391,26 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const [annotationStatus, setAnnotationStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [annotationError, setAnnotationError] = useState<string | null>(null);
 
+  const [savedFocus, setSavedFocus] = useState<SavedFocus>({ lessonNumber: null, ...EMPTY_FOCUS });
+  const focusSaved = selectedLesson !== null && savedFocus.lessonNumber === selectedLesson;
+  const quizCounts = useMemo(
+    () => (selectedLesson ? classQuizCounts(selectedLesson, studentAnswers.map((answer) => answer.answers)) : null),
+    [selectedLesson, studentAnswers],
+  );
+  // Drafts from before #178, or a strategy restored from published materials, have no
+  // focus for this lesson: Step 2 suggests the default, saved once the teacher uses it.
+  const strategyFocus: StrategyFocus = focusSaved ? savedFocus
+    : selectedLesson ? defaultStrategyFocus(selectedLesson, quizCounts) : EMPTY_FOCUS;
+  const setStrategyFocus = (focus: StrategyFocus) => {
+    setSavedFocus({ lessonNumber: selectedLesson, misconceptions: focus.misconceptions, coreIdeas: focus.coreIdeas });
+    setAnnotationStatus("idle");
+  };
+  // Generation uses only a focus the teacher has saved, so an unvisited Step 2 changes nothing.
+  const generationFocus = (strategy: string) => (focusSaved ? focusForStrategy(savedFocus, strategy) : undefined);
+  const chosenFocus = selectedStrategies[0] ? generationFocus(selectedStrategies[0]) : undefined;
+
   // Cohort
   const [classRecommendation, setClassRecommendation] = useState<StrategyRecommendation | null>(null);
-  const [showCohortHelp, setShowCohortHelp] = useState(false);
-  const [openStrategyInfo, setOpenStrategyInfo] = useState<Set<string>>(new Set());
 
 
   // General
@@ -398,8 +431,6 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
 
 
   const getStrategyLabel = getEngagementStrategyLabel;
-
-  const getStrategyDescription = getEngagementStrategyDescription;
 
   const buildDraftSnapshot = useCallback(
     (nextVideos?: Record<string, VideoState>): PersistedDraft => {
@@ -423,7 +454,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
         materialFormat,
         classroomContext,
         plan,
+        recommendation: classRecommendation,
         selectedStrategies,
+        strategyFocus: savedFocus,
         annotationDecision,
         annotationReason,
         annotationStatus: annotationStatus === "saved" ? "saved" : "idle",
@@ -442,7 +475,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
       materialFormat,
       classroomContext,
       plan,
+      classRecommendation,
       selectedStrategies,
+      savedFocus,
       annotationDecision,
       annotationReason,
       annotationStatus,
@@ -496,17 +531,6 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     [draftStorageKey],
   );
 
-  const toggleStrategyInfo = (strategyId: string) => {
-    setOpenStrategyInfo((prev) => {
-      const next = new Set(prev);
-      if (next.has(strategyId)) {
-        next.delete(strategyId);
-      } else {
-        next.add(strategyId);
-      }
-      return next;
-    });
-  };
 
   // Load lessons list
   useEffect(() => {
@@ -562,6 +586,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     setPlan(null);
     setClassRecommendation(null);
     setSelectedStrategies([]);
+    setSavedFocus({ lessonNumber: null, ...EMPTY_FOCUS });
     setAnnotationDecision(null);
     setAnnotationReason("");
     setAnnotationStatus("idle");
@@ -612,7 +637,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
 
           setSelectedLesson(draft.lessonNumber);
           setPlan(draft.plan);
+          setClassRecommendation(draft.plan && draft.recommendation && typeof draft.recommendation === "object" && draft.recommendation.lessonNumber === draft.lessonNumber ? draft.recommendation : null);
           setSelectedStrategies(singleStrategySelection(draft.selectedStrategies));
+          setSavedFocus(restoreFocus(draft.strategyFocus));
           setAnnotationDecision(draft.annotationDecision);
           setAnnotationReason(draft.annotationReason ?? "");
           setAnnotationStatus(draft.annotationStatus ?? "idle");
@@ -990,6 +1017,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     setQueuedVideoIds(new Set());
     setSelectedLesson(lessonNumber);
     setPlan(null);
+    setClassRecommendation(null);
     setSelectedStrategies([]);
     setAnnotationDecision(null);
     setAnnotationReason("");
@@ -1120,6 +1148,10 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
       setClassRecommendation(recommendation);
       setPlan(masterPlan);
       setSelectedStrategies([masterPlan.strategy]);
+      setSavedFocus({ lessonNumber: selectedLesson, ...defaultStrategyFocus(selectedLesson, recommendation.counts) });
+      setAnnotationDecision(null);
+      setAnnotationReason("");
+      setAnnotationStatus("idle");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unexpected error.");
     }
@@ -1151,6 +1183,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             classId,
             assignmentId,
             classroomContext: classroomContext.trim(),
+            ...(chosenFocus ? { focus: chosenFocus } : {}),
             ...(useFallback ? { fallback: true } : {}),
           }),
         });
@@ -1206,20 +1239,24 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
 
   const selectStrategy = (strategyId: string) => {
     setSelectedStrategies([strategyId]);
+    setAnnotationStatus("idle");
   };
 
-  const submitAnnotation = async () => {
-    if (!plan || !annotationDecision) {
-      setAnnotationError("Please choose agree or disagree.");
-      setAnnotationStatus("error");
+  // "Use {strategy}" (#178): records whether the teacher kept the recommendation,
+  // with the focus and optional reason, then moves on to the materials.
+  const applyStrategy = async () => {
+    const strategy = selectedStrategies[0];
+    if (!strategy || !selectedLesson) return;
+    // Keep the focus shown (possibly the suggested default) as the teacher's choice.
+    setSavedFocus({ lessonNumber: selectedLesson, misconceptions: strategyFocus.misconceptions, coreIdeas: strategyFocus.coreIdeas });
+    const focus = focusForStrategy(strategyFocus, strategy);
+    if (!plan || !classRecommendation) {
+      setAnnotationStatus("saved");
+      setCurrentStep(3);
       return;
     }
-    if (annotationDecision === "disagree" && !annotationReason.trim()) {
-      setAnnotationError("Please add the reason you disagree.");
-      setAnnotationStatus("error");
-      return;
-    }
-
+    const decision = strategy === plan.strategy ? "agree" : "disagree";
+    setAnnotationDecision(decision);
     setAnnotationStatus("saving");
     setAnnotationError(null);
     try {
@@ -1230,20 +1267,23 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           studentName: null,
           classId,
           assignmentId,
-          assignment: selectedLesson ? `Lesson ${selectedLesson}` : null,
+          assignment: `Lesson ${selectedLesson}`,
+          lessonNumber: selectedLesson,
           overallRecommendation: plan.overallRecommendation,
           recommendationReason: plan.recommendationReason,
-          decision: annotationDecision,
-          reason: annotationReason.trim() || null,
+          decision,
+          reason: decision === "disagree" ? annotationReason.trim() || null : null,
           aiPlan: plan,
           selectedStrategies,
+          ...(focus ? { focus } : {}),
           answers: {},
         }),
       });
-      if (!res.ok) throw new Error("Failed to save annotation.");
+      if (!res.ok) throw new Error("Couldn't save your choice. Please try again.");
       setAnnotationStatus("saved");
+      setCurrentStep(3);
     } catch (err) {
-      setAnnotationError(err instanceof Error ? err.message : "Failed to save.");
+      setAnnotationError(err instanceof Error ? err.message : "Couldn't save your choice. Please try again.");
       setAnnotationStatus("error");
     }
   };
@@ -1594,7 +1634,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
 
   const stepStatus = [
     quizStatus === "published" ? "Published" : quizStatus === "closed" ? "Closed" : selectedLesson ? "In progress" : "Not started",
-    selectedStrategies.length ? getEngagementStrategyLabel(selectedStrategies[0]) : "Not chosen yet",
+    selectedStrategies.length ? getEngagementStrategyLabel(selectedStrategies[0])
+      : studentAnswers.length ? `${studentAnswers.length} response${studentAnswers.length === 1 ? "" : "s"} in` : "Waiting for responses",
     publishedContentIds.size ? "Sent to students" : content.length ? "Draft ready" : "Not started",
     // Shows the assignment dashboard until #182 builds this step.
     "Class results",
@@ -1755,202 +1796,13 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
 
           {/* Step 2: Strategy */}
           {currentStep === 2 && (
-            <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-              <div className="flex flex-col gap-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 2</p>
-                <h2 className="text-2xl font-semibold text-slate-900">Engagement strategy recommendation</h2>
-                <p className="text-sm text-slate-600">Based on student responses, generate strategies for the entire cohort.</p>
-              </div>
-
-              {/* Student answers summary */}
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold uppercase text-slate-400">Student responses</p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void loadStudentAnswers()}
-                      disabled={loadingAnswers}
-                      className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
-                    >
-                      {loadingAnswers ? "Loading..." : "Refresh"}
-                    </button>
-                  </div>
-                </div>
-                {answersError && <p role="alert" className="mt-2 text-sm text-rose-700">
-                  {answersError} Select Refresh to try again.{studentAnswers.length > 0 ? " Showing previously loaded responses." : ""}
-                </p>}
-                {(!answersError || studentAnswers.length > 0) && <p className="mt-2 text-sm text-slate-700">
-                  <span className="font-semibold">{studentAnswers.length}</span> student{studentAnswers.length === 1 ? " has" : "s have"} answered so far.
-                </p>}
-                {studentAnswers.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {studentAnswers.map((sa) => (
-                      <span key={sa.student_id} className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-600 border border-slate-200">
-                        {sa.student_name}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Cohort analysis */}
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-xs font-semibold uppercase text-slate-400">Cohort analysis</p>
-                      <button
-                        type="button"
-                        onClick={() => setShowCohortHelp((prev) => !prev)}
-                        aria-label="Explain cohort analysis"
-                        aria-expanded={showCohortHelp}
-                        title="What does cohort analysis do?"
-                        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-[11px] font-semibold text-slate-500 transition hover:bg-slate-100"
-                      >
-                        ?
-                      </button>
-                    </div>
-                    <p className="mt-1 text-sm text-slate-600">Recommend one strategy for the whole class from the submitted quiz answers.</p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={analyzeClass}
-                      disabled={generationBusy || loadingAnswers || !!answersError || studentAnswers.length === 0}
-                      className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
-                    >
-                      Analyze {studentAnswers.length} students
-                    </button>
-                  </div>
-                </div>
-
-                {showCohortHelp && (
-                  <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
-                    How we choose: we look at your class&apos;s answers to this lesson&apos;s quiz in three steps. (1) If more than 70% of the answers are correct, we recommend engaged critiquing to deepen the idea. (2) Otherwise, if more than a quarter of the incorrect answers point to the same misconception, we recommend cognitive conflict to address it directly. (3) Otherwise, it depends on the lesson: we recommend an analogy if most of its core ideas are things students can&apos;t easily see, and experience bridging if they are things students can see in everyday life. The same answers always lead to the same recommendation. You know your class best, so please feel free to choose a different strategy below.
-                  </div>
-                )}
-
-                {classRecommendation && (
-                  <div className="mt-4 grid gap-2">
-                    <p className="text-xs font-semibold uppercase text-slate-400">How your class did</p>
-                    <div className="whitespace-pre-wrap rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-700">
-                      {buildTeacherSummary(classRecommendation)}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Plan display (reuse existing plan UI) */}
-              {plan && (
-                <div className="mt-4 grid gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-700">
-                  <div>
-                    <p className="text-xs font-semibold uppercase text-slate-400">Master plan</p>
-                    <p className="text-base font-semibold text-slate-900">{plan.name}</p>
-                    <p className="text-sm font-medium text-slate-700">Strategy: {getStrategyLabel(plan.strategy)}</p>
-                    <p className="text-sm text-slate-600">{plan.summary}</p>
-                  </div>
-                  <div className="grid gap-4">
-                    <div className={`rounded-2xl border border-slate-200 bg-white p-4 ${plan.strategy ? `ring-2 ${strategies.find((strategy) => strategy.id === plan.strategy)?.ring ?? ''}` : ''}`}>
-                      <p className="text-xs font-semibold uppercase text-slate-400">Recommended strategy</p>
-                      <div className="mt-2 flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => toggleStrategyInfo(plan.strategy)}
-                              aria-label={`Explain ${getStrategyLabel(plan.strategy)}`}
-                              aria-expanded={openStrategyInfo.has(plan.strategy)}
-                              title={getStrategyDescription(plan.strategy)}
-                              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-[11px] font-semibold text-slate-500 transition hover:bg-slate-100"
-                            >
-                              i
-                            </button>
-                            <p className="text-base font-semibold text-slate-900">{getStrategyLabel(plan.strategy)}</p>
-                            <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-semibold text-white">Primary</span>
-                          </div>
-                          {openStrategyInfo.has(plan.strategy) && (
-                            <p className="mt-2 text-xs leading-5 text-slate-500">{getStrategyDescription(plan.strategy)}</p>
-                          )}
-                          <p className="mt-2 text-sm text-slate-600">{plan.overallRecommendation}</p>
-                          <p className="mt-1 text-xs text-slate-500">{plan.recommendationReason}</p>
-                        </div>
-                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${selectedStrategies.includes(plan.strategy) ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                          {selectedStrategies.includes(plan.strategy) ? 'Selected for content' : 'Not selected'}
-                        </span>
-                      </div>
-                    </div>
-
-
-                  </div>
-
-                  {/* Teacher annotation */}
-                  <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-semibold uppercase text-slate-400">Teacher annotation</p>
-                    <p className="text-sm font-medium text-slate-700">
-                      Do you accept the recommended strategy: <span className="font-semibold text-slate-900">{getStrategyLabel(plan.strategy)}</span>?
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button type="button" onClick={() => setAnnotationDecision("agree")}
-                        className={`rounded-full px-4 py-2 text-xs font-semibold ${annotationDecision === "agree" ? "bg-emerald-600 text-white" : "border border-slate-200 text-slate-600"}`}>
-                        Accept
-                      </button>
-                      <button type="button" onClick={() => setAnnotationDecision("disagree")}
-                        className={`rounded-full px-4 py-2 text-xs font-semibold ${annotationDecision === "disagree" ? "bg-rose-600 text-white" : "border border-slate-200 text-slate-600"}`}>
-                        Disagree
-                      </button>
-                    </div>
-                    {annotationDecision === "disagree" && (
-                      <textarea className="min-h-[96px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
-                        value={annotationReason} onChange={(e) => setAnnotationReason(e.target.value)}
-                        placeholder="Explain your reasoning..." required />
-                    )}
-                    <div className="flex flex-wrap items-center gap-3">
-                      <button type="button" onClick={submitAnnotation} disabled={annotationStatus === "saving"}
-                        className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:bg-slate-400">
-                        {annotationStatus === "saving" ? "Saving..." : "Save annotation"}
-                      </button>
-                      {annotationStatus === "saved" && <span className="text-xs font-semibold text-emerald-600">Saved.</span>}
-                      {annotationStatus === "error" && annotationError && <span className="text-xs font-semibold text-rose-600">{annotationError}</span>}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-                    <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase text-slate-400">Material strategy</p>
-                      <p className="text-sm text-slate-600">Choose one strategy. Selecting another replaces your current choice. A cohort recommendation is selected automatically when available; you can also choose manually before students complete the quiz.</p>
-                      <div role="group" aria-label="Material strategy" className="flex flex-wrap gap-2">
-                        {strategies.map((strategy) => {
-                          const isSelected = selectedStrategies.includes(strategy.id);
-                          const isRecommended = plan?.strategy === strategy.id;
-                          return (
-                            <button
-                              key={strategy.id}
-                              type="button"
-                              onClick={() => selectStrategy(strategy.id)}
-                              aria-pressed={isSelected}
-                              disabled={generationBusy}
-                              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${isSelected ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-                            >
-                              {strategy.label}
-                              {isRecommended ? ' · Recommended' : ''}
-                              {isSelected ? ' · Selected' : ''}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-              <button type="button" onClick={() => setCurrentStep(3)} disabled={!selectedLesson || selectedStrategies.length !== 1}
-                className="mt-2 inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400">
-                Continue to material generation
-              </button>
-
-              <div className="flex items-center justify-between">
-                <button type="button" onClick={() => setCurrentStep(1)} className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-100">Previous step</button>
-                <button type="button" onClick={() => setCurrentStep(3)} className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-100">Next step</button>
-              </div>
-            </div>
+            <StrategyStep classId={classId} assignmentId={assignmentId} lessonNumber={selectedLesson}
+              quizPublished={quizStatus !== "draft"} answers={studentAnswers} answersError={answersError}
+              onRetryAnswers={() => void loadStudentAnswers()} classSize={classSize}
+              recommendation={classRecommendation} onAnalyze={analyzeClass} busy={generationBusy}
+              pick={selectedStrategies[0] ?? null} onPick={selectStrategy} focus={strategyFocus} onFocusChange={setStrategyFocus}
+              reason={annotationReason} onReasonChange={(reason) => { setAnnotationReason(reason); setAnnotationStatus("idle"); }}
+              onUse={() => void applyStrategy()} saveStatus={annotationStatus} saveError={annotationError} />
           )}
 
           {/* Step 3: Content generation */}
@@ -2019,7 +1871,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                 {isHydrated && slidesAvailable && selectedLesson && slideStrategies.map((strategy) => (
                   <SlidesWorkspace key={`${classId}:${assignmentId}:${selectedLesson}:${strategy}`} user={user}
                     ref={(editor) => { slideEditorsRef.current[strategy] = editor; }}
-                    embeddedContext={{ lessonNumber: selectedLesson, strategy, classroomContext }}
+                    embeddedContext={{ lessonNumber: selectedLesson, strategy, classroomContext, focus: generationFocus(strategy) }}
                     onBusyChange={onSlideBusyChange} onReadyChange={onSlideReadyChange} onPublished={onSlidesPublished} />
                 ))}
               </div>

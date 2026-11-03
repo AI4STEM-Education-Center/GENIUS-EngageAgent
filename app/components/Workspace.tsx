@@ -19,6 +19,7 @@ type Data = {
   assignments?: WorkspaceAssignment[];
   members?: WorkspaceMember[];
   user?: UserContext;
+  classSize?: number;
 };
 const inputClass = "min-h-11 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-red-700 focus:outline-2 focus:outline-red-100";
 const buttonClass = "inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md bg-red-800 px-4 py-2 text-sm font-semibold text-white hover:bg-red-900 disabled:opacity-50";
@@ -81,7 +82,7 @@ export default function Workspace() {
   if (data?.user && classId && assignmentId) {
     const shell = { homeHref: home, classHref: classPath(classId), canSignOut: true };
     return teacher
-      ? <TeacherView key={`${classId}:${assignmentId}`} user={data.user} shell={shell}
+      ? <TeacherView key={`${classId}:${assignmentId}`} user={data.user} shell={shell} classSize={data.classSize}
           initialMaterialFormat={params.get("view") === "slides" ? "slides" : undefined}
           initialStep={params.get("view") === "dashboard" ? 4 : undefined} />
       : <StudentView key={`${classId}:${assignmentId}`} user={data.user} shell={shell} />;

@@ -61,6 +61,11 @@ export async function workspaceClassDetail(user: UserContext, id: string) {
   return { classroom: { id: classroom.id, name: classroom.name, ...(user.role === "teacher" ? { joinCode: classroom.joinCode } : {}) }, assignments, members };
 }
 
+/** Students who have joined the class, for the Step 2 "n of class size submitted" banner (#178). Check access first. */
+export async function workspaceClassSize(classId: string) {
+  return (await workspaceQuery<WorkspaceMember>(classPartition(classId), "MEMBER#")).length;
+}
+
 export async function createWorkspaceAssignment(user: UserContext, classId: string, title: unknown) {
   await requireWorkspaceClass(user, classId);
   if (user.role !== "teacher") throw new WorkspaceError("Only teachers can create tasks.", 403);

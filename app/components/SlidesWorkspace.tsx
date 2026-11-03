@@ -18,6 +18,7 @@ import { publishSlideDeck } from "@/lib/slides/publish-client";
 import { isSlideDeckPublished, slidePublicationContentKey } from "@/lib/slides/publication-status";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import { slideRevisionFeedback } from "@/lib/slides/revision";
+import type { StrategyFocus } from "@/lib/strategy-focus";
 
 const input = "w-full min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-2 focus:outline-teal-700 disabled:opacity-50";
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium hover:bg-gray-100 disabled:opacity-50";
@@ -28,7 +29,7 @@ const label = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 export type SlidesWorkspaceHandle = { generate(): void };
 type SlidesWorkspaceProps = {
   user: UserContext;
-  embeddedContext?: { lessonNumber: number; strategy: SlideStrategy; classroomContext?: string };
+  embeddedContext?: { lessonNumber: number; strategy: SlideStrategy; classroomContext?: string; focus?: Partial<StrategyFocus> };
   onBusyChange?: (strategy: SlideStrategy, busy: boolean) => void;
   onReadyChange?: (strategy: SlideStrategy, ready: boolean) => void;
   onPublished?: () => void;
@@ -252,7 +253,9 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       setStatus(review ? "Reviewing slide content..." : chosenStrategy === "analogy" && chosenMethod === "six-step" ? "Generating six-step slides..." : chosenStrategy === "experience bridging" ? "Generating experience-bridging slides..." : "Generating five slides...");
       const context = { lessonNumber: chosenLesson, strategy: chosenStrategy, textModel: chosenModels.textModel, promptVersion: chosenPrompt, classroomContext: chosenClassroomContext,
         ...(chosenStrategy === "analogy" ? { analogyMethod: chosenMethod } : {}) };
-      const result = await post("/api/slides", { ...context, operation: review ? "review" : "generate", ...(review && deck ? { draft: deck.draft, feedback: slideRevisionFeedback(teacherRequest, [...issues, ...suggestions]) } : {}) }, controller);
+      // A review keeps the deck's own content, so the Step 2 focus only shapes a new draft.
+      const focus = review ? undefined : embeddedContext?.focus;
+      const result = await post("/api/slides", { ...context, ...(focus ? { focus } : {}), operation: review ? "review" : "generate", ...(review && deck ? { draft: deck.draft, feedback: slideRevisionFeedback(teacherRequest, [...issues, ...suggestions]) } : {}) }, controller);
       const draft = parseDraft(result.draft, chosenStrategy, true);
       let next: SlideDeck = { id: review && deck ? deck.id : crypto.randomUUID(), lessonNumber: chosenLesson, strategy: chosenStrategy, draft, classroomContext: chosenClassroomContext, assets: preservedAssets(review ? deck : null, draft), checks: review ? deck?.checks : undefined, modelSelection: chosenModels, textModel: result.model, promptProvenance: result.promptProvenance };
       if (controller.signal.aborted) return;

@@ -58,24 +58,28 @@ it.each([true, false])("shows response loading failures without claiming zero su
     return originalFetch(input, init);
   });
   render(<TeacherView user={scopedTeacher} />);
+  const analyze = () => screen.getByRole("button", { name: "Analyze 1 response and recommend" }) as HTMLButtonElement;
   if (!initiallyFails) {
-    await screen.findByText("Avery");
-    await waitFor(() => expect((screen.getByRole("button", { name: "Analyze 1 students" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(analyze().disabled).toBe(false));
+    expect(stepTab(/Strategy/).textContent).toContain("1 response in");
     fail = true;
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    // Polling refetches the answers; the Strategy tab click forces a reload here.
+    fireEvent.click(stepTab(/Assessment/));
+    fireEvent.click(stepTab(/Strategy/));
   }
-  expect((await screen.findByRole("alert")).textContent).toContain("Responses temporarily unavailable. Select Refresh to try again.");
-  if (initiallyFails) expect(screen.queryByText(/students have answered so far/)).toBeNull();
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("Responses temporarily unavailable.");
+  // A failed load is not "0 submitted".
+  expect(screen.queryByText(/submitted/)).toBeNull();
+  if (initiallyFails) expect(screen.queryByRole("button", { name: /^Analyze 1 response/ })).toBeNull();
   else {
-    expect(screen.getByText("Avery")).toBeTruthy();
-    expect(screen.getByRole("alert").textContent).toContain("Showing previously loaded responses.");
-    expect((screen.getByRole("button", { name: "Analyze 1 students" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(alert.textContent).toContain("Showing previously loaded responses.");
+    expect(analyze().disabled).toBe(true);
   }
   fail = false;
-  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-  expect(screen.getByText("Avery")).toBeTruthy();
-  expect((screen.getByRole("button", { name: "Analyze 1 students" }) as HTMLButtonElement).disabled).toBe(false);
+  expect(analyze().disabled).toBe(false);
 });
 
 it("shows the v8.3 header and four teacher steps, with the dashboard as Step 4 (#172)", async () => {
@@ -83,7 +87,7 @@ it("shows the v8.3 header and four teacher steps, with the dashboard as Step 4 (
   await screen.findByRole("button", { name: /Lesson 1 0 questions/ });
   const steps = within(screen.getByRole("navigation", { name: "Teacher steps" })).getAllByRole("button");
   expect(steps.map(step => step.textContent)).toEqual([
-    "1AssessmentNot started", "2StrategyNot chosen yet", "3Engagement materialsNot started", "4Questions & discussionClass results",
+    "1AssessmentNot started", "2StrategyWaiting for responses", "3Engagement materialsNot started", "4Questions & discussionClass results",
   ]);
   const header = within(screen.getByRole("banner"));
   expect(header.getByText("Physics · Period 3")).toBeTruthy();

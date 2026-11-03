@@ -469,3 +469,28 @@ describe("slide quality checks", () => {
     expect(await response.text()).not.toContain("secret-provider-detail");
   });
 });
+describe("Step 2 focus in slide generation (#178)", () => {
+  it("narrows the slide prompt to the teacher's chosen misconception", async () => {
+    expect((await POST(req({ ...base, focus: { misconceptions: ["a"] } }))).status).toBe(200);
+    const parameters = mocks.complete.mock.calls[0][0];
+    const context = JSON.parse(parameters.input[0].content);
+    const statement = "If it bends, it must be damaged (permanent). If it 'looks normal,' no deformation happened.";
+    expect(context.teacherFocus).toEqual({ kind: "misconceptions", items: [statement] });
+    expect(context.referenceVariables.MISCONCEPTION_OR_GAP).toEqual([statement]);
+    expect(parameters.instructions).toContain("Teacher-chosen focus");
+  });
+  it("sends the full lesson context without a focus", async () => {
+    expect((await POST(req())).status).toBe(200);
+    const context = JSON.parse(mocks.complete.mock.calls[0][0].input[0].content);
+    expect(context.teacherFocus).toBeUndefined();
+    expect(mocks.complete.mock.calls[0][0].instructions).not.toContain("Teacher-chosen focus");
+  });
+  it.each([{ misconceptions: ["nope"] }, { misconceptions: ["a", "b", "a"] }, "a"])("rejects focus %j before calling the model", async focus => {
+    expect((await POST(req({ ...base, focus }))).status).toBe(400);
+    expect(mocks.complete).not.toHaveBeenCalled();
+  });
+  it("ignores a core-idea focus for a misconception strategy", async () => {
+    expect((await POST(req({ ...base, focus: { coreIdeas: [0] } }))).status).toBe(200);
+    expect(JSON.parse(mocks.complete.mock.calls[0][0].input[0].content).teacherFocus).toBeUndefined();
+  });
+});

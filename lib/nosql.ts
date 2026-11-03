@@ -12,6 +12,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import crypto from "node:crypto";
 import type { Survey, SurveyResponse } from "@/lib/types";
 import type { SurveyAnalysisRecord } from "@/lib/daily-experience-analysis";
+import type { ResolvedFocus } from "@/lib/strategy-focus";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -154,6 +155,8 @@ type TeacherAnnotation = {
   reason?: string | null;
   ai_plan: Record<string, unknown>;
   selected_strategies: string[];
+  /** The Step 2 focus for the chosen strategy, in the lesson's words (#178). */
+  strategy_focus?: ResolvedFocus | null;
   answers: Record<string, string | undefined>;
   created_at: string;
 };

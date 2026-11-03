@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { recordTeacherAnnotation } from "@/lib/nosql";
+import { FocusError, resolveStrategyFocus } from "@/lib/strategy-focus";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,9 @@ type AnnotationRequest = {
   reason?: string | null;
   aiPlan?: Record<string, unknown>;
   selectedStrategies?: string[];
+  /** With focus: the lesson the focus belongs to. */
+  lessonNumber?: number;
+  focus?: unknown;
   answers?: Record<string, string | undefined>;
 };
 
@@ -35,11 +39,19 @@ export async function POST(request: Request) {
       );
     }
 
-    if (decision === "disagree" && !reason) {
-      return NextResponse.json(
-        { error: "reason is required when decision is disagree." },
-        { status: 400 },
-      );
+    // Choosing a different strategy is recorded as a disagreement; the reason is optional (#178).
+    let strategyFocus = null;
+    if (payload.focus !== undefined) {
+      const strategy = payload.selectedStrategies?.[0];
+      if (typeof payload.lessonNumber !== "number" || typeof strategy !== "string") {
+        return NextResponse.json({ error: "lessonNumber and selectedStrategies are required with focus." }, { status: 400 });
+      }
+      try {
+        strategyFocus = resolveStrategyFocus(payload.lessonNumber, strategy, payload.focus);
+      } catch (error) {
+        if (error instanceof FocusError) return NextResponse.json({ error: error.message }, { status: 400 });
+        throw error;
+      }
     }
 
     const record = await recordTeacherAnnotation({
@@ -52,6 +64,7 @@ export async function POST(request: Request) {
       reason,
       ai_plan: payload.aiPlan ?? {},
       selected_strategies: payload.selectedStrategies ?? [],
+      ...(strategyFocus ? { strategy_focus: strategyFocus } : {}),
       answers: payload.answers ?? {},
     });
 
