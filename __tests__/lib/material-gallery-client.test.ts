@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { listMaterialGallery, copyGalleryMaterial, previewGalleryMaterial } from "@/lib/material-gallery-client";
+import { listMaterialGallery, copyGalleryMaterial, previewGalleryMaterial, refreshGalleryCopyMedia } from "@/lib/material-gallery-client";
 const scope = { classId: "ea-class-one", assignmentId: "ea-task-one" };
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -20,4 +20,17 @@ it("rejects malformed preview responses and preserves server error messages", as
   vi.stubGlobal("fetch", fetch);
   await expect(previewGalleryMaterial(scope, "template")).rejects.toThrow("incomplete data");
   await expect(listMaterialGallery(scope)).rejects.toThrow("Teacher access required.");
+});
+it("refreshes a copy using a scoped read without copying or publishing again", async () => {
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ media: { video: "https://saved.example/fresh-video", image: "https://saved.example/fresh-image" } }) });
+  vi.stubGlobal("fetch", fetch);
+  const id = "gallery-copy-02e5ce78-a55c-41ea-b866-69e7313fa9c3";
+  expect(await refreshGalleryCopyMedia(scope, id)).toEqual({ video: "https://saved.example/fresh-video", image: "https://saved.example/fresh-image" });
+  const [url, init] = fetch.mock.calls[0]; const params = new URL(url, "https://app.example").searchParams;
+  expect(Object.fromEntries(params)).toEqual({ ...scope, action: "copy-media", copyId: id.slice(13) });
+  expect(init.method).toBe("GET"); expect(init.cache).toBe("no-store");
+});
+it.each([{}, { media: {} }, { media: { video: "" } }, { media: { video: "/video", image: 1 } }])("rejects incomplete refreshed media: %j", async data => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => data }));
+  await expect(refreshGalleryCopyMedia(scope, "gallery-copy-02e5ce78-a55c-41ea-b866-69e7313fa9c3")).rejects.toThrow("incomplete data");
 });

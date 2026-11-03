@@ -19,6 +19,8 @@ import ShareVideoMaterial from "./ShareVideoMaterial";
 import VideoMaterialEditor from "./VideoMaterialEditor";
 import { defaultStrategyFocus, focusForStrategy, focusKind, lessonCoreIdeas, lessonFocusMisconceptions, resolveStrategyFocus, type StrategyFocus } from "@/lib/strategy-focus";
 import type { GalleryCopy, GalleryMaterial } from "@/lib/material-gallery";
+import { refreshGalleryCopyMedia } from "@/lib/material-gallery-client";
+import { sameMediaResource } from "@/lib/stable-media-urls";
 import { STRATEGIES as SLIDE_STRATEGIES, type SlideStrategy, type SlideDeck } from "@/lib/slides/model";
 import { parseMaterialActivity } from "@/lib/material-activities";
 import { downloadStudentMaterial, type PreparedMaterialFile } from "@/lib/material-export";
@@ -382,6 +384,10 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   useEffect(() => () => { if (preparedMaterial) URL.revokeObjectURL(preparedMaterial.url); }, [preparedMaterial]);
   useEffect(() => () => { materialDownloadJob.current?.controller.abort(); materialDownloadJob.current = null; }, []);
   const [videos, setVideos] = useState<Record<string, VideoState>>({});
+  const [galleryMediaError, setGalleryMediaError] = useState("");
+  const [galleryMediaRetry, setGalleryMediaRetry] = useState(0);
+  const materialMediaRef = useRef({ images, videos });
+  useEffect(() => { materialMediaRef.current = { images, videos }; }, [images, videos]);
   const [focusImage, setFocusImage] = useState<{ url: string; title: string } | null>(null);
   const [focusVideo, setFocusVideo] = useState<{ url: string; title: string } | null>(null);
 
@@ -418,6 +424,65 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const [isRestoringDraftMedia, setIsRestoringDraftMedia] = useState(false);
   const [isRestoringPublishedState, setIsRestoringPublishedState] = useState(false);
   const isRestoringStep3State = isRestoringDraftMedia || isRestoringPublishedState;
+  const galleryCopyIds = content.map(item => item.id).filter(id => /^gallery-copy-[0-9a-f-]{36}$/iu.test(id)).sort().join(",");
+
+  useEffect(() => {
+    if (!isHydrated || isRestoringStep3State || !classId || !assignmentId || !galleryCopyIds) return;
+    let active: AbortController | undefined;
+    let cancelled = false;
+    let lastSuccess = 0;
+    const refresh = async () => {
+      if (active || cancelled) return;
+      const controller = new AbortController(); active = controller;
+      const before = materialMediaRef.current;
+      const results = await Promise.allSettled(galleryCopyIds.split(",").map(async id => ({ id,
+        media: await refreshGalleryCopyMedia({ classId, assignmentId }, id, controller.signal),
+      })));
+      if (cancelled || controller.signal.aborted) return;
+      const renewed = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
+      setImages(previous => {
+        const next = { ...previous };
+        for (const { id, media } of renewed) {
+          // Ignore a late refresh if generation or an image-version choice
+          // changed this material while the request was in flight.
+          if (!media.image || previous[id] !== before.images[id] || previous[id]?.status === "loading") continue;
+          const current = previous[id];
+          // A version selection can precede this request but still be waiting
+          // for its debounced save (or DynamoDB consistency). Renew only the
+          // selected resource; never write the server's older active version
+          // into this history slot. Expired signatures retain the same identity.
+          if (current?.url && !sameMediaResource(current.url, media.image)) continue;
+          const history = current?.history?.map((version, index) => index === (current.historyIndex ?? 0) ? { ...version, url: media.image! } : version);
+          next[id] = { ...current, status: "ready", url: media.image, ...(history ? { history } : {}) };
+        }
+        return next;
+      });
+      setVideos(previous => {
+        const next = { ...previous };
+        for (const { id, media } of renewed) {
+          if (previous[id] !== before.videos[id] || ["loading", "polling"].includes(previous[id]?.status ?? "")) continue;
+          if (previous[id]?.url && !sameMediaResource(previous[id].url!, media.video)) continue;
+          next[id] = { status: "ready", url: media.video };
+        }
+        return next;
+      });
+      const failed = results.some(result => result.status === "rejected");
+      setGalleryMediaError(failed ? "Some saved video links could not refresh. Try again to preview them." : "");
+      if (!failed) lastSuccess = Date.now();
+      active = undefined;
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible" && Date.now() - lastSuccess > 5 * 60_000) void refresh();
+    };
+    void refresh();
+    // Gallery links last fifteen minutes. Renew before expiry, including after
+    // a sleeping/background tab returns, without republishing the draft.
+    const interval = window.setInterval(refreshWhenVisible, 8 * 60_000);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => { cancelled = true; active?.abort(); window.clearInterval(interval);
+      window.removeEventListener("focus", refreshWhenVisible); document.removeEventListener("visibilitychange", refreshWhenVisible); };
+  }, [assignmentId, classId, galleryCopyIds, galleryMediaRetry, isHydrated, isRestoringStep3State, user.geniusId]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -1493,7 +1558,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     timers.set(itemId, setTimeout(async () => {
       timers.delete(itemId);
       try {
-        await scopedTaskFetch({ classId, assignmentId }, "/api/media", {
+        const response = await scopedTaskFetch({ classId, assignmentId }, "/api/media", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1505,6 +1570,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             versionIndex,
           }),
         });
+        // The history entry may already have expired. Once the selected
+        // version is saved, renew it now instead of waiting for the interval.
+        if (response.ok && /^gallery-copy-[0-9a-f-]{36}$/iu.test(itemId)) setGalleryMediaRetry(value => value + 1);
       } catch { /* best-effort */ }
     }, 500));
   };
@@ -2083,6 +2151,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                 key={`${classId}:${assignmentId}:${selectedLesson}`} scope={{ classId, assignmentId }} lessonNumber={selectedLesson ?? 0}
                 strategy={selectedStrategies[0] ?? ""} format={materialFormat} focus={selectedFocus} disabled={generationBusy}
                 refreshKey={galleryRefresh} browseRequest={galleryBrowseRequest} onUse={useGalleryMaterial} />}
+              {galleryCopyIds && galleryMediaError && <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-amber-800">
+                <p>{galleryMediaError}</p><button type="button" className="font-semibold underline" onClick={() => setGalleryMediaRetry(value => value + 1)}>Refresh saved videos</button>
+              </div>}
 
               <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl bg-slate-50 p-4">
                 <div className="min-w-0 text-sm text-slate-700">

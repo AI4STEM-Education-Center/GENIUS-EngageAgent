@@ -279,6 +279,31 @@ async function videoUrls(source: Source) {
   return { video: await galleryBlobUrl(source.videoMedia.video), ...(source.videoMedia.image ? { image: await galleryBlobUrl(source.videoMedia.image) } : {}) };
 }
 
+/** A copied draft is private to its teacher/task even before student publication. */
+async function copyVideoMedia(context: AuthorizedSlideContext, copyId: unknown) {
+  const { copy, source } = await copiedSource(context, copyId);
+  if (source.format !== "video") throw new SlideRequestError("Choose a copied video material.", 422);
+  const contentItemId = `gallery-copy-${copy.id}`;
+  const [fallback, image, video] = await Promise.all([
+    videoUrls(source),
+    getMedia(context.classId, context.assignmentId, "cohort", contentItemId, "image"),
+    getMedia(context.classId, context.assignmentId, "cohort", contentItemId, "video"),
+  ]);
+  const media = { ...fallback };
+  for (const [kind, saved] of [["image", image], ["video", video]] as const) {
+    if (!saved) continue;
+    if (![context.classId, `CLASS#${context.classId}`].includes(saved.class_id) || saved.assignment_id !== context.assignmentId
+      || saved.student_id !== "cohort" || saved.content_item_id !== contentItemId || saved.media_type !== kind) {
+      throw new SlideRequestError("Saved media did not match this task.", 422);
+    }
+    if (!saved.data_url) throw new SlideRequestError("The saved video links could not be refreshed. Please try again.", 503);
+    // An adapted copy may have newly generated task media. Never replace it
+    // with the Gallery original when renewing a draft's expiring URLs.
+    media[kind] = saved.data_url;
+  }
+  return { media };
+}
+
 /** Called only after the content-publish handler authorizes this task. URLs are renewed on every read. */
 export async function resolveGalleryContentMedia(classId: string, assignmentId: string, contentItemId: string) {
   const match = /^gallery-copy-([0-9a-f-]{36})$/iu.exec(contentItemId);
@@ -314,6 +339,7 @@ export async function galleryGet(request: Request) {
   const params = new URL(request.url).searchParams;
   if (new Set(params.keys()).size !== [...params.keys()].length) throw new SlideRequestError("Repeated query parameters are not allowed.");
   const context = await authorizeSlides(request, Object.fromEntries(params));
+  if (params.get("action") === "copy-media") return copyVideoMedia(context, params.get("copyId"));
   if (params.get("action") === "asset") {
     const { source } = params.has("copyId") ? await copiedSource(context, params.get("copyId")) : { source: await sharedSource(params.get("id")) };
     const visualId = params.get("visualId");

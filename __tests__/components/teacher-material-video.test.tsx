@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { UserContext } from "@/lib/auth";
-import type { ContentItem, ImageState, Plan } from "@/lib/types";
+import type { ContentItem, ImageState, Plan, VideoState } from "@/lib/types";
 import { analogyActivity } from "../fixtures/material-activities";
 
 // This suite exercises the teacher's material workflow; the slide editor has its own integration tests.
@@ -27,18 +27,23 @@ const activity: Omit<ContentItem, "id"> = {
   strategy: "analogy", activity: analogyActivity,
 };
 const sourceImage = "https://example.com/source-spring.jpg";
+const signedMedia = (path: string, signature: string, signedAt = Date.now()) => {
+  const query = new URLSearchParams({ "X-Amz-Algorithm": "AWS4-HMAC-SHA256", "X-Amz-Signature": signature.repeat(64),
+    "X-Amz-Date": new Date(signedAt).toISOString().replace(/[-:]/gu, "").replace(/\.\d{3}Z$/u, "Z"), "X-Amz-Expires": "900" });
+  return `https://materials.s3.us-east-2.amazonaws.com/${path}?${query}`;
+};
 const fetchMock = vi.fn<(path: string, init?: RequestInit) => Promise<Response>>();
 const reply = (data: unknown, status = 200) => ({
   ok: status >= 200 && status < 300, status,
   json: async () => data, text: async () => JSON.stringify(data),
 }) as Response;
 
-function seedDraft(content: ContentItem[] = [], images: Record<string, ImageState> = {}) {
+function seedDraft(content: ContentItem[] = [], images: Record<string, ImageState> = {}, videos: Record<string, VideoState> = {}) {
   localStorage.setItem(`engage-agent:draft:v3:${teacher.classId}:${teacher.assignmentId}`, JSON.stringify({
     version: 2, classId: teacher.classId, assignmentId: teacher.assignmentId,
     lessonNumber: 3, currentStep: 3, materialFormat: "video", plan,
     selectedStrategies: ["analogy"], annotationDecision: null, annotationReason: "", annotationStatus: "idle",
-    content, images, videos: {}, selectedForPublish: [], publishedContentIds: [],
+    content, images, videos, selectedForPublish: [], publishedContentIds: [],
   }));
 }
 
@@ -165,6 +170,151 @@ it("keeps a restored Gallery video's original lesson, focus and source when savi
     expect(draft.content[0]).toMatchObject(saved);
   });
   expect(posts()).toHaveLength(0);
+});
+
+it("refreshes an unpublished Gallery video's expired draft links and renews after returning to the task", async () => {
+  const id = "gallery-copy-02e5ce78-a55c-41ea-b866-69e7313fa9c3";
+  const saved: ContentItem = { ...activity, id, lessonNumber: 3, focus: { coreIdeas: [0] },
+    gallerySource: { templateId: "shared-video", revision: 1, title: "Shared video", mode: "adapt" } };
+  const now = Date.now();
+  const expiredImage = signedMedia("material-gallery/source/image.png", "a", now - 16 * 60_000);
+  const renewedImage = signedMedia("material-gallery/source/image.png", "b", now);
+  const expiredVideo = signedMedia("material-gallery/source/video.mp4", "a", now - 16 * 60_000);
+  const renewedVideo = signedMedia("material-gallery/source/video.mp4", "b", now);
+  const laterVideo = signedMedia("material-gallery/source/video.mp4", "c", now + 16 * 60_000);
+  seedDraft([saved], { [id]: { status: "ready", url: expiredImage } }, { [id]: { status: "ready", url: expiredVideo } });
+  const original = fetchMock.getMockImplementation()!; let refreshed = 0;
+  fetchMock.mockImplementation(async (path, init) => path.includes("action=copy-media")
+    ? reply({ media: { video: ++refreshed === 1 ? renewedVideo : laterVideo, image: renewedImage } }) : original(path, init));
+  await openMaterials();
+  await waitFor(() => expect(screen.getByLabelText("Activity video").getAttribute("src")).toBe(renewedVideo));
+  expect(screen.getByAltText(saved.title).getAttribute("src")).toBe(renewedImage);
+  const refresh = fetchMock.mock.calls.find(([path]) => path.includes("action=copy-media"))!;
+  expect(Object.fromEntries(new URL(refresh[0], "https://app.example").searchParams)).toEqual({ classId: teacher.classId, assignmentId: teacher.assignmentId, action: "copy-media", copyId: id.slice(13) });
+  expect(refresh[1]?.method).toBe("GET"); expect(posts()).toHaveLength(0);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now + 16 * 60_000);
+  try {
+    fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(screen.getByLabelText("Activity video").getAttribute("src")).toBe(laterVideo));
+  } finally { clock.mockRestore(); }
+  expect(posts()).toHaveLength(0);
+});
+
+it("keeps the current Gallery draft on a refresh failure and offers a retry without regeneration", async () => {
+  const id = "gallery-copy-02e5ce78-a55c-41ea-b866-69e7313fa9c3";
+  const oldVideo = signedMedia("material-gallery/source/video.mp4", "a", Date.now() - 16 * 60_000);
+  const recoveredVideo = signedMedia("material-gallery/source/video.mp4", "b");
+  seedDraft([{ ...activity, id, lessonNumber: 3 }], {}, { [id]: { status: "ready", url: oldVideo } });
+  const original = fetchMock.getMockImplementation()!; let fail = true;
+  fetchMock.mockImplementation(async (path, init) => path.includes("action=copy-media")
+    ? fail ? reply({ error: "Temporary storage failure." }, 503) : reply({ media: { video: recoveredVideo } }) : original(path, init));
+  await openMaterials();
+  expect(await screen.findByText(/Some saved video links could not refresh/)).toBeTruthy();
+  expect(screen.getByLabelText("Activity video").getAttribute("src")).toBe(oldVideo);
+  fail = false; fireEvent.click(screen.getByRole("button", { name: "Refresh saved videos" }));
+  await waitFor(() => expect(screen.getByLabelText("Activity video").getAttribute("src")).toBe(recoveredVideo));
+  expect(screen.queryByText(/Some saved video links could not refresh/)).toBeNull(); expect(posts()).toHaveLength(0);
+});
+
+it("aborts an in-flight copy-media refresh when the teacher task changes", async () => {
+  const id = "gallery-copy-02e5ce78-a55c-41ea-b866-69e7313fa9c3";
+  seedDraft([{ ...activity, id, lessonNumber: 3 }], {}, { [id]: { status: "ready", url: "https://saved.example/old-video" } });
+  let finish: (response: Response) => void = () => {};
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (path, init) => path.includes("action=copy-media") ? new Promise(resolve => { finish = resolve; }) : original(path, init));
+  const view = render(<TeacherView user={teacher} />);
+  await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => path.includes("action=copy-media"))).toBe(true));
+  const signal = fetchMock.mock.calls.find(([path]) => path.includes("action=copy-media"))![1]?.signal;
+  view.rerender(<TeacherView user={{ ...teacher, classId: "ea-class-different", assignmentId: "ea-task-different" }} />);
+  expect(signal?.aborted).toBe(true);
+  await act(async () => { finish(reply({ media: { video: "https://saved.example/stale-scope-video" } })); });
+  expect(document.querySelector('video[src="https://saved.example/stale-scope-video"]')).toBeNull();
+});
+
+it("keeps a selected image history version when refresh returns the previous server version before its debounced save", async () => {
+  const id = "gallery-copy-9f065d8d-5f8e-40b8-8cb7-6a536622abcc";
+  const saved: ContentItem = { ...activity, id, lessonNumber: 3 };
+  const now = Date.now();
+  const first = signedMedia("media/copied-image_v0.png", "a", now - 16 * 60_000);
+  const second = signedMedia("media/copied-image_v1.png", "b", now - 16 * 60_000);
+  const renewedSecond = signedMedia("media/copied-image_v1.png", "c", now);
+  const staleServerSecond = signedMedia("media/copied-image_v1.png", "d", now + 6 * 60_000);
+  const renewedFirst = signedMedia("media/copied-image_v0.png", "e", now + 6 * 60_000);
+  const video = signedMedia("material-gallery/source/video.mp4", "a", now);
+  seedDraft([saved], { [id]: { status: "ready", url: second, historyIndex: 1,
+    history: [{ url: first, createdAt: "2026-11-02T00:00:00Z" }, { url: second, createdAt: "2026-11-03T00:00:00Z" }] } }, { [id]: { status: "ready", url: video } });
+  const original = fetchMock.getMockImplementation()!;
+  let refreshCount = 0; let finishPut: (response: Response) => void = () => {};
+  const sequence: string[] = [];
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path.includes("action=copy-media")) {
+      refreshCount++;
+      if (refreshCount > 1) sequence.push(refreshCount === 2 ? "refresh returned previous version" : "selected version renewed");
+      return reply({ media: { video, image: refreshCount === 1 ? renewedSecond : refreshCount === 2 ? staleServerSecond : renewedFirst } });
+    }
+    if (path === "/api/media" && init?.method === "PUT") {
+      sequence.push("save started");
+      return new Promise(resolve => { finishPut = resolve; });
+    }
+    return original(path, init);
+  });
+  await openMaterials();
+  await waitFor(() => expect(screen.getByAltText(saved.title).getAttribute("src")).toBe(renewedSecond));
+  // Let the initial refreshed draft settle before controlling just the version-save debounce.
+  await waitFor(() => expect(JSON.parse(localStorage.getItem(`engage-agent:draft:v3:${teacher.classId}:${teacher.assignmentId}`)!).images[id].url).toBe(renewedSecond));
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now + 6 * 60_000);
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "←" })); sequence.push("selected previous version");
+    expect(screen.getByAltText(saved.title).getAttribute("src")).toBe(first);
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(refreshCount).toBe(2); expect(sequence).toEqual(["selected previous version", "refresh returned previous version"]);
+    expect(screen.getByAltText(saved.title).getAttribute("src")).toBe(first);
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(sequence.at(-1)).toBe("save started");
+    const put = fetchMock.mock.calls.find(([path, init]) => path === "/api/media" && init?.method === "PUT")!;
+    expect(JSON.parse(String(put[1]?.body))).toMatchObject({ contentItemId: id, versionIndex: 0 });
+    await act(async () => { finishPut(reply({ updated: true })); });
+    expect(refreshCount).toBe(3); expect(sequence.at(-1)).toBe("selected version renewed");
+    expect(screen.getByAltText(saved.title).getAttribute("src")).toBe(renewedFirst);
+    await act(async () => { await vi.advanceTimersByTimeAsync(350); });
+    const persisted = JSON.parse(localStorage.getItem(`engage-agent:draft:v3:${teacher.classId}:${teacher.assignmentId}`)!).images[id];
+    expect(persisted.historyIndex).toBe(0); expect(persisted.url).toBe(renewedFirst);
+    expect(persisted.history.map((entry: { url: string }) => entry.url)).toEqual([renewedFirst, renewedSecond]);
+  } finally { clock.mockRestore(); vi.useRealTimers(); }
+});
+
+it("does not write a newly saved refinement into the old history slot before its generation response arrives", async () => {
+  const id = "gallery-copy-a25110e2-8143-448b-84d4-bd9eb60a206e";
+  const saved: ContentItem = { ...activity, id, lessonNumber: 3 };
+  const now = Date.now();
+  const originalImage = signedMedia("media/refined-copy_image_v0.png", "a", now);
+  const newImage = signedMedia("media/refined-copy_image_v1.png", "b", now + 6 * 60_000);
+  const video = signedMedia("material-gallery/refined-source/video.mp4", "a", now);
+  seedDraft([saved], { [id]: { status: "ready", url: originalImage, historyIndex: 0, history: [{ url: originalImage, createdAt: "2026-11-03T00:00:00Z" }] } }, { [id]: { status: "ready", url: video } });
+  const original = fetchMock.getMockImplementation()!; let refreshCount = 0;
+  let finishRefine: (response: Response) => void = () => {};
+  fetchMock.mockImplementation(async (path, init) => {
+    if (path.includes("action=copy-media")) return reply({ media: { video, image: ++refreshCount === 1 ? originalImage : newImage } });
+    if (path === "/api/engagement-image") return new Promise(resolve => { finishRefine = resolve; });
+    return original(path, init);
+  });
+  await openMaterials(); await waitFor(() => expect(refreshCount).toBe(1));
+  fireEvent.click(screen.getAllByRole("button", { name: "Refine" })[0]);
+  fireEvent.change(screen.getByPlaceholderText("Describe how you'd like to modify this image..."), { target: { value: "Make the gaps clearer." } });
+  fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+  await waitFor(() => expect(callsTo("/api/engagement-image")).toHaveLength(1));
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now + 6 * 60_000);
+  try {
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(refreshCount).toBe(2); expect(screen.getAllByAltText(saved.title).map(image => image.getAttribute("src"))).toEqual([originalImage, originalImage]);
+    await act(async () => { finishRefine(reply({ url: newImage })); });
+    expect(screen.getAllByAltText(saved.title).map(image => image.getAttribute("src"))).toEqual([newImage, newImage]);
+    await waitFor(() => {
+      const image = JSON.parse(localStorage.getItem(`engage-agent:draft:v3:${teacher.classId}:${teacher.assignmentId}`)!).images[id];
+      expect(image.historyIndex).toBe(1); expect(image.history.map((entry: { url: string }) => entry.url)).toEqual([originalImage, newImage]);
+    });
+  } finally { clock.mockRestore(); }
 });
 
 it("uses saved classroom edits when generating a video for an adapted material", async () => {

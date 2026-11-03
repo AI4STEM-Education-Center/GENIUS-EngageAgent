@@ -8,6 +8,7 @@ import PublishedSlidesReader from "./PublishedSlidesReader";
 import type { UserContext } from "@/lib/auth";
 import type { ContentItem, TextMode } from "@/lib/types";
 import type { StepProgress } from "@/lib/student-progress";
+import { stableContentMedia } from "@/lib/stable-media-urls";
 import {
   buildPublishedContentState,
   type MediaRecordResponse,
@@ -53,6 +54,10 @@ function ContentReview({
 }: Props) {
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [media, setMedia] = useState<Record<string, SharedContentMedia>>({});
+  // Keep refreshed capabilities available without changing a playing src.
+  // Both refs belong to the keyed learner/class/task instance below.
+  const latestMedia = useRef<Record<string, SharedContentMedia>>({});
+  const failedVideoUrls = useRef(new Map<string, Set<string>>());
   const [loading, setLoading] = useState(true);
   const contentRequest = useRef(0);
   const [error, setError] = useState<string | null>(null);
@@ -116,8 +121,22 @@ function ContentReview({
       );
 
       if (requestNumber !== contentRequest.current) return;
+      latestMedia.current = publishedState.mediaByItemId;
+      for (const id of failedVideoUrls.current.keys()) {
+        if (!publishedState.mediaByItemId[id]?.video) failedVideoUrls.current.delete(id);
+      }
       setContentItems(publishedState.contentItems);
-      setMedia(publishedState.mediaByItemId);
+      setMedia(current => {
+        const next = stableContentMedia(current, publishedState.mediaByItemId);
+        for (const [id, incoming] of Object.entries(publishedState.mediaByItemId)) {
+          const failed = failedVideoUrls.current.get(id);
+          const previous = current[id]?.video;
+          if (!previous || !incoming.video || !failed?.size) continue;
+          if (failed.has(incoming.video)) next[id].video = previous;
+          else if (failed.has(previous)) next[id].video = incoming.video;
+        }
+        return next;
+      });
       setError(null);
     } catch (err) {
       if (requestNumber === contentRequest.current) setError(err instanceof Error ? err.message : "Failed to load content.");
@@ -125,6 +144,21 @@ function ContentReview({
       if (requestNumber === contentRequest.current) setLoading(false);
     }
   }, [assignmentId, classId]);
+
+  function recoverVideo(itemId: string, failedUrl: string) {
+    if (!failedUrl) return;
+    const failed = failedVideoUrls.current.get(itemId) ?? new Set<string>();
+    if (failed.has(failedUrl)) return;
+    failed.add(failedUrl);
+    failedVideoUrls.current.set(itemId, failed);
+    const replacement = latestMedia.current[itemId]?.video;
+    if (!replacement || failed.has(replacement)) return;
+    setMedia(current => current[itemId]?.video === failedUrl
+      ? { ...current, [itemId]: { ...current[itemId], video: replacement } }
+      : current);
+    // If no new URL is available, the next normal poll replaces this failed
+    // capability. Error events never launch requests or reload the same src.
+  }
 
   const loadOwnQuestions = useCallback(async () => {
     if (!classId || !assignmentId) return;
@@ -395,10 +429,11 @@ function ContentReview({
             </div>
             <h3 className="mt-2 text-lg font-semibold text-ink">{item.title}</h3>
             {item.activity ? <MaterialActivityView activity={item.activity} media={itemMedia} questionInput={false}
+              onVideoError={url => recoverVideo(item.id, url)}
               predictionKey={`engage:material-prediction:${JSON.stringify([user.geniusId, classId, assignmentId, item.id])}`} /> : (
               <div className="mt-3 space-y-4">
                 {itemMedia?.image && <img src={itemMedia.image} alt={item.title} className="max-h-96 w-full rounded-lg border border-line object-contain" />}
-                {itemMedia?.video && <video src={itemMedia.video} aria-label={item.title} className="max-h-96 w-full rounded-lg border border-line" controls playsInline preload="metadata" />}
+                {itemMedia?.video && <video src={itemMedia.video} aria-label={item.title} className="max-h-96 w-full rounded-lg border border-line" controls playsInline preload="metadata" onError={event => recoverVideo(item.id, event.currentTarget.getAttribute("src") ?? "")} />}
                 <p className="whitespace-pre-line text-[15px] leading-relaxed text-ink-2">{item.body}</p>
               </div>
             )}

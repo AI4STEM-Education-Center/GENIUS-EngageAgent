@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import StudentContentReviewView from "@/app/components/StudentContentReviewView";
 import { conflictActivity } from "../fixtures/material-activities";
@@ -40,7 +40,7 @@ beforeEach(() => {
   });
   vi.stubGlobal("fetch", fetchMock);
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 const ratingCard = async () => {
   const label = await screen.findByText("Rate the material");
@@ -355,4 +355,156 @@ it("retains the reader and unfinished question when a background refresh fails",
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   expect((screen.getByRole("textbox", { name: "Question 1" }) as HTMLTextAreaElement).value).toBe("My unfinished question");
+});
+
+const mediaTime = Date.parse("2026-11-03T12:00:00Z");
+const signedVideo = (signedAt: number, signature: string, path = "material-gallery/source/video-one.mp4", version?: string) => {
+  const query = new URLSearchParams({
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "X-Amz-Date": new Date(signedAt).toISOString().replace(/[-:]/gu, "").replace(".000", ""),
+    "X-Amz-Expires": "900", "X-Amz-Signature": signature.repeat(64), "X-Amz-SignedHeaders": "host",
+    ...(version ? { versionId: version } : {}),
+  });
+  return `https://materials.s3.us-east-2.amazonaws.com/${path}?${query}`;
+};
+
+it("keeps a playing video src stable across the 15-second poll and renews it near expiry", async () => {
+  const now = vi.spyOn(Date, "now").mockReturnValue(mediaTime);
+  const intervals = vi.spyOn(window, "setInterval");
+  let revision = 0;
+  let url = signedVideo(mediaTime, "a");
+  fetchMock.mockImplementation(async (input: string) => input.startsWith("/api/content-publish")
+    ? { ok: true, json: async () => ({ items: [{ content_item_id: "video", content_json: JSON.stringify({ title: `Video material ${revision}`, type: "Video", body: "Observe the video.", strategy: "cognitive conflict", activity: conflictActivity }), media: { video: url } }] }) }
+    : { ok: true, json: async () => ({}) });
+  render(<StudentContentReviewView user={student} />);
+  await screen.findByRole("heading", { name: "Video material 0" });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "The ball stays round." } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  const video = screen.getByLabelText("Activity video") as HTMLVideoElement;
+  const originalUrl = video.getAttribute("src");
+  video.currentTime = 12;
+  const poll = intervals.mock.calls.find(([, interval]) => interval === 15_000)![0] as () => void;
+  revision = 1; url = signedVideo(mediaTime + 15_000, "b"); now.mockReturnValue(mediaTime + 15_000);
+  await act(async () => poll());
+  await screen.findByRole("heading", { name: "Video material 1" });
+  expect(screen.getByLabelText("Activity video")).toBe(video);
+  expect(video.getAttribute("src")).toBe(originalUrl);
+  expect(video.currentTime).toBe(12);
+  expect(screen.getByLabelText("Your prediction")).toHaveProperty("value", "The ball stays round.");
+  expect(screen.getByLabelText("Your prediction")).toHaveProperty("readOnly", true);
+  revision = 2; url = signedVideo(mediaTime + 840_000, "c"); now.mockReturnValue(mediaTime + 840_000);
+  await act(async () => poll());
+  await screen.findByRole("heading", { name: "Video material 2" });
+  expect(screen.getByLabelText("Activity video")).toBe(video);
+  expect(video.getAttribute("src")).toBe(url);
+});
+
+it("adopts changed video objects and versions immediately and removes withdrawn media", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(mediaTime);
+  let revision = 0;
+  let url: string | undefined = signedVideo(mediaTime, "a");
+  fetchMock.mockImplementation(async (input: string) => input.startsWith("/api/content-publish")
+    ? { ok: true, json: async () => ({ items: [{ content_item_id: "video", content_json: JSON.stringify({ title: `Video material ${revision}`, type: "Video", body: "Observe the video." }), media: { video: url } }] }) }
+    : { ok: true, json: async () => ({}) });
+  render(<StudentContentReviewView user={student} />);
+  await screen.findByLabelText("Video material 0", { selector: "video" });
+  revision = 1; url = signedVideo(mediaTime, "b", "media/class/task/cohort/video_v2.mp4");
+  fireEvent.focus(window);
+  expect((await screen.findByLabelText("Video material 1", { selector: "video" })).getAttribute("src")).toBe(url);
+  revision = 2; url = signedVideo(mediaTime, "c", "media/class/task/cohort/video_v2.mp4", "new-version");
+  fireEvent.focus(window);
+  expect((await screen.findByLabelText("Video material 2", { selector: "video" })).getAttribute("src")).toBe(url);
+  revision = 3; url = undefined;
+  fireEvent.focus(window);
+  await screen.findByRole("heading", { name: "Video material 3" });
+  expect(screen.queryByLabelText("Video material 3", { selector: "video" })).toBeNull();
+});
+
+it.each(["geniusId", "classId", "assignmentId"] as const)("never retains the previous %s scope's playback URL", async dimension => {
+  vi.spyOn(Date, "now").mockReturnValue(mediaTime);
+  let url = signedVideo(mediaTime, "a");
+  fetchMock.mockImplementation(async (input: string) => input.startsWith("/api/content-publish")
+    ? { ok: true, json: async () => ({ items: [{ content_item_id: "video", content_json: JSON.stringify({ title: "A video", type: "Video", body: "Observe." }), media: { video: url } }] }) }
+    : { ok: true, json: async () => ({}) });
+  const view = render(<StudentContentReviewView user={student} />);
+  const original = await screen.findByLabelText("A video", { selector: "video" });
+  url = signedVideo(mediaTime + 15_000, "b");
+  view.rerender(<StudentContentReviewView user={{ ...student, [dimension]: "different-scope" }} />);
+  const replacement = await screen.findByLabelText("A video", { selector: "video" });
+  expect(replacement).not.toBe(original);
+  expect(replacement.getAttribute("src")).toBe(url);
+});
+
+it.each([false, true])("recovers an early-expired video from the latest polled URL without retry loops (inquiry=%s)", async inquiry => {
+  vi.spyOn(Date, "now").mockReturnValue(mediaTime + 15_000);
+  const originalUrl = signedVideo(mediaTime, "a");
+  const freshUrl = signedVideo(mediaTime + 15_000, "b");
+  const workingUrl = signedVideo(mediaTime, "c", "material-gallery/working/video.mp4");
+  let revision = 0;
+  let url = originalUrl;
+  fetchMock.mockImplementation(async (input: string) => input.startsWith("/api/content-publish")
+    ? { ok: true, json: async () => ({ items: [
+      { content_item_id: "recover-video", content_json: JSON.stringify({ title: `Recover video ${revision}`, type: "Video", body: "Observe.", ...(inquiry ? { strategy: "cognitive conflict", activity: conflictActivity } : {}) }), media: { video: url } },
+      { content_item_id: "working-video", content_json: JSON.stringify({ title: "Working video", type: "Video", body: "Keep watching." }), media: { video: workingUrl } },
+    ] }) }
+    : { ok: true, json: async () => ({}) });
+  render(<StudentContentReviewView user={student} />);
+  await screen.findByRole("article", { name: "Recover video 0" });
+  if (inquiry) {
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "My original prediction." } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  }
+  const video = screen.getByLabelText(inquiry ? "Activity video" : "Recover video 0", { selector: "video" });
+  const working = screen.getByLabelText("Working video", { selector: "video" }) as HTMLVideoElement;
+  working.currentTime = 8;
+  revision = 1; url = freshUrl;
+  fireEvent.focus(window);
+  await screen.findByRole("article", { name: "Recover video 1" });
+  expect(video.getAttribute("src")).toBe(originalUrl);
+  const requestsBeforeError = fetchMock.mock.calls.length;
+  fireEvent.error(video);
+  expect(video.getAttribute("src")).toBe(freshUrl);
+  expect(fetchMock.mock.calls).toHaveLength(requestsBeforeError);
+  expect(screen.getByLabelText("Working video", { selector: "video" })).toBe(working);
+  expect(working.getAttribute("src")).toBe(workingUrl);
+  expect(working.currentTime).toBe(8);
+  if (inquiry) {
+    expect(screen.getByLabelText("Your prediction")).toHaveProperty("value", "My original prediction.");
+    expect(screen.getByLabelText("Your prediction")).toHaveProperty("readOnly", true);
+  }
+  // The replacement can fail too. Repeated errors never reassign its src or
+  // launch immediate fetches, and a stale poll cannot cycle back to a failed URL.
+  fireEvent.error(video); fireEvent.error(video); fireEvent.error(video);
+  expect(fetchMock.mock.calls).toHaveLength(requestsBeforeError);
+  expect(video.getAttribute("src")).toBe(freshUrl);
+  revision = 2; url = originalUrl;
+  fireEvent.focus(window);
+  await screen.findByRole("article", { name: "Recover video 2" });
+  expect(video.getAttribute("src")).toBe(freshUrl);
+});
+
+it("replaces a failed URL on the next normal poll when no newer signature was cached", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(mediaTime + 15_000);
+  const originalUrl = signedVideo(mediaTime, "a");
+  let revision = 0;
+  let url = originalUrl;
+  fetchMock.mockImplementation(async (input: string) => input.startsWith("/api/content-publish")
+    ? { ok: true, json: async () => ({ items: [{ content_item_id: "video", content_json: JSON.stringify({ title: `Waiting video ${revision}`, type: "Video", body: "Observe." }), media: { video: url } }] }) }
+    : { ok: true, json: async () => ({}) });
+  render(<StudentContentReviewView user={student} />);
+  const video = await screen.findByLabelText("Waiting video 0", { selector: "video" });
+  const requestsBeforeError = fetchMock.mock.calls.length;
+  fireEvent.error(video); fireEvent.error(video);
+  expect(video.getAttribute("src")).toBe(originalUrl);
+  expect(fetchMock.mock.calls).toHaveLength(requestsBeforeError);
+  revision = 1;
+  fireEvent.focus(window);
+  await screen.findByRole("heading", { name: "Waiting video 1" });
+  expect(video.getAttribute("src")).toBe(originalUrl);
+  revision = 2; url = signedVideo(mediaTime + 15_000, "b");
+  fireEvent.focus(window);
+  await screen.findByRole("heading", { name: "Waiting video 2" });
+  expect(video.getAttribute("src")).toBe(url);
 });

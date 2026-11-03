@@ -119,6 +119,14 @@ export async function copyGalleryMaterial(scope: GalleryScope, id: string, mode:
   const deck = imageProvenance({ ...copy.deck, assets: await loadAssets(scope, copy.visualIds || [], { copyId: copy.copyId }, signal) }) as SlideDeck & { gallerySource: GalleryProvenance };
   return { format: "slides", deck, source: copy.source };
 }
+export async function refreshGalleryCopyMedia(scope: GalleryScope, contentItemId: string, signal?: AbortSignal): Promise<{ video: string; image?: string }> {
+  const copyId = /^gallery-copy-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/iu.exec(contentItemId)?.[1];
+  if (!copyId) throw new Error("Choose a copied video material.");
+  const data = await json<{ media: { video: string; image?: string } }>(scope, { action: "copy-media", copyId }, "GET", signal);
+  if (!record(data.media) || typeof data.media.video !== "string" || !data.media.video
+    || (data.media.image !== undefined && (typeof data.media.image !== "string" || !data.media.image))) throw invalid();
+  return data.media;
+}
 export async function unshareGalleryMaterial(scope: GalleryScope, id: string, signal?: AbortSignal) {
   const result = await json<{ removed: boolean }>(scope, { action: "unshare", id }, "POST", signal);
   if (result.removed !== true) throw invalid();

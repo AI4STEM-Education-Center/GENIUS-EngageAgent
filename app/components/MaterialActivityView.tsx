@@ -11,6 +11,7 @@ type Props = {
   questionInput?: boolean;
   /** Session-only key scoped by the caller to learner, class, task and material. */
   predictionKey?: string;
+  onVideoError?: (url: string) => void;
 };
 
 function readPrediction(key?: string): { draft: string; recorded: string } {
@@ -23,7 +24,7 @@ function readPrediction(key?: string): { draft: string; recorded: string } {
   } catch { return { draft: "", recorded: "" }; }
 }
 
-function ActivityReader({ activity, media, preview = false, questionInput = true, predictionKey }: Props) {
+function ActivityReader({ activity, media, preview = false, questionInput = true, predictionKey, onVideoError }: Props) {
   const storageKey = !preview && activity.stages.some(stage => stage.id === "prediction") ? predictionKey : undefined;
   const [initialPrediction] = useState(() => readPrediction(storageKey));
   const [visibleCount, setVisibleCount] = useState(1);
@@ -75,7 +76,7 @@ function ActivityReader({ activity, media, preview = false, questionInput = true
               </figcaption>
             </figure>
           )}
-          {index === activity.image.revealAt && media?.video && <video src={media.video} controls playsInline preload="metadata" aria-label="Activity video" className="mt-3 aspect-square w-full max-w-md rounded-md bg-black" />}
+          {index === activity.image.revealAt && media?.video && <video src={media.video} controls playsInline preload="metadata" aria-label="Activity video" className="mt-3 aspect-square w-full max-w-md rounded-md bg-black" onError={event => onVideoError?.(event.currentTarget.getAttribute("src") ?? "")} />}
           {!preview && stage.id === "question" && !questionInput && <p className="mt-3 text-sm font-medium text-slate-700">Record your scientific question in Your questions below.</p>}
           {!preview && (stage.id === "prediction" || (stage.id === "question" && questionInput)) && (
             <div className="mt-3">

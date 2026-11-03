@@ -7,6 +7,9 @@ export function productionConfigErrors(env) {
   for (const name of ["OPENAI_API_KEY", "SSO_SECRET", "DYNAMODB_TABLE", "ENGAGE_S3_BUCKET"]) {
     if (!value(name)) errors.push(`${name} is required for production material generation and storage.`);
   }
+  if (value("OPENAI_IMAGE_MODEL") === "gpt-image-1") {
+    errors.push("OPENAI_IMAGE_MODEL uses the retired gpt-image-1 model. Set it to gpt-image-2 or leave it unset to use the current default before deploying.");
+  }
 
   const origins = {};
   for (const [name, fallback] of [

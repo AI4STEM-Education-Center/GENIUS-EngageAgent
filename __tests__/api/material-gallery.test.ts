@@ -42,7 +42,7 @@ beforeEach(async () => {
   vi.stubEnv("ENGAGE_LOCAL_DATA_DIR", directory); vi.stubEnv("ENGAGE_APP_URL", origin); vi.stubEnv("SSO_SECRET", "local-gallery-test-secret");
   mocks.session.mockResolvedValue(teacher); mocks.context.mockResolvedValue({}); mocks.media.mockResolvedValue(null);
 });
-afterEach(async () => { vi.unstubAllEnvs(); await fs.rm(directory, { recursive: true, force: true }); });
+afterEach(async () => { vi.useRealTimers(); vi.unstubAllEnvs(); await fs.rm(directory, { recursive: true, force: true }); });
 
 describe("teacher material library", () => {
   it("persists complete editable sources, exposes only committed templates, and excludes task/private generation metadata", async () => {
@@ -184,6 +184,47 @@ describe("saved video reuse", () => {
     mocks.media.mockResolvedValue({ class_id: scope.classId, assignment_id: scope.assignmentId, student_id: "cohort", content_item_id: item.id,
       mime_type: "video/mp4", data_url: "http://127.0.0.1/private" });
     expect((await shareVideo()).status).toBe(422); expect(fetch).not.toHaveBeenCalled(); fetch.mockRestore();
+  });
+  it("renews an unpublished copy after expiry and withdrawal, only for its teacher and exact task", async () => {
+    mocks.media.mockImplementation(async (_class, _assignment, _student, id, kind) => id === item.id && kind === "video" ? {
+      class_id: scope.classId, assignment_id: scope.assignmentId, student_id: "cohort", content_item_id: item.id,
+      mime_type: "video/mp4", media_type: "video", data_url: "data:video/mp4;base64,dmlkZW8=",
+    } : null);
+    const template = (await (await shareVideo()).json()).material;
+    const copy = await (await post({ action: "copy", id: template.id, mode: "adapt" })).json();
+    expect((await post({ action: "unshare", id: template.id })).status).toBe(200);
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(Date.now() + 16 * 60_000);
+    expect((await mediaGET(new Request(`${origin}${copy.media.video}`))).status).toBe(401);
+    const fields = { action: "copy-media", copyId: copy.copyId };
+    const renewedResponse = await get(fields); expect(renewedResponse.status).toBe(200);
+    const renewed = (await renewedResponse.json()).media;
+    expect(renewed.video).not.toBe(copy.media.video);
+    expect((await mediaGET(new Request(`${origin}${renewed.video}`))).status).toBe(200);
+    mocks.media.mockClear();
+    expect((await get(fields, { ...scope, assignmentId: "ea-task-unrelated" })).status).toBe(404);
+    mocks.session.mockResolvedValue({ ...teacher, geniusId: "different-teacher" }); expect((await get(fields)).status).toBe(404);
+    mocks.session.mockResolvedValue({ ...teacher, role: "student" }); expect((await get(fields)).status).toBe(403);
+    mocks.session.mockResolvedValue(null); expect((await get(fields)).status).toBe(401);
+    expect(mocks.media).not.toHaveBeenCalled();
+  });
+  it("prefers regenerated task media when refreshing a copied video and rejects mismatched records", async () => {
+    mocks.media.mockImplementation(async (_class, _assignment, _student, id, kind) => id === item.id && kind === "video" ? {
+      class_id: scope.classId, assignment_id: scope.assignmentId, student_id: "cohort", content_item_id: item.id,
+      mime_type: "video/mp4", media_type: "video", data_url: "data:video/mp4;base64,dmlkZW8=",
+    } : null);
+    const template = (await (await shareVideo()).json()).material;
+    const copy = await (await post({ action: "copy", id: template.id, mode: "adapt" })).json();
+    mocks.media.mockImplementation(async (_class, _assignment, _student, id, kind) => ({
+      class_id: scope.classId, assignment_id: scope.assignmentId, student_id: "cohort", content_item_id: id,
+      mime_type: kind === "video" ? "video/mp4" : "image/png", media_type: kind, data_url: `https://saved.example/new-${kind}`,
+    }));
+    const response = await get({ action: "copy-media", copyId: copy.copyId });
+    expect(response.status).toBe(200);
+    expect((await response.json()).media).toEqual({ image: "https://saved.example/new-image", video: "https://saved.example/new-video" });
+    mocks.media.mockResolvedValue({ class_id: "other-class", assignment_id: scope.assignmentId, student_id: "cohort", content_item_id: copy.item.id,
+      media_type: "video", data_url: "https://private.example/unrelated" });
+    const mismatch = await get({ action: "copy-media", copyId: copy.copyId });
+    expect(mismatch.status).toBe(422); expect(await mismatch.text()).not.toContain("private.example");
   });
   it("preserves a video's recorded lesson, focus and editable scene through copying and verified re-sharing", async () => {
     const focus = { misconceptions: ["a"], coreIdeas: [] };
