@@ -14,6 +14,7 @@ import { listStudentAnswers } from "@/lib/nosql";
 import { materialOutputFormat } from "@/lib/material-output-schema";
 import { materialInquiryIssues } from "@/lib/material-inquiry-quality";
 import { isWorkspaceClass } from "@/lib/workspace";
+import { FocusError, focusPromptLine, resolveStrategyFocus, type ResolvedFocus } from "@/lib/strategy-focus";
 
 type GeneratedContentItem = Pick<
   ContentItem,
@@ -45,6 +46,7 @@ const normalizeTextModes = (value: unknown): TextMode[] => {
 const buildPrompt = (
   lessonContext: LessonGenerationContext,
   strategyContext: StrategyContext,
+  focus: ResolvedFocus | null = null,
 ) => ({
   system: `You are an education content designer creating short, student-facing science materials.
 Return JSON only with key: items (array).
@@ -63,7 +65,7 @@ Do not include teacher directions, facilitation notes, or implementation instruc
 Engagement strategy:
 - Name: ${strategyContext.label}
 - Description: ${strategyContext.description}
-
+${focus ? `\n${focusPromptLine(focus)}\n` : ""}
 Create exactly 1 student-facing content item aligned to the lesson objective and strategy.
 The text can use one or a combination of:
 (a) questions,
@@ -112,6 +114,7 @@ export async function POST(request: Request) {
       classId,
       assignmentId,
       classroomContext,
+      focus,
     } = (await request.json()) as {
       lessonNumber?: number;
       selectedStrategies?: string[];
@@ -119,6 +122,7 @@ export async function POST(request: Request) {
       classId?: string;
       assignmentId?: string;
       classroomContext?: string;
+      focus?: unknown;
     };
     if (typeof lessonNumber !== "number") {
       return NextResponse.json(
@@ -136,8 +140,8 @@ export async function POST(request: Request) {
     }
 
     // The client can retry a failed or timed-out request with `fallback: true`.
-    // Source-aligned materials use gpt-4.1; the legacy fourth strategy retains
-    // gpt-4o-mini. Separate HTTP requests allow a retry after an upstream proxy
+    // All four strategies use a structured activity and semantic review.
+    // Separate HTTP requests allow a retry after an upstream proxy
     // has closed the first response; the actual hosting timeout is external.
     const primaryModel = process.env.OPENAI_MODEL ?? "gpt-5-mini";
     if (!Array.isArray(selectedStrategies) || selectedStrategies.some(strategy => typeof strategy !== "string") ||
@@ -146,7 +150,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid strategy or class context." }, { status: 400 });
     }
     const strategies = [...new Set(selectedStrategies.filter(Boolean))];
-    if (strategies.some(strategy => !MATERIAL_STRATEGIES.includes(strategy) && strategy !== "engaged critiquing")) {
+    if (strategies.some(strategy => !MATERIAL_STRATEGIES.includes(strategy))) {
       return NextResponse.json({ error: "Unsupported engagement strategy." }, { status: 400 });
     }
     if (strategies.length === 0) {
@@ -154,6 +158,13 @@ export async function POST(request: Request) {
         { error: "selectedStrategies must contain at least one strategy." },
         { status: 400 },
       );
+    }
+    let focusByStrategy: Map<string, ResolvedFocus | null>;
+    try {
+      focusByStrategy = new Map(strategies.map(strategy => [strategy, resolveStrategyFocus(lessonNumber, strategy, focus)]));
+    } catch (error) {
+      if (error instanceof FocusError) return NextResponse.json({ error: error.message }, { status: 400 });
+      throw error;
     }
     const items: GeneratedResponseItem[] = [];
     const classKey = classId?.trim();
@@ -179,8 +190,8 @@ export async function POST(request: Request) {
         const fallbackModel = process.env.OPENAI_FALLBACK_MODEL ?? (sourceAligned ? "gpt-4.1" : "gpt-4o-mini");
         const model = fallback ? fallbackModel : primaryModel;
         const prompt = sourceAligned
-          ? buildMaterialPrompt(lessonContext, getStrategyContext(strategy), diagnostic, classroomContext)
-          : buildPrompt(lessonContext, getStrategyContext(strategy));
+          ? buildMaterialPrompt(lessonContext, getStrategyContext(strategy), diagnostic, classroomContext, focusByStrategy.get(strategy))
+          : buildPrompt(lessonContext, getStrategyContext(strategy), focusByStrategy.get(strategy));
         const generationOptions = sourceAligned ? { signal: AbortSignal.timeout(24_000), maxRetries: 0 } : undefined;
         const completion = await client.chat.completions.create({
           model,

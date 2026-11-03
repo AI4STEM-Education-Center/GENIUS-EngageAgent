@@ -1,7 +1,7 @@
 import { analogyPlanErrors, type AnalogyPlan } from "./analogy";
 import { analogyStages, analogyVisualIds, analogyVisibleVisualIds, isAnalogyMethod, type AnalogyMethod } from "./analogy-methods";
 
-export const STRATEGIES = ["analogy", "cognitive conflict", "experience bridging"] as const;
+export const STRATEGIES = ["analogy", "cognitive conflict", "experience bridging", "engaged critiquing"] as const;
 export type SlideStrategy = typeof STRATEGIES[number];
 export const SLIDE_CONTRACT_VERSION = "student-inquiry-strategies-20261014-v6";
 export const ANALOGY_OPENING_CONTRACT_VERSION = "analogy-six-step-20261001";
@@ -10,6 +10,7 @@ export const STAGES: Record<SlideStrategy, readonly string[]> = {
   analogy: ["analogue", "mapping", "predict", "reflect", "question"],
   "cognitive conflict": ["phenomenon", "prediction", "discrepant", "compare", "question"],
   "experience bridging": ["experience", "notice", "name", "connect", "question"],
+  "engaged critiquing": ["claim", "evidence", "critique", "revise", "question"],
 };
 export function experienceBridgingStages(includeConnection = true): readonly string[] {
   return includeConnection ? STAGES["experience bridging"] : ["experience", "notice", "name", "question"];
@@ -21,7 +22,7 @@ export function stageOptions(strategy: SlideStrategy, index: number, method?: An
   return strategy === "analogy" && method !== "six-step" && index === 3 ? ["reflect", "limits"] : [methodStages(strategy, method, includeLimits)[index]];
 }
 export const VISUALS: Record<SlideStrategy, readonly string[]> = {
-  analogy: ["analogue", "target", "variation"], "cognitive conflict": ["phenomenon", "evidence"], "experience bridging": ["experience"],
+  analogy: ["analogue", "target", "variation"], "cognitive conflict": ["phenomenon", "evidence"], "experience bridging": ["experience"], "engaged critiquing": ["claim", "evidence"],
 };
 export function methodVisualIds(strategy: SlideStrategy, method?: AnalogyMethod): readonly string[] {
   return strategy === "analogy" ? analogyVisualIds(method) : VISUALS[strategy];
@@ -32,7 +33,8 @@ export type SlideDraft = { title: string; slides: TeachingSlide[]; visuals: Slid
 export type SlideAsset = { data: string; width: number; height: number; model?: string; sourcePrompt?: string; referenceData?: string };
 export type SlideCheck = { key: string; issues: string[]; model?: string; imageData?: string };
 export type SlideChecks = { text?: SlideCheck; images: Record<string, SlideCheck> };
-export type SlideDeck = { id: string; lessonNumber: number; strategy: SlideStrategy; classroomContext?: string; draft: SlideDraft; assets: Record<string, SlideAsset>; modelSelection?: SlideModelSelection; textModel?: string; promptProvenance?: SlidePromptProvenance; checks?: SlideChecks; teacherDecision?: { reason: string; draftKey: string; checks: SlideChecks; assets: Record<string, SlideAsset> } };
+export type GalleryProvenance = { templateId: string; revision: number; title: string; mode: "use" | "adapt" };
+export type SlideDeck = { id: string; lessonNumber: number; strategy: SlideStrategy; focus?: Partial<StrategyFocus>; gallerySource?: GalleryProvenance; classroomContext?: string; draft: SlideDraft; assets: Record<string, SlideAsset>; modelSelection?: SlideModelSelection; textModel?: string; promptProvenance?: SlidePromptProvenance; checks?: SlideChecks; teacherDecision?: { reason: string; draftKey: string; checks: SlideChecks; assets: Record<string, SlideAsset> } };
 export type SlideLesson = { lessonNumber: number; lessonTitle: string; learningObjective: string };
 
 export function isSlideStrategy(value: unknown): value is SlideStrategy {
@@ -41,6 +43,7 @@ export function isSlideStrategy(value: unknown): value is SlideStrategy {
 
 // Reveal order is owned by the application, never by model-generated coordinates.
 export function visibleVisualIds(strategy: SlideStrategy, index: number, method?: AnalogyMethod, includeLimits = false): readonly string[] {
+  if (strategy === "engaged critiquing") return index === 0 ? ["claim"] : index < 4 ? ["evidence"] : [];
   if (strategy === "analogy") return analogyVisibleVisualIds(method, index, includeLimits);
   if (strategy === "cognitive conflict") return index === 0 || index === 1 ? ["phenomenon"] : index === 2 || index === 3 ? ["evidence"] : [];
   return index === 0 || index === 1 ? ["experience"] : [];
@@ -131,3 +134,5 @@ export function isSlideAsset(value: unknown): value is SlideAsset {
 }
 import type { SlideModelSelection } from "./models";
 import type { SlidePromptProvenance } from "./prompt-versions";
+
+import type { StrategyFocus } from "../strategy-focus";

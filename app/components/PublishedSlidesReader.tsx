@@ -17,7 +17,8 @@ type Props = {
   learnerId?: string;
 };
 
-const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-100 disabled:opacity-50";
+const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-[9px] border border-line bg-white px-3.5 py-2 text-sm font-semibold text-ink transition hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-45";
+const primaryButton = "inline-flex min-h-10 items-center justify-center gap-2 rounded-[9px] border border-brand bg-brand px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-brand-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-45";
 const REFRESH_MS = 8 * 60 * 1000;
 
 function SlideText({ elements }: { elements: SlideElement[] }) {
@@ -148,10 +149,12 @@ function Reader({ classId, assignmentId, publicationId, audience, onQuestion, le
     dialog.current?.close(); setExpanded(false);
     // The effect moves focus only after the modal has closed and unmounted.
   }
-  const controls = <div className="my-3 flex flex-wrap items-center justify-between gap-2">
-    <button type="button" className={button} aria-label="Previous slide" disabled={index === 0} onClick={() => setIndex(current => current - 1)}><ChevronLeft size={18} aria-hidden="true" />Previous</button>
-    <span aria-live="polite" className="text-sm tabular-nums">Slide {index + 1} of {publication?.manifest.pages.length ?? 0}</span>
-    <button type="button" className={button} aria-label="Next slide" disabled={last || !canAdvance} onClick={next}>Next<ChevronRight size={18} aria-hidden="true" /></button>
+  const controls = <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+    <button type="button" className={button} aria-label="Previous slide" disabled={index === 0} onClick={() => setIndex(current => current - 1)}><ChevronLeft size={16} aria-hidden="true" />Previous</button>
+    <span aria-live="polite" className="text-[13.5px] tabular-nums text-mute">Slide {index + 1} of {publication?.manifest.pages.length ?? 0}</span>
+    {isStudent && last && onQuestion ? (
+      <button type="button" className={primaryButton} onClick={openQuestions}>Write your question</button>
+    ) : <button type="button" className={isStudent ? primaryButton : button} aria-label="Next slide" disabled={last || !canAdvance} onClick={next}>Next<ChevronRight size={16} aria-hidden="true" /></button>}
   </div>;
 
   if (!publication) return <section aria-label="Published slides" className="my-4 rounded-lg border border-slate-200 p-4">
@@ -163,25 +166,26 @@ function Reader({ classId, assignmentId, publicationId, audience, onQuestion, le
     {isStudent && page.stage === "compare" && recordedPrediction && <section aria-label="Your recorded prediction" className="mb-4 rounded-md border border-teal-200 bg-teal-50 p-4 text-slate-800">
       <h4 className="font-semibold">Your prediction</h4><p className="mt-1 whitespace-pre-wrap break-words">{recordedPrediction}</p>
     </section>}
-    <SlideCanvas elements={elements} title={page.title} index={index} ariaHidden onImageError={imageFailed} />
+    <div className="overflow-hidden rounded-[10px] border border-line">
+      <SlideCanvas elements={elements} title={page.title} index={index} ariaHidden onImageError={imageFailed} />
+    </div>
     <SlideText elements={elements} />
     {needsPrediction && <div className="mt-4">
       <label htmlFor={`${predictionId}${inDialog ? "-expanded" : ""}`} className="text-sm font-semibold text-slate-800">Your prediction</label>
       <textarea id={`${predictionId}${inDialog ? "-expanded" : ""}`} rows={3} maxLength={2000} value={recordedPrediction || prediction}
         readOnly={!!recordedPrediction} onChange={event => setPrediction(event.target.value)}
-        className="mt-2 block w-full resize-y rounded-md border border-slate-300 bg-white p-3 text-base text-slate-900 focus:outline-teal-700 read-only:bg-slate-50" />
-      <p className="mt-1 text-sm text-slate-600">{recordedPrediction ? "Your prediction is recorded so you can compare it with the observation." : "Write your prediction before continuing to the observation."}</p>
+        placeholder="I think… because…"
+        className="mt-2 block w-full resize-y rounded-[9px] border border-slate-300 bg-white p-3 text-[14.5px] leading-relaxed text-ink outline-none focus:border-brand focus:ring-3 focus:ring-brand/10 read-only:bg-canvas" />
+      <p className="mt-1 text-sm text-slate-600">{recordedPrediction ? "Saved — you can compare your prediction with the evidence." : "Write your prediction to continue."}</p>
     </div>}
     {controls}
-    {isStudent && last && page.stage === "question" && (onQuestion
-      ? <button type="button" className={button} onClick={openQuestions}>Write your scientific question</button>
-      : <p className="text-sm text-slate-700">Record your scientific question in Your questions below.</p>)}
+    {isStudent && last && !onQuestion && <p className="mt-3 text-sm text-mute">Record your scientific question in Your questions below.</p>}
   </>;
 
-  return <section aria-label="Published slides" className="my-4 min-w-0">
-    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-      <h3 className="min-w-0 break-words text-lg font-semibold text-slate-900">{publication.manifest.title}</h3>
-      <button ref={expandButton} type="button" className={button} onClick={() => setExpanded(true)}><Expand size={17} aria-hidden="true" />Enlarge slides</button>
+  return <section aria-label="Published slides" className={isStudent ? "min-w-0" : "my-4 min-w-0"}>
+    <div className={`mb-3 flex flex-wrap items-center gap-3 ${isStudent ? "justify-end" : "justify-between"}`}>
+      <h3 className={isStudent ? "sr-only" : "min-w-0 break-words text-lg font-semibold text-ink"}>{publication.manifest.title}</h3>
+      <button ref={expandButton} type="button" className={button} onClick={() => setExpanded(true)}><Expand size={16} aria-hidden="true" />Enlarge slides</button>
     </div>
     {error && <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3"><p role="alert" className="text-sm text-amber-950">{error}</p>
       <button type="button" className={`${button} mt-2`} disabled={loading} onClick={() => refresh.current()}><RefreshCw size={16} aria-hidden="true" />Retry slides</button></div>}

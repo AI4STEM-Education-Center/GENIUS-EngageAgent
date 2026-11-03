@@ -43,6 +43,77 @@ beforeEach(() => {
   mocks.edit.mockResolvedValue({ data: [{ b64_json: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64") }] });
 });
 afterEach(() => vi.unstubAllEnvs());
+it("passes validated teacher focus to slide generation and rejects invalid focus before a model call", async () => {
+  const response = await POST(req({ ...base, focus: { misconceptions: ["a"] } }));
+  expect(response.status).toBe(200);
+  const context = JSON.parse(mocks.complete.mock.calls[0][0].input[0].content);
+  expect(context.teacherFocus).toMatchObject({ kind: "misconceptions", items: [expect.stringContaining("deformation")] });
+  mocks.complete.mockClear();
+  for (const focus of [{ misconceptions: ["not-in-this-lesson"] }, { coreIdeas: [0] }, { misconceptions: ["a", "a"] }]) {
+    expect((await POST(req({ ...base, focus }))).status).toBe(400);
+  }
+  expect(mocks.complete).not.toHaveBeenCalled();
+});
+
+it("checks the persisted teacher focus and rejects malformed focus before semantic review", async () => {
+  mocks.complete.mockResolvedValue(completion({ issues: [] }));
+  const draft = slideFixture("engaged critiquing");
+  const body = { ...base, strategy: "engaged critiquing", draft, focus: { misconceptions: ["a", "b"] } };
+  expect((await check(req(body))).status).toBe(200);
+  const params = mocks.complete.mock.calls[0][0];
+  expect(JSON.parse(params.input[0].content).teacherFocus).toMatchObject({ kind: "misconceptions", items: [expect.any(String), expect.any(String)] });
+  expect(params.instructions).toContain("Both teacher-selected items take precedence");
+  expect(JSON.stringify(params)).not.toContain("test-key");
+  mocks.complete.mockClear();
+  expect((await check(req({ ...body, focus: { coreIdeas: [0] } }))).status).toBe(400);
+  expect(mocks.complete).not.toHaveBeenCalled();
+});
+
+it("revises exactly one page with a narrow schema and no larger generation budget", async () => {
+  const draft = slideFixture("cognitive conflict");
+  const slide = { ...draft.slides[4], task: "Write one scientific question about the contact.", teacherNotes: ["Allow students time to write.", "Collect their questions for the next lesson."] };
+  mocks.complete.mockResolvedValue(completion({ slide }));
+  const response = await POST(req({ ...base, operation: "review-slide", slideIndex: 4, draft, feedback: "Shorten the final task", focus: { misconceptions: ["a"] } }));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ slide, slideIndex: 4, model: "gpt-6.1-sol" });
+  const params = mocks.complete.mock.calls[0][0];
+  expect(params.text.format.name).toBe("single_slide_revision");
+  expect(Object.keys(params.text.format.schema.properties)).toEqual(["slide"]);
+  expect(params.text.format.schema.properties.slide.properties.stage.enum).toEqual(["question"]);
+  expect(params.max_output_tokens).toBe(12000);
+  expect(params.instructions).not.toContain("Return the complete draft");
+  expect(JSON.parse(params.input[0].content)).toMatchObject({ teacherRequest: "Shorten the final task", selectedSlideNumber: 5, teacherFocus: { kind: "misconceptions" } });
+  expect(mocks.answers).not.toHaveBeenCalled();
+  expect(mocks.begin.mock.calls[0][3]).toMatchObject({ kind: "slide-revision", slideIndex: 4, draft });
+});
+
+it("rejects invalid selected-page requests before provider access and invalid selected-page output afterwards", async () => {
+  const draft = slideFixture("cognitive conflict");
+  for (const slideIndex of [undefined, -1, 5, 0.5, "4"]) expect((await POST(req({ ...base, operation: "review-slide", slideIndex, draft }))).status).toBe(400);
+  expect((await POST(req({ ...base, operation: "generate", slideIndex: 4 }))).status).toBe(400);
+  expect(mocks.complete).not.toHaveBeenCalled();
+  mocks.complete.mockResolvedValue(completion(draft));
+  const invalid = await POST(req({ ...base, operation: "review-slide", slideIndex: 4, draft }));
+  expect(invalid.status).toBe(502);
+  expect((await invalid.json()).error).toContain("original draft is unchanged");
+});
+
+it("generates the complete fourth-strategy deck and continues its claim image into evidence", async () => {
+  const draft = slideFixture("engaged critiquing");
+  mocks.complete.mockResolvedValueOnce(completion(draft));
+  const response = await POST(req({ ...base, strategy: "engaged critiquing", focus: { misconceptions: ["a", "b"] } }));
+  expect(response.status).toBe(200);
+  expect((await response.json()).draft.slides.map((slide: { stage: string }) => slide.stage)).toEqual(["claim", "evidence", "critique", "revise", "question"]);
+  const data = { ...base, strategy: "engaged critiquing", draft, visualId: "evidence" };
+  expect((await image(req(data))).status).toBe(422);
+  expect(mocks.generate).not.toHaveBeenCalled();
+  expect(mocks.edit).not.toHaveBeenCalled();
+  const referenceAsset = { data: `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64")}`, width: 1536, height: 1024 };
+  expect((await image(req({ ...data, referenceAsset }))).status).toBe(200);
+  expect(mocks.edit).toHaveBeenCalledTimes(1);
+  expect(mocks.edit.mock.calls[0][0].input[0].content).toEqual(expect.arrayContaining([expect.objectContaining({ type: "input_image", image_url: referenceAsset.data })]));
+});
+
 describe("authorized slide APIs", () => {
   it.each(["generate", "review"] as const)("requires the opening phenomenon in new conflict %s output while accepting a legacy revision input", async operation => {
     const legacy = slideFixture("cognitive conflict");
@@ -237,7 +308,7 @@ describe("authorized slide APIs", () => {
     expect(await result.text()).not.toContain("private storage failure");
     expect(mocks.complete).not.toHaveBeenCalled();
   });
-  it.each(["gpt-image-1", "gpt-image-2"])("requires an inline baseline JPEG and uses %s editing for a variation", async imageModel => {
+  it.each(["gpt-image-1.5", "gpt-image-2"])("requires an inline baseline JPEG and uses %s editing for a variation", async imageModel => {
     const data = { ...base, strategy: "analogy", draft: slideFixture("analogy"), visualId: "variation", imageModel };
     expect((await image(req(data))).status).toBe(422);
     expect((await image(req({ ...data, referenceAsset: { data: "https://example.com/image.jpg", width: 10, height: 10 } }))).status).toBe(422);
@@ -360,13 +431,24 @@ describe("authorized slide APIs", () => {
     expect(mocks.begin).toHaveBeenCalledTimes(4);
     for (const call of mocks.begin.mock.calls) expect(call[3].model).toBe(textModel);
   });
-  it.each(["gpt-image-1", "gpt-image-1.5", "gpt-image-2"])("selects image model %s explicitly", async imageModel => {
+  it.each(["gpt-image-1.5", "gpt-image-2"])("selects image model %s explicitly", async imageModel => {
     vi.stubEnv("OPENAI_IMAGE_MODEL", "gpt-image-1");
     const request = req({ ...base, draft: slideFixture("cognitive conflict"), visualId: "evidence", imageModel });
     expect((await image(request)).status).toBe(200);
     expect(mocks.generate.mock.calls[0][0].tools[0]).toMatchObject({ model: imageModel, action: "generate", size: "1536x1024", quality: "high", output_format: "jpeg", output_compression: 85 });
     expect(mocks.generate.mock.calls[0][1].signal).toBe(request.signal);
     expect(mocks.begin.mock.calls[0][3]).toEqual({ kind: "image", model: imageModel });
+  });
+  it("rejects the retired project image default before paid submission while allowing an explicit supported choice", async () => {
+    vi.stubEnv("OPENAI_IMAGE_MODEL", "gpt-image-1");
+    const data = { ...base, draft: slideFixture("cognitive conflict"), visualId: "evidence" };
+    const response = await image(req(data));
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toContain("no longer available");
+    expect(mocks.begin).not.toHaveBeenCalled();
+    expect((await image(req({ ...data, imageModel: "gpt-image-1" }))).status).toBe(400);
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect((await image(req({ ...data, imageModel: "gpt-image-2" }))).status).toBe(200);
   });
   it("rejects unsupported or wrong-modality models before calling providers", async () => {
     for (const textModel of [null, {}, [], "gpt-image-1", "http://arbitrary-host", "unknown-model"]) expect((await POST(req({ ...base, textModel }))).status).toBe(400);

@@ -146,6 +146,33 @@ describe("durable owner-bound slide jobs", () => {
     const result = await response.json(); expect(result.jobFailure).toBe(true); expect(JSON.stringify(result)).not.toContain("private upstream");
   });
 
+  it("identifies an unavailable image model without reflecting the provider message", async () => {
+    const id = await ticket({ kind: "image", model: "gpt-image-1" });
+    mocks.retrieve.mockResolvedValue(completed(null, { status: "failed", error: { code: "model_not_found", message: "private provider model detail" } }));
+    const response = await poll(id);
+    expect(response.status).toBe(503);
+    const result = await response.json();
+    expect(result).toMatchObject({ jobFailure: true, error: expect.stringContaining("model is unavailable") });
+    expect(JSON.stringify(result)).not.toContain("private provider");
+  });
+
+  it("persists bounded single-page revision context and returns only the validated page on polling", async () => {
+    const draft = slideFixture("cognitive conflict");
+    const spec: SlideJobSpec = { kind: "slide-revision", model: "gpt-6.1-sol", strategy: "cognitive conflict", lessonNumber: 3, slideIndex: 4, draft };
+    const id = await ticket(spec);
+    expect(mocks.put.mock.calls[0][0][0].value.spec).toEqual(spec);
+    const slide = { ...draft.slides[4], task: "Write one scientific question about the contact.", teacherNotes: ["Give students time to write.", "Collect their own questions for the next lesson."] };
+    mocks.retrieve.mockResolvedValue(completed({ slide }));
+    const response = await poll(id);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ slide, slideIndex: 4, model: spec.model });
+    mocks.retrieve.mockResolvedValue(completed({ slide: { ...slide, stage: "prediction" } }));
+    expect((await poll(id)).status).toBe(502);
+    mocks.put.mockClear(); mocks.create.mockClear();
+    await expect(ticket({ ...spec, slideIndex: 20 })).rejects.toMatchObject({ status: 400 });
+    expect(mocks.put).not.toHaveBeenCalled(); expect(mocks.create).not.toHaveBeenCalled();
+  });
+
   it("does not retain an image request or any extraneous spec fields", async () => {
     const spec = { kind: "image", model: "gpt-image-2", image: "data:image/jpeg;base64,private" } as SlideJobSpec;
     await start(spec); const saved = mocks.put.mock.calls[0][0][0];
@@ -190,6 +217,25 @@ describe("completed slide output validation", () => {
   ])("rejects incomplete, refused or unreadable text output %j", extra => {
     expect(() => finishSlideJob(completed(slideFixture("cognitive conflict"), extra), draftSpec)).toThrow();
   });
+  it("reports bounded failure metadata and an actionable image limit without logging provider content", () => {
+    const logged = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = completed("private generated text", { status: "incomplete", max_output_tokens: 2000,
+      incomplete_details: { reason: "max_output_tokens" }, error: { code: "server_error", message: "private credential" },
+      output: [{ type: "image_generation_call", status: "incomplete", result: "private image base64", revised_prompt: "private class detail" }],
+      usage: { output_tokens: 2000, output_tokens_details: { reasoning_tokens: 1800 } } });
+    expect(() => finishSlideJob(response, { kind: "image", model: "gpt-image-2" })).toThrow("image reached its generation limit");
+    expect(logged).toHaveBeenCalledWith("Slide provider result incomplete", {
+      kind: "image", status: "incomplete", errorCode: "server_error", incompleteReason: "max_output_tokens", refused: false,
+      output: [{ type: "image_generation_call", status: "incomplete" }], outputTokens: 2000, reasoningTokens: 1800, maxOutputTokens: 2000,
+    });
+    expect(JSON.stringify(logged.mock.calls)).not.toMatch(/private|resp_|test-key/);
+    logged.mockClear();
+    const unknown = completed(null, { status: "private-status", error: { code: "private-code", message: "private-message" },
+      incomplete_details: { reason: "private-reason" }, output: [{ type: "private-type", status: "private-state" }] });
+    expect(() => finishSlideJob(unknown, { kind: "image", model: "gpt-image-2" })).toThrow();
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("private");
+  });
+
   it("retains strict six-step design metadata checks and method binding", () => {
     const spec: SlideJobSpec = { ...draftSpec, kind: "draft", strategy: "analogy", analogyMethod: "six-step" };
     const draft = sixStepDraft(); expect(finishSlideJob(completed(draft), spec).draft).toEqual(draft);

@@ -3,7 +3,7 @@ import { analogyMappingIndex, resolveAnalogyMethod } from "./analogy-methods";
 import { analogyStudentFields } from "./analogy";
 
 const sentenceCount = (text: string) => text.split(/[.!?]+(?:\s|$)/u).filter(part => part.trim()).length;
-const strategyLabel = /\b(?:analogy|cognitive[ -]conflict|experience[ -]bridging)\b/iu;
+const strategyLabel = /\b(?:analogy|cognitive[ -]conflict|experience[ -]bridging|engaged[ -]critiquing)\b/iu;
 // Topic orientation is allowed on page 1; only an explicit solved counter/energy
 // correspondence is rejected here. Other semantic leakage belongs to AI review.
 const counterEnergyMapping = /\b(?:counters?|trays?)\s+(?:represent\w*|track\w*|model\w*|symboli[sz]e\w*|stand(?:s)? for)\b[^.!?\n]{0,80}\benergy\b|\b(?:counters?|trays?)\s+(?:are|is)\s+(?:not\s+)?(?:literal\s+)?energy\b|\benergy\s+(?:is|isn't|is not)\s+(?:like\s+|represented by\s+)?(?:literal\s+)?counters?\b/iu;
@@ -11,7 +11,7 @@ const counterEnergyMapping = /\b(?:counters?|trays?)\s+(?:represent\w*|track\w*|
 // Only explicit output rules belong here; stage meaning is checked separately.
 export function teachingErrors(draft: SlideDraft, lessonNumber?: number): string[] {
   const errors: string[] = [];
-  const inquiryStrategy = draft.slides[1]?.stage === "prediction" || (draft.slides[0]?.stage === "experience" && draft.slides[1]?.stage === "notice");
+  const inquiryStrategy = draft.slides[0]?.stage === "claim" || draft.slides[1]?.stage === "prediction" || (draft.slides[0]?.stage === "experience" && draft.slides[1]?.stage === "notice");
   if (inquiryStrategy) {
     const publicFields = [
       { path: "Deck title", text: draft.title },
@@ -161,6 +161,7 @@ export function imageContext(draft: SlideDraft, strategy: SlideStrategy, visualI
 }
 
 export function imageReferenceId(draft: SlideDraft, id: string): string | undefined {
+  if (id === "evidence" && draft.slides[0]?.stage === "claim" && draft.visuals.some(visual => visual.id === "claim")) return "claim";
   if (id === "variation") return "target";
   if (draft.analogyMethod === "six-step" && id === "target") return "phenomenon";
   if (id === "evidence" && draft.slides[1]?.stage === "prediction" && draft.visuals.some(visual => visual.id === "phenomenon")) return "phenomenon";
@@ -182,7 +183,7 @@ export function imageMatchesPlan(deck: SlideDeck, id: string): boolean {
 
 // Snapshots invalidate reviews after edits; they are not authorization tokens.
 const reviewContract = (deck: SlideDeck) => deck.strategy === "analogy" ? (deck.draft.analogyMethod === "six-step" ? SIX_STEP_REVIEW_CONTRACT_VERSION : ANALOGY_OPENING_CONTRACT_VERSION) : SLIDE_CONTRACT_VERSION;
-export const textCheckKey = (deck: SlideDeck) => JSON.stringify([reviewContract(deck), deck.lessonNumber, deck.strategy, deck.classroomContext ?? "", deck.promptProvenance, deck.draft]);
+export const textCheckKey = (deck: SlideDeck) => JSON.stringify([reviewContract(deck), deck.lessonNumber, deck.strategy, deck.classroomContext ?? "", deck.promptProvenance, deck.draft, ...(deck.focus ? [deck.focus] : [])]);
 export const imageCheckKey = (deck: SlideDeck, id: string) => JSON.stringify([reviewContract(deck), deck.lessonNumber, deck.strategy, deck.classroomContext ?? "", imageContext(deck.draft, deck.strategy, id), ...(imageReferenceId(deck.draft, id) ? [deck.assets[imageReferenceId(deck.draft, id)!]?.data] : []), ...(deck.strategy === "analogy" && deck.draft.analogyPlan && id === "target" ? [deck.assets.analogue?.data, deck.draft.visuals.find(visual => visual.id === "analogue")] : [])]);
 
 export function hasTeacherDecision(deck: SlideDeck): boolean {

@@ -1,5 +1,10 @@
 # Release the GENIUS embedded material workflow
 
+For the current #179/#181 candidate and its November 3 checks, see
+[v8.4 production verification](./v84-production-verification.md). The deployment
+and authentication observations below are an **October 8 historical snapshot**;
+they must not be used as evidence of today's deployed SHA or current SSO failure.
+
 Status reviewed on October 8, 2026. This release preserves the existing split:
 GENIUS manages login, enrollment, assignments and the iframe; EngageAgent
 generates, publishes and presents materials. No duplicate EngageAgent class is
@@ -48,7 +53,7 @@ SSO key equality or provider model access.
 | `ALLOWED_ORIGINS` | Must contain the exact GENIUS HTTPS origin for the frame-ancestor policy. |
 | `GENIUS_EMBED_ORIGIN` | Optional. The new GENIUS origin that embeds the [standard URLs](./genius-standard-urls.md) and receives `genius.task-*` messages; defaults to the `GENIUS_URL` origin. When set, it must be canonical HTTPS and listed in `ALLOWED_ORIGINS`. |
 | `OPENAI_API_KEY` | Existing server-side key with access to the configured slide text and image models. |
-| `OPENAI_SLIDES_MODEL` / `OPENAI_IMAGE_MODEL` | Verify actual access; the current code defaults are `gpt-6.1-sol` / `gpt-image-1`. Empty Amplify overrides retain these defaults. |
+| `OPENAI_SLIDES_MODEL` / `OPENAI_IMAGE_MODEL` | Verify actual access; the current code defaults are `gpt-6.1-sol` / `gpt-image-2`. Empty Amplify overrides retain these defaults. The preflight rejects an explicit retired `gpt-image-1` override. |
 | `DYNAMODB_TABLE` | Existing production table with string keys `class_id` and `record_id`; verify application read/write/query and transaction permissions. |
 | `ENGAGE_S3_BUCKET` | Existing private production bucket; runtime identity must upload and read the `slide-publications/` and `material-files/` prefixes. Confirm bucket policies/KMS settings permit the existing identity. |
 | AWS identity | Supply both `ENGAGE_AWS_ACCESS_KEY_ID` and `ENGAGE_AWS_SECRET_ACCESS_KEY`, or use the existing AWS runtime identity. A partial static override is rejected. |

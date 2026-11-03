@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Download, Expand, ImagePlus, LoaderCircle, RefreshCw, ScanEye, Send, Sparkles, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, Expand, ImagePlus, LoaderCircle, RefreshCw, ScanEye, Send, Sparkles, X, LayoutGrid, Undo2 } from "lucide-react";
 import type { UserContext } from "@/lib/auth";
 import { STRATEGIES, isSlideAsset, parseDraft, type SlideDeck, type SlideLesson, type SlideStrategy, type TeachingSlide } from "@/lib/slides/model";
 import { browserMeasure, layoutErrors } from "@/lib/slides/layout";
@@ -18,23 +18,27 @@ import { publishSlideDeck } from "@/lib/slides/publish-client";
 import { isSlideDeckPublished, slidePublicationContentKey } from "@/lib/slides/publication-status";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import { slideRevisionFeedback } from "@/lib/slides/revision";
+import type { StrategyFocus } from "@/lib/strategy-focus";
+import ShareSlidesDialog from "./ShareSlidesDialog";
 
-const input = "w-full min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-2 focus:outline-teal-700 disabled:opacity-50";
-const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium hover:bg-gray-100 disabled:opacity-50";
-const primaryButton = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-teal-800 bg-teal-800 px-3 py-2 text-sm font-medium text-white hover:bg-teal-900 disabled:opacity-50";
+const input = "w-full min-w-0 rounded-[9px] border border-slate-300 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-3 focus:ring-brand/10 disabled:opacity-50";
+const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-[9px] border border-line bg-white px-3.5 py-2 text-sm font-semibold text-ink hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-45";
+const primaryButton = "inline-flex min-h-10 items-center justify-center gap-2 rounded-[9px] border border-brand bg-brand px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-45";
 const icon = `${button} h-10 w-10 shrink-0 p-0`;
 const label = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
 export type SlidesWorkspaceHandle = { generate(): void };
 type SlidesWorkspaceProps = {
   user: UserContext;
-  embeddedContext?: { lessonNumber: number; strategy: SlideStrategy; classroomContext?: string };
+  embeddedContext?: { lessonNumber: number; strategy: SlideStrategy; classroomContext?: string; focus?: Partial<StrategyFocus> };
+  incomingDeck?: SlideDeck;
   onBusyChange?: (strategy: SlideStrategy, busy: boolean) => void;
   onReadyChange?: (strategy: SlideStrategy, ready: boolean) => void;
   onPublished?: () => void;
+  onGalleryShared?: () => void;
 };
 
-const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceProps>(function SlidesWorkspaceEditor({ user, embeddedContext, onBusyChange, onReadyChange, onPublished }, ref) {
+const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceProps>(function SlidesWorkspaceEditor({ user, embeddedContext, incomingDeck, onBusyChange, onReadyChange, onPublished, onGalleryShared }, ref) {
   const [lessons, setLessons] = useState<SlideLesson[]>([]);
   const [standaloneLesson, setLessonNumber] = useState(1);
   const [standaloneStrategy, setStrategy] = useState<SlideStrategy>("analogy");
@@ -63,6 +67,12 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const [publishedContentKey, setPublishedContentKey] = useState("");
   const [publicationWarning, setPublicationWarning] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [editorTab, setEditorTab] = useState<"text" | "notes">("text");
+  const [revisionScope, setRevisionScope] = useState<"deck" | "slide">("deck");
+  const [undoDeck, setUndoDeck] = useState<SlideDeck | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [sharedDeck, setSharedDeck] = useState<SlideDeck | null>(null);
+  const importedDeckId = useRef<string | null>(null);
   const [reload, setReload] = useState(0);
   const job = useRef<AbortController | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -86,10 +96,25 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     setCatalogLoaded(false);
     fetch(`/api/slides?${new URLSearchParams({ classId: classId || "", assignmentId: assignmentId || "" })}`, { headers: scopedClientAuthHeaders({ classId, assignmentId }), signal: controller.signal, cache: "no-store" })
       .then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error || "Unable to load lessons."); return data as { lessons: SlideLesson[]; models?: SlideModelCatalog }; })
-      .then(value => { if (!controller.signal.aborted) { setLessons(value.lessons); setModels(value.models || INITIAL_MODEL_CATALOG); if (!embedded) setLessonNumber(value.lessons[0]?.lessonNumber ?? 1); setCatalogLoaded(true); setError(""); } })
+      .then(value => { if (!controller.signal.aborted) { setLessons(value.lessons); setModels(value.models || INITIAL_MODEL_CATALOG); if (!embedded && !importedDeckId.current) setLessonNumber(value.lessons[0]?.lessonNumber ?? 1); setCatalogLoaded(true); setError(""); } })
       .catch(err => { if (!controller.signal.aborted) setError(err.message); });
     return () => controller.abort();
   }, [classId, assignmentId, reload, embedded]);
+  useEffect(() => {
+    if (!incomingDeck || incomingDeck.id === importedDeckId.current) return;
+    if (embeddedContext && (incomingDeck.lessonNumber !== lessonNumber || incomingDeck.strategy !== strategy)) return;
+    importedDeckId.current = incomingDeck.id;
+    job.current?.abort(); job.current = null;
+    exportRequest.current++; exportJob.current?.abort(); exportJob.current = null;
+    publishJob.current?.abort(); publishJob.current = null;
+    setDeck(incomingDeck); setIndex(0); setBusy(false); setReviewed(false); setDownloaded(false);
+    setUndoDeck(null); setSharedDeck(null); setShareOpen(false); setFeedback("");
+    setPreparedDownload(null); setPublishedContentKey(""); setPublicationWarning(""); setReviewWarnings([]); setError("");
+    setClassroomContext(incomingDeck.classroomContext ?? "");
+    if (!embeddedContext) { setLessonNumber(incomingDeck.lessonNumber); setStrategy(incomingDeck.strategy); }
+    setRestoredScope(scopeKey);
+    setStatus("Gallery material copied into this task. Review or edit it, then send it to your students.");
+  }, [incomingDeck, embeddedContext, lessonNumber, strategy, scopeKey]);
   useEffect(() => {
     if (!catalogLoaded || !lessons.some(lesson => lesson.lessonNumber === scope.lessonNumber)) return;
     // Standalone controls can select settings for the next draft without replacing
@@ -97,7 +122,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     if (deck) { setRestoredScope(scopeKey); return; }
     let active = true;
     void loadSlideDraft(scope).then(restored => {
-      if (!active || !restored) return;
+      if (!active || !restored || importedDeckId.current) return;
       setDeck(restored); setSavedDeck(restored); setReviewed(false); setDownloaded(false);
       setClassroomContext(restored.classroomContext ?? "");
       setStatus("Saved draft restored. Continue checking or editing; generation does not restart automatically.");
@@ -164,7 +189,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   }, [deck, savedDeck, busy]);
 
   async function post(path: string, body: object, controller: AbortController) {
-    return postSlideRequest<{ draft: unknown; asset: unknown; issues: string[]; model?: string; promptProvenance?: SlidePromptProvenance }>(
+    return postSlideRequest<{ draft: unknown; slide?: TeachingSlide; slideIndex?: number; asset: unknown; issues: string[]; model?: string; promptProvenance?: SlidePromptProvenance }>(
       path, { classId, assignmentId, ...body }, controller.signal);
   }
   async function run(work: (controller: AbortController) => Promise<void>) {
@@ -184,7 +209,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   async function checkText(target: SlideDeck, controller: AbortController): Promise<SlideDeck> {
     setStatus("Checking teaching sequence and scientific content...");
     try {
-      const result = await post("/api/slides/check", { lessonNumber: target.lessonNumber, strategy: target.strategy, draft: target.draft, textModel: target.modelSelection?.textModel, classroomContext: target.classroomContext ?? "" }, controller);
+      const result = await post("/api/slides/check", { lessonNumber: target.lessonNumber, strategy: target.strategy, draft: target.draft, textModel: target.modelSelection?.textModel, classroomContext: target.classroomContext ?? "", ...(target.focus ? { focus: target.focus } : {}) }, controller);
       const next = { ...target, checks: { images: target.checks?.images || {}, text: { key: textCheckKey(target), issues: result.issues, model: result.model } } };
       showDraft(next, controller);
       return next;
@@ -204,7 +229,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     const key = imageCheckKey(target, visualId);
     if (!force && existing?.key === key && existing.imageData === asset.data) return target;
     setStatus(`Checking ${visualId} image against the slide text...`);
-    const reference = target.strategy === "cognitive conflict" && imageReferenceId(target.draft, visualId) === "phenomenon"
+    const reference = target.strategy === "engaged critiquing" && imageReferenceId(target.draft, visualId) === "claim" ? target.assets.claim
+      : target.strategy === "cognitive conflict" && imageReferenceId(target.draft, visualId) === "phenomenon"
       ? target.assets.phenomenon
       : visualId === "variation" ? target.assets.target : target.strategy === "analogy" && target.draft.analogyPlan && visualId === "target" ? target.assets.analogue : undefined;
     const phenomenon = target.draft.analogyMethod === "six-step" && visualId === "target" ? target.assets.phenomenon : undefined;
@@ -242,19 +268,21 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     // Capture this operation's request once; automatic repairs must keep it,
     // while a new generation must not inherit an earlier revision request.
     const teacherRequest = review ? feedback : "";
+    setUndoDeck(review ? deck : null);
     void run(async controller => {
       const chosenLesson = review && deck ? deck.lessonNumber : lessonNumber;
       const chosenStrategy = review && deck ? deck.strategy : strategy;
       const chosenPrompt = review && deck ? deck.promptProvenance?.version ?? "optimized" : "optimized";
       const chosenMethod = review && deck ? resolveAnalogyMethod(deck.draft.analogyMethod) : "six-step";
       const chosenClassroomContext = review && deck ? deck.classroomContext ?? "" : (sharedClassroomContext ?? classroomContext).trim();
+      const chosenFocus = review ? deck?.focus : embeddedContext?.focus;
       const chosenModels = { ...selection };
       setStatus(review ? "Reviewing slide content..." : chosenStrategy === "analogy" && chosenMethod === "six-step" ? "Generating six-step slides..." : chosenStrategy === "experience bridging" ? "Generating experience-bridging slides..." : "Generating five slides...");
       const context = { lessonNumber: chosenLesson, strategy: chosenStrategy, textModel: chosenModels.textModel, promptVersion: chosenPrompt, classroomContext: chosenClassroomContext,
-        ...(chosenStrategy === "analogy" ? { analogyMethod: chosenMethod } : {}) };
+        ...(chosenStrategy === "analogy" ? { analogyMethod: chosenMethod } : {}), ...(chosenFocus ? { focus: chosenFocus } : {}) };
       const result = await post("/api/slides", { ...context, operation: review ? "review" : "generate", ...(review && deck ? { draft: deck.draft, feedback: slideRevisionFeedback(teacherRequest, [...issues, ...suggestions]) } : {}) }, controller);
       const draft = parseDraft(result.draft, chosenStrategy, true);
-      let next: SlideDeck = { id: review && deck ? deck.id : crypto.randomUUID(), lessonNumber: chosenLesson, strategy: chosenStrategy, draft, classroomContext: chosenClassroomContext, assets: preservedAssets(review ? deck : null, draft), checks: review ? deck?.checks : undefined, modelSelection: chosenModels, textModel: result.model, promptProvenance: result.promptProvenance };
+      let next: SlideDeck = { ...(review && deck ? deck : {}), id: review && deck ? deck.id : crypto.randomUUID(), lessonNumber: chosenLesson, strategy: chosenStrategy, draft, focus: chosenFocus, classroomContext: chosenClassroomContext, assets: preservedAssets(review ? deck : null, draft), checks: review ? deck?.checks : undefined, modelSelection: chosenModels, textModel: result.model, promptProvenance: result.promptProvenance };
       if (controller.signal.aborted) return;
       // Bounded native repairs; retain drafts on failure and never loop on provider errors.
       setDeck(next); setIndex(0); setReviewed(false); setDownloaded(false);
@@ -311,14 +339,49 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       setError(failures.join("\n")); setStatus(failures.length ? "Slide text ready. Some images need a retry." : layoutErrors(next, browserMeasure()).length ? "Draft retained. Layout corrections needed." : `${next.draft.slides.length} slides ready to send.`);
     });
   }
+  function reviseSelectedSlide() {
+    if (!deck || busy || !canGenerate) return;
+    const original = deck;
+    const selected = index;
+    const request = feedback.trim();
+    setUndoDeck(original);
+    void run(async controller => {
+      setStatus(`Revising slide ${selected + 1}…`);
+      const result = await post("/api/slides", {
+        lessonNumber: original.lessonNumber, strategy: original.strategy, operation: "review-slide", slideIndex: selected,
+        draft: original.draft, textModel: selection.textModel, classroomContext: original.classroomContext ?? "",
+        ...(original.focus ? { focus: original.focus } : {}),
+        ...(original.strategy === "analogy" ? { analogyMethod: resolveAnalogyMethod(original.draft.analogyMethod) } : {}),
+        promptVersion: original.promptProvenance?.version ?? "optimized",
+        feedback: slideRevisionFeedback(request, []),
+      }, controller);
+      const selectedSlide = result.slide;
+      if (result.slideIndex !== selected || !selectedSlide || selectedSlide.stage !== original.draft.slides[selected].stage) throw new Error("The revision did not match the selected slide. Your original draft is retained.");
+      // A single-slide response cannot replace the deck, visuals or analogy plan.
+      // Validate its editable text in the original method and stage sequence.
+      const draft = parseDraft({ ...original.draft, slides: original.draft.slides.map((slide, n) => n === selected ? selectedSlide : slide) }, original.strategy, true);
+      const revised = { ...original, draft, checks: { images: original.checks?.images ?? {} } };
+      if (controller.signal.aborted) return;
+      showDraft(revised, controller); setReviewed(false); setDownloaded(false);
+      setStatus(`Slide ${selected + 1} revised. Other slides and images are unchanged.`);
+    });
+  }
+  function undoRevision() {
+    if (!undoDeck || busy) return;
+    setDeck(undoDeck); setIndex(n => Math.min(n, undoDeck.draft.slides.length - 1));
+    setUndoDeck(null); setReviewed(false); setDownloaded(false); setError(""); setReviewWarnings([]);
+    setStatus("Revision undone.");
+  }
   function edit(field: keyof Omit<TeachingSlide, "stage">, value: string | string[]) {
     const previous = deck?.draft.slides[index]?.[field];
     if (previous === value || (Array.isArray(previous) && Array.isArray(value)
       && previous.length === value.length && previous.every((item, n) => item === value[n]))) return;
+    setUndoDeck(null);
     setDeck(current => current ? { ...current, draft: { ...current.draft, slides: current.draft.slides.map((slide, n) => n === index ? { ...slide, [field]: value } : slide) } } : current);
     setReviewed(false); setDownloaded(false); setStatus("");
   }
   function editMapping(field: "mappingHint" | "responseStarter", value: string) {
+    setUndoDeck(null);
     setDeck(current => current?.draft.analogyPlan ? { ...current, draft: { ...current.draft, analogyPlan: { ...current.draft.analogyPlan, [field]: value } } } : current);
     setReviewed(false); setDownloaded(false); setStatus("");
   }
@@ -400,7 +463,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const Heading = embedded ? "h3" : "h1";
   return <Container aria-label={embedded ? `${label(strategy)} slides` : undefined} className={embedded ? "min-w-0" : "mx-auto max-w-7xl px-5 pb-12"}>
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-4">
-      <Heading className="text-2xl font-semibold">{embedded ? `${label(strategy)} slides` : "Teaching slides"}</Heading>
+      <Heading className="text-[22px] font-semibold tracking-tight text-ink">{embedded ? "Review, send & share" : "Teaching slides"}</Heading>
       {deck && <span className="text-sm text-gray-500">{deck === savedDeck ? "Saved on this device" : storageError ? "Unsaved draft" : "Saving draft..."}{downloaded ? " · Export prepared" : ""}</span>}
     </div>
     {(!embedded || sharedClassroomContext === undefined) && <div className="grid items-end gap-3 border-b border-gray-200 py-5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
@@ -423,20 +486,56 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     {!deck && <div className="border-y border-gray-200 py-16 text-center text-sm text-gray-500">No slide draft yet.</div>}
     {deck && slide && <>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0"><h2 className="break-words text-lg font-semibold">{deck.draft.title}</h2><p className="mt-1 text-sm text-gray-500">Lesson {deck.lessonNumber} · {label(deck.strategy)} · {deck.draft.slides.length} slides</p></div>
+        <div className="min-w-0"><h2 className="break-words text-lg font-semibold">{deck.draft.title}</h2><p className="mt-1 text-sm text-gray-500">Lesson {deck.lessonNumber} · {label(deck.strategy)} · {deck.draft.slides.length} slides</p>{deck.gallerySource && <p className="mt-1 text-xs text-mute">{deck.gallerySource.mode === "adapt" ? "Adapted from Gallery" : "From Gallery"}: {deck.gallerySource.title}</p>}</div>
         <div className="flex flex-wrap gap-2">
           <button className={icon} disabled={!!issues.length} title="Enlarge preview" aria-label="Enlarge preview" onClick={() => dialog.current?.showModal()}><Expand size={17} /></button>
         </div>
       </div>
-      <section aria-label="Slide preview" className="min-w-0">
-        <SlidePreview deck={deck} index={index} />
-        <div className="my-3 flex items-center justify-between gap-2">
-          <button className={icon} title="Previous slide" aria-label="Previous slide" disabled={index === 0} onClick={() => setIndex(n => n - 1)}><ChevronLeft size={19} /></button>
-          <span className="text-sm tabular-nums">{index + 1} / {deck.draft.slides.length}</span>
-          <button className={icon} title="Next slide" aria-label="Next slide" disabled={index === deck.draft.slides.length - 1} onClick={() => setIndex(n => n + 1)}><ChevronRight size={19} /></button>
+      <section aria-label="Revise slides" className="mb-4 rounded-xl border border-ai-mid bg-ai-light/50 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-ink"><Sparkles size={16} className="text-ai" />Revise with AI</h3>
+          <div role="group" aria-label="Revision scope" className="inline-flex rounded-lg bg-white p-1">
+            <button type="button" aria-pressed={revisionScope === "deck"} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${revisionScope === "deck" ? "bg-ai text-white" : "text-ink-2"}`} disabled={busy} onClick={() => setRevisionScope("deck")}>Whole deck</button>
+            <button type="button" aria-pressed={revisionScope === "slide"} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${revisionScope === "slide" ? "bg-ai text-white" : "text-ink-2"}`} disabled={busy} onClick={() => setRevisionScope("slide")}>Slide {index + 1} only</button>
+          </div>
         </div>
-        <ol className="divide-y divide-gray-200 border-y border-gray-200">{deck.draft.slides.map((item, n) => <li key={item.stage}><button className={`flex min-h-11 w-full items-start gap-3 px-3 py-3 text-left text-sm ${index === n ? "bg-teal-50 text-teal-900" : "hover:bg-gray-100"}`} aria-current={index === n ? "step" : undefined} onClick={() => setIndex(n)}><span className="font-mono">{n + 1}</span><span className="min-w-0 break-words">{item.title}</span></button></li>)}</ol>
+        <label className="sr-only" htmlFor={`${reviewControlId}-request`}>Revision request</label>
+        <div className="mt-3 flex flex-wrap items-start gap-2">
+          <textarea id={`${reviewControlId}-request`} aria-label="Revision request" className={`${input} min-w-[200px] flex-1 resize-y`} rows={2} maxLength={3000} disabled={busy} value={feedback} onChange={e => setFeedback(e.target.value)} placeholder={revisionScope === "slide" ? "e.g. Make this slide's thinking task shorter" : "e.g. Use a familiar classroom example or shorter text"} />
+          <button className={`${primaryButton} !border-ai !bg-ai hover:!bg-indigo-700`} disabled={busy || !canGenerate} onClick={() => revisionScope === "slide" ? reviseSelectedSlide() : generate(true)}><RefreshCw size={16} />Revise with AI</button>
+        </div>
+        {revisionScope === "slide" && <p className="mt-2 text-xs text-mute">Only this slide&apos;s text and teacher notes change. Other slides and images stay the same.</p>}
+        {undoDeck && deck !== undoDeck && !busy && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white p-3 text-sm text-ink-2">
+          <span>{(() => { const changed = deck.draft.slides.flatMap((s, i) => JSON.stringify(s) !== JSON.stringify(undoDeck.draft.slides[i]) ? [i + 1] : []); return changed.length ? `Changed slide${changed.length > 1 ? "s" : ""} ${changed.join(", ")}` : "Revision ready"; })()}</span>
+          <button type="button" className={button} onClick={undoRevision}><Undo2 size={15} />Undo revision</button>
+        </div>}
       </section>
+      <nav aria-label="Choose slide" className="mb-4 overflow-x-auto pb-2">
+        <ol className="grid grid-flow-col auto-cols-[minmax(145px,1fr)] gap-3">{deck.draft.slides.map((item, n) => <li key={`${item.stage}-${n}`}>
+          <button type="button" className={`block w-full overflow-hidden rounded-lg border-2 text-left ${index === n ? "border-brand" : "border-line hover:border-slate-300"}`} aria-label={`Edit slide ${n + 1}: ${item.title}`} aria-current={index === n ? "step" : undefined} onClick={() => setIndex(n)}>
+            <div aria-hidden="true" className="pointer-events-none"><SlidePreview deck={deck} index={n} /></div>
+            <div className="flex items-center gap-2 bg-white px-2 py-2 text-xs text-ink-2"><b>{n + 1}</b><span className="truncate">{label(item.stage)}</span></div>
+          </button>
+        </li>)}</ol>
+      </nav>
+      <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,1fr)]">
+        <section aria-label="Slide preview" className="min-w-0">
+          <div className="overflow-hidden rounded-[10px] border border-line"><SlidePreview deck={deck} index={index} /></div>
+          <div className="my-3 flex items-center justify-between gap-2">
+            <button className={icon} title="Previous slide" aria-label="Previous slide" disabled={index === 0} onClick={() => setIndex(n => n - 1)}><ChevronLeft size={19} /></button>
+            <span className="text-sm tabular-nums text-mute">{index + 1} / {deck.draft.slides.length}</span>
+            <button className={icon} title="Next slide" aria-label="Next slide" disabled={index === deck.draft.slides.length - 1} onClick={() => setIndex(n => n + 1)}><ChevronRight size={19} /></button>
+          </div>
+        </section>
+        <aside aria-label="Slide editor" className="min-w-0">
+          <div role="tablist" aria-label="Slide fields" className="mb-3 flex border-b border-line">
+            <button type="button" role="tab" aria-selected={editorTab === "text"} onClick={() => setEditorTab("text")} className={`border-b-2 px-4 py-2.5 text-sm font-semibold ${editorTab === "text" ? "border-brand text-ink" : "border-transparent text-mute"}`}>Slide text</button>
+            <button type="button" role="tab" aria-selected={editorTab === "notes"} onClick={() => setEditorTab("notes")} className={`border-b-2 px-4 py-2.5 text-sm font-semibold ${editorTab === "notes" ? "border-brand text-ink" : "border-transparent text-mute"}`}>Teacher notes</button>
+          </div>
+          {editorTab === "text" ? <div className="space-y-3">{(["title", "body", "task"] as const).map(field => <label key={field} className="block text-[13px] font-semibold text-ink-2">{field === "task" ? "Thinking task" : label(field)}<textarea aria-label={`Slide ${field}`} className={`${input} mt-1.5 resize-y`} rows={field === "body" ? 3 : 2} disabled={busy} value={slide[field]} onChange={e => edit(field, e.target.value)} />{field === "body" && deck.strategy !== "analogy" && <span className="mt-1 block text-xs font-normal text-mute">{slide.stage === "question" ? "Leave this empty; students see their question task and writing card." : "Optional when the picture and thinking task provide enough context."}</span>}</label>)}{index === analogyMappingIndex(deck.draft.analogyMethod) && deck.draft.analogyPlan && analogyStudentFields(deck.draft.analogyMethod).map(field => <label key={field} className="block text-sm font-medium">{field === "mappingHint" ? "Visible comparison hint" : "Student response starter"}<textarea className={`${input} mt-2 resize-y`} rows={2} maxLength={field === "mappingHint" ? 140 : 100} disabled={busy} value={deck.draft.analogyPlan![field]} onChange={e => editMapping(field, e.target.value)} /></label>)}</div>
+          : <label className="block text-[13px] font-semibold text-ink-2">Teacher notes<textarea aria-label="Slide teacher notes" className={`${input} mt-1.5 resize-y`} rows={8} disabled={busy} value={slide.teacherNotes.join("\n\n")} onChange={e => edit("teacherNotes", e.target.value.split(/\n\s*\n/u).filter(Boolean))} /><span className="mt-2 block text-xs font-normal text-mute">Private guidance for you. Students do not see these notes. Separate up to two notes with a blank line.</span></label>}
+        </aside>
+      </div>
       <section aria-label="AI Review" className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-base font-semibold">AI Review</h3>
@@ -458,17 +557,6 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       </section>
       {!!issues.length && <div role="alert" className="mt-5 border-l-4 border-red-700 bg-red-50 p-4 text-sm text-red-900"><ul className="space-y-2">{issues.map((issue, n) => <li key={n} className="whitespace-pre-line break-words">{issue}</li>)}</ul></div>}
       {!!missingImages && !busy && <p className="mt-3 text-sm text-amber-900">Images pending. Download unavailable.</p>}
-      <div className="mt-6 grid items-start gap-6 border-t border-gray-200 pt-5 lg:grid-cols-2">
-        <aside aria-label="Slide editor" className="min-w-0">
-          <h3 className="mb-4 text-base font-semibold">Edit slide text</h3>
-          <div className="space-y-4">{(["title", "body", "task"] as const).map(field => <label key={field} className="block text-sm font-medium">{field === "task" ? "Thinking task" : label(field)}<textarea aria-label={`Slide ${field}`} className={`${input} mt-2 resize-y`} rows={field === "title" ? 2 : 4} disabled={busy} value={slide[field]} onChange={e => edit(field, e.target.value)} />{field === "body" && deck.strategy !== "analogy" && <span className="mt-1 block text-xs font-normal text-gray-600">{slide.stage === "question" ? "Leave this empty; students see their question task and writing card." : "Optional when the picture and thinking task provide enough context."}</span>}</label>)}{index === analogyMappingIndex(deck.draft.analogyMethod) && deck.draft.analogyPlan && analogyStudentFields(deck.draft.analogyMethod).map(field => <label key={field} className="block text-sm font-medium">{field === "mappingHint" ? "Visible comparison hint" : "Student response starter"}<textarea className={`${input} mt-2 resize-y`} rows={2} maxLength={field === "mappingHint" ? 140 : 100} disabled={busy} value={deck.draft.analogyPlan![field]} onChange={e => editMapping(field, e.target.value)} /></label>)}</div>
-        </aside>
-        <section aria-label="Revise slides" className="min-w-0">
-          <h3 className="text-base font-semibold">Revise slides (optional)</h3>
-          <label className="mt-3 block text-sm font-medium">Revision request<textarea aria-label="Revision request" className={`${input} mt-2 resize-y`} rows={2} maxLength={3000} disabled={busy} value={feedback} onChange={e => setFeedback(e.target.value)} placeholder="Describe what you would like to improve." /></label>
-          <button className={`${button} mt-3`} disabled={busy || !canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Revise with AI</button>
-        </section>
-      </div>
       <section aria-label="Review and publish" className="mt-5 rounded-lg border border-teal-200 bg-teal-50/50 p-4">
         <h3 className="text-base font-semibold text-gray-900">Review and publish</h3>
         <p id={reviewHelpId} aria-live="polite" className="mt-2 text-sm leading-6 text-gray-700">{reviewHelp}</p>
@@ -483,6 +571,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         <div className="mt-3 flex flex-wrap gap-2">
           <button type="button" className={button} disabled={!ready || busy || reviewed} onClick={() => setReviewed(true)}><ScanEye size={16} />{reviewed ? "Review confirmed" : "Confirm review"}</button>
           <button type="button" className={button} disabled={busy || !ready} onClick={download}><Download size={17} />Download PPTX</button>
+          <button type="button" className={button} disabled={busy || !ready || !classId || !assignmentId} onClick={() => setShareOpen(true)}><LayoutGrid size={17} />{sharedDeck === deck ? "In Gallery · share another version" : "Share to Gallery"}</button>
           <button type="button" className={primaryButton} disabled={busy || !ready || !classId || !assignmentId || published} onClick={publish}><Send size={17} />{published ? "Published" : "Send to students"}</button>
           {preparedDownload?.deck === deck && !busy && ready && <a className={button} href={preparedDownload.httpUrl || preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>}
         </div>
@@ -497,6 +586,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           <button className={button} disabled={busy || !!issues.length || !!visual.needsReference} onClick={() => retryImage(visual.id)}><ImagePlus size={16} />Regenerate {visual.id} image</button>
         </li>)}</ul>
       </section>}
+      {shareOpen && classId && assignmentId && <ShareSlidesDialog deck={deck} scope={{ classId, assignmentId }} onClose={() => setShareOpen(false)} onShared={() => { setSharedDeck(deck); setShareOpen(false); setStatus("Shared to Gallery. Send to students separately when you are ready."); onGalleryShared?.(); }} />}
       <dialog ref={dialog} className="fixed inset-0 m-auto w-[96vw] max-w-7xl max-h-[96vh] overflow-auto border border-gray-300 bg-gray-50 p-3 backdrop:bg-black/70">
         <div className="mb-3 flex items-center justify-between gap-2"><button className={icon} aria-label="Previous enlarged slide" disabled={index === 0} onClick={() => setIndex(n => n - 1)}><ChevronLeft size={19} /></button><span className="text-sm">{index + 1} / {deck.draft.slides.length}</span><button className={icon} aria-label="Next enlarged slide" disabled={index === deck.draft.slides.length - 1} onClick={() => setIndex(n => n + 1)}><ChevronRight size={19} /></button><button className={icon} aria-label="Close preview" title="Close preview" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
         <div className="mx-auto w-full" style={{ maxWidth: "calc((96vh - 90px) * 16 / 9)" }}><SlidePreview deck={deck} index={index} /></div>

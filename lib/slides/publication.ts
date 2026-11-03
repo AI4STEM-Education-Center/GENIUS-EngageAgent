@@ -22,7 +22,7 @@ const string = (value: unknown, max: number) => typeof value === "string" && val
 const dimension = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 4096;
 export const isSlidePublicationId = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
 const lesson = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 8;
-const assetId = (value: unknown): value is string => typeof value === "string" && /^(?:phenomenon|target|analogue|variation|evidence|experience)$/u.test(value);
+const assetId = (value: unknown): value is string => typeof value === "string" && /^(?:phenomenon|target|analogue|variation|evidence|experience|claim)$/u.test(value);
 
 export function isPublishedSlideReference(value: unknown): value is PublishedSlideReference {
   return record(value) && keys(value, ["publicationId", "slideCount", "lessonNumber"]) && isSlidePublicationId(value.publicationId)
@@ -48,6 +48,7 @@ function isElement(value: unknown): value is PublicSlideElement {
 
 function validStages(strategy: SlideStrategy, stages: string[]) {
   const sequence = stages.join(",");
+  if (strategy === "engaged critiquing") return sequence === "claim,evidence,critique,revise,question";
   if (strategy === "cognitive conflict") return sequence === "phenomenon,prediction,discrepant,compare,question";
   if (strategy === "experience bridging") return ["experience,notice,name,question", "experience,notice,name,connect,question"].includes(sequence);
   return ["phenomenon,target,analogue,mapping,apply,question", "phenomenon,target,analogue,mapping,apply,limits,question",
