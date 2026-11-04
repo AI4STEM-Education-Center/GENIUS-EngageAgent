@@ -26,6 +26,8 @@ import { STRATEGIES as SLIDE_STRATEGIES, type SlideStrategy, type SlideDeck } fr
 import { parseMaterialActivity } from "@/lib/material-activities";
 import { downloadStudentMaterial, type PreparedMaterialFile } from "@/lib/material-export";
 import type { UserContext } from "@/lib/auth";
+import { useClassProfile } from "./ClassProfileModal";
+import { describeClassProfile } from "@/lib/class-profile";
 import { recommendWorkspaceCohort, workspaceQuizAnswers } from "@/lib/cohort-recommendation";
 import {
   engagementStrategies as strategies,
@@ -348,6 +350,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const [publishingQuiz, setPublishingQuiz] = useState(false);
   // Assessment step sub-tabs (quiz vs survey), mirrors the tab pattern in StudentView.
   const [assessmentTab, setAssessmentTab] = useState<"quiz" | "survey">("quiz");
+
+  // Class profile (#173): asked once on the teacher's first visit to the class.
+  const classProfile = useClassProfile({ classId, assignmentId, enabled: hasAssignmentContext });
 
   // Student answers
   const [studentAnswers, setStudentAnswers] = useState<StudentAnswer[]>([]);
@@ -1780,6 +1785,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   };
 
   const visibleStep = showDashboard ? 0 : currentStep;
+  // Matches the v8.3 prototype: "Rural · Honors", the supports, and an Edit link.
+  const profileSummary = describeClassProfile(classProfile.profile);
+  const classProfileCard = { name: "Class profile", title: `${profileSummary.location} · ${profileSummary.classType}`, detail: profileSummary.supports, edit: "Edit" };
   const stepStatus = [
     quizStatus === "published" ? "Published" : quizStatus === "closed" ? "Closed" : selectedLesson ? "In progress" : "Not started",
     selectedStrategies.length ? getEngagementStrategyLabel(selectedStrategies[0])
@@ -1796,7 +1804,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     <AppFrame
       header={<AppHeader userName={user.name} homeHref={shell?.homeHref} context={taskContext(user, shell)} canSignOut={shell?.canSignOut}
         actions={[
-          { label: "Class profile", icon: <Users size={15} />, comingSoon: true },
+          { label: "Class profile", icon: <Users size={15} />, onClick: classProfile.openEditor, comingSoon: !hasAssignmentContext },
           { label: "Dashboard", icon: <BarChart3 size={15} />, onClick: () => setShowDashboard(true), active: showDashboard },
           { label: "Gallery", icon: <LayoutGrid size={15} />, onClick: () => { setShowDashboard(false); setCurrentStep(3); setGalleryBrowseRequest(value => value + 1); } },
           { label: "Ask EngageAgent", icon: <MessageCircle size={15} />, comingSoon: true },
@@ -1965,9 +1973,18 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                 {[
                   { name: "Lesson", title: selectedLessonData?.lesson_title || "Choose in Step 1", detail: selectedLessonData ? `${selectedLessonData.core_ideas?.length ?? 0} core ideas` : "" },
                   { name: "Strategy", title: selectedStrategies[0] ? getStrategyLabel(selectedStrategies[0]) : "Choose in Step 2", detail: selectedFocusKind ? `${selectedFocus[selectedFocusKind].length} selected ${selectedFocusKind === "misconceptions" ? "misconceptions" : "core ideas"}` : "" },
-                  { name: "Class profile", title: "Not provided", detail: "Add what matters in Classroom context" },
+                  classProfileCard,
                   { name: "Students’ experiences", title: "No GENIUS check-in data", detail: "Task survey suggestions appear below when available" },
-                ].map(card => <div key={card.name} className="rounded-xl bg-canvas p-4"><p className="text-xs font-bold uppercase tracking-wider text-faint">{card.name}</p><p className="mt-2 font-semibold text-ink">{card.title}</p><p className="mt-1 text-sm text-mute">{card.detail}</p></div>)}
+                ].map((card: { name: string; title: string; detail: string; edit?: string }) => (
+                  <div key={card.name} className="rounded-xl bg-canvas p-4">
+                    <p className="text-xs font-bold uppercase tracking-wider text-faint">{card.name}</p>
+                    <p className="mt-2 font-semibold text-ink">{card.title}</p>
+                    <p className="mt-1 text-sm text-mute">{card.detail}</p>
+                    {card.edit && hasAssignmentContext && (
+                      <button type="button" aria-label="Edit class profile" onClick={classProfile.openEditor} className="mt-2 text-sm font-semibold text-brand hover:underline">{card.edit}</button>
+                    )}
+                  </div>
+                ))}
               </div>
 
               <fieldset className="grid gap-3" aria-label="Material type">
@@ -2254,6 +2271,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             </div>
           </div>
         )}
+
+        {classProfile.element}
 
         {/* Refine image modal */}
         {refineTarget && (
