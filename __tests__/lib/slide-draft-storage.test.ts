@@ -10,6 +10,16 @@ const scope: SlideDraftScope = { userId: "teacher-a", classId: "ea-class-a", ass
 const stored = () => ({ version: 1, key: slideDraftKey(scope), deck: deckFixture(scope.strategy) });
 afterEach(() => vi.unstubAllGlobals());
 
+it("isolates Gallery copy caches without changing existing workflow keys", () => {
+  expect(slideDraftKey(scope)).toBe(JSON.stringify([scope.userId, scope.classId, scope.assignmentId, scope.lessonNumber, scope.strategy]));
+  const gallery = { ...scope, draftNamespace: "gallery:copy-a" };
+  const value = { ...stored(), key: slideDraftKey(gallery) };
+  expect(restoreSlideDraft(value, gallery)?.id).toBe(value.deck.id);
+  expect(() => restoreSlideDraft(value, scope)).toThrow();
+  expect(() => restoreSlideDraft(stored(), gallery)).toThrow();
+  expect(() => restoreSlideDraft(value, { ...gallery, draftNamespace: "gallery:copy-b" })).toThrow();
+});
+
 it("round-trips generated images, content and keyed checks without retaining teacher acceptance", () => {
   const value = stored();
   value.deck.teacherDecision = { reason: "Reviewed in class", draftKey: "key", checks: value.deck.checks!, assets: value.deck.assets };

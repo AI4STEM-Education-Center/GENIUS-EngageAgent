@@ -7,7 +7,7 @@ import { getMedia } from "./nosql";
 import { parseMaterialActivity } from "./material-activities";
 import { isSlideAsset, type SlideDraft } from "./slides/model";
 import type { ContentItem, TextMode } from "./types";
-import type { GalleryFilters, GalleryFocus, GalleryMaterial, GalleryMetadata, GalleryProvenance, GalleryScope } from "./material-gallery";
+import type { GalleryFilters, GalleryFocus, GalleryMaterial, GalleryMetadata, GalleryProvenance, GalleryScope, SavedGalleryCopySummary } from "./material-gallery";
 import { assertGalleryStorage, copyGalleryBlob, duplicateGalleryBlob, galleryBlobUrl, readGalleryBlob, storeGalleryBlob, type GalleryBlob } from "./material-gallery-storage";
 
 const PARTITION = "MATERIAL_GALLERY#v1";
@@ -23,7 +23,17 @@ type Source = {
   videoMedia?: { video: GalleryBlob; image?: GalleryBlob };
   derivedFrom?: Pick<GalleryProvenance, "templateId" | "revision" | "title">;
 };
-type Copy = { id: string; ownerId: string; classId: string; assignmentId: string; templateId: string; source: GalleryProvenance; createdAt: string };
+type Copy = { id: string; ownerId: string; classId: string; assignmentId: string; templateId: string; source: GalleryProvenance; createdAt: string; saved?: SavedGalleryCopySummary & { snapshotId: string } };
+type CopySnapshot = {
+  id: string; copyId: string; expectedRevision: number; createdAt: string; expiresAt: number;
+  format: "slides" | "video"; lessonNumber: number; strategy: string;
+  draft?: SlideDraft; item?: ContentItem; classroomContext?: string;
+  assets: Record<string, AssetDescription & { sourcePrompt?: string; referenceDigest?: string }>;
+  videoMedia?: Source["videoMedia"];
+};
+const snapshotKey = (id: string) => `DRAFT#${id}`;
+const savedKey = (id: string, revision: number) => `SAVE#${id}#${String(revision).padStart(10, "0")}`;
+const saveConflict = () => new SlideRequestError("This copy has a newer saved version. Reopen it before saving again; your current edits are retained.", 409);
 type Shared = { id: string; ownerId: string; material: Omit<GalleryMaterial, "isOwner"> };
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const sourceKey = (id: string) => `SOURCE#${id}`;
@@ -262,6 +272,142 @@ async function copiedSource(context: AuthorizedSlideContext, copyId: unknown) {
   if (!source) throw new SlideRequestError("Copied material not found.", 404);
   return { copy, source };
 }
+
+function sameFocus(a: unknown, b: unknown) {
+  const normalized = (value: unknown) => record(value) ? JSON.stringify([
+    Array.isArray(value.misconceptions) ? [...value.misconceptions].sort() : [],
+    Array.isArray(value.coreIdeas) ? [...value.coreIdeas].sort() : [],
+  ]) : "[[],[]]";
+  return normalized(a) === normalized(b);
+}
+async function startCopySave(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+  const { copy, source } = await copiedSource(context, body.copyId);
+  if (!Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 0) throw new SlideRequestError("Provide the last saved revision.", 422);
+  if ((copy.saved?.revision ?? 0) !== body.expectedRevision) throw saveConflict();
+  const value = source.format === "slides" ? body.deck : body.item;
+  if (!record(value) || value.id !== (source.format === "slides" ? copy.id : `gallery-copy-${copy.id}`)
+    || value.lessonNumber !== source.lessonNumber || value.strategy !== source.strategy || !sameFocus(value.focus, source.metadata.focus)) {
+    throw new SlideRequestError("Keep this copy's original lesson, strategy and focus.", 422);
+  }
+  if (value.gallerySource !== undefined && (!record(value.gallerySource)
+    || Object.entries(copy.source).some(([key, expected]) => value.gallerySource && (value.gallerySource as Record<string, unknown>)[key] !== expected))) {
+    throw new SlideRequestError("The copy's Gallery source does not match its receipt.", 422);
+  }
+  const id = randomUUID();
+  const snapshot: CopySnapshot = { id, copyId: copy.id, expectedRevision: Number(body.expectedRevision), createdAt: new Date().toISOString(),
+    expiresAt: Math.floor(Date.now() / 1000) + STAGING_SECONDS, format: source.format, lessonNumber: source.lessonNumber, strategy: source.strategy, assets: {} };
+  if (source.format === "slides") {
+    const draft = requestDraft(value.draft, slideContext(source).strategy, true);
+    snapshot.draft = draft;
+    snapshot.assets = parseAssetDescriptions(body.assets, draft);
+    snapshot.classroomContext = text(value.classroomContext, "Classroom context", 1200);
+    for (const [visualId, description] of Object.entries(snapshot.assets)) {
+      const input = (body.assets as Record<string, Record<string, unknown>>)[visualId];
+      if (input.sourcePrompt !== undefined) description.sourcePrompt = text(input.sourcePrompt, "Image source prompt", 50_000);
+      if (input.referenceDigest !== undefined) {
+        if (typeof input.referenceDigest !== "string" || !/^[a-f0-9]{64}$/u.test(input.referenceDigest)) throw new SlideRequestError("Invalid image reference.", 422);
+        description.referenceDigest = input.referenceDigest;
+      }
+    }
+  } else {
+    snapshot.item = videoItem(value, source.lessonNumber);
+    const video = await savedVideoMedia(context, snapshot.item, id, "video");
+    const image = await savedVideoMedia(context, snapshot.item, id, "image");
+    snapshot.videoMedia = { video: video!, ...(image ? { image } : {}) };
+  }
+  if (Buffer.byteLength(JSON.stringify(snapshot), "utf8") > MAX_SOURCE_BYTES) throw new SlideRequestError("This copy is too large to save. Shorten its text and notes first.", 413);
+  assertGalleryStorage();
+  await workspacePut([{ partition: copyPartition(context), key: snapshotKey(id), value: snapshot, createOnly: true, expiresAt: snapshot.expiresAt }]);
+  return { saveId: id };
+}
+async function copySaveStage(context: AuthorizedSlideContext, copyId: unknown, saveId: unknown) {
+  const { copy, source } = await copiedSource(context, copyId);
+  const snapshot = await workspaceGet<CopySnapshot>(copyPartition(context), snapshotKey(idValue(saveId)));
+  if (!snapshot || snapshot.copyId !== copy.id) throw new SlideRequestError("Saved copy not found.", 404);
+  return { copy, source, snapshot };
+}
+async function uploadCopyAsset(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+  const { snapshot } = await copySaveStage(context, body.copyId, body.saveId);
+  const partition = copyPartition(context);
+  if (await workspaceGet(partition, savedKey(snapshot.copyId, snapshot.expectedRevision + 1))) throw saveConflict();
+  if (snapshot.expiresAt <= Date.now() / 1000) throw new SlideRequestError("This save upload expired. Save your current copy again.", 410);
+  if (snapshot.format !== "slides" || typeof body.visualId !== "string" || !Object.hasOwn(snapshot.assets, body.visualId)) throw new SlideRequestError("Choose an image in this copy.", 422);
+  const asset = body.asset;
+  if (!isSlideAsset(asset) || asset.data.length > MAX_IMAGE_BYTES) throw new SlideRequestError("Use a PNG, JPEG or WebP image smaller than 3 MB.", 422);
+  const match = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/u.exec(asset.data)!;
+  const bytes = Buffer.from(match[2], "base64"), expected = snapshot.assets[body.visualId], size = imageDimensions(bytes, match[1]);
+  if (bytes.toString("base64") !== match[2] || !size || expected.width !== asset.width || expected.height !== asset.height
+    || size.width !== asset.width || size.height !== asset.height || digest(bytes) !== expected.digest) throw new SlideRequestError("The image changed during saving. Save the current copy again.", 422);
+  const key = assetKey(snapshot.id, body.visualId);
+  const existing = await workspaceGet<GalleryBlob>(partition, key);
+  if (!existing) {
+    const saved = { ...await storeGalleryBlob(`material-gallery/${snapshot.id}/${body.visualId}-${expected.digest}`, bytes, match[1]), width: asset.width, height: asset.height };
+    try { await workspacePut([{ partition, key, value: saved, createOnly: true, expiresAt: snapshot.expiresAt }]); }
+    catch (error) { if ((await workspaceGet<GalleryBlob>(partition, key))?.digest !== expected.digest) throw error; }
+  }
+  return { saveId: snapshot.id, visualId: body.visualId };
+}
+async function commitCopySave(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+  const { copy, source, snapshot } = await copySaveStage(context, body.copyId, body.saveId);
+  const partition = copyPartition(context), revision = snapshot.expectedRevision + 1, key = savedKey(copy.id, revision);
+  const previous = await workspaceGet<SavedGalleryCopySummary & { snapshotId: string }>(partition, key);
+  // Retrying a lost success acknowledgement never overwrites a later revision.
+  if (previous?.snapshotId === snapshot.id) { const { snapshotId: _id, ...summary } = previous; void _id; return { saved: summary }; }
+  if (previous || (copy.saved?.revision ?? 0) !== snapshot.expectedRevision) throw saveConflict();
+  if (snapshot.expiresAt <= Date.now() / 1000) throw new SlideRequestError("This save upload expired. Save your current copy again.", 410);
+  const assets = [];
+  for (const [visualId, description] of Object.entries(snapshot.assets)) {
+    const asset = await workspaceGet<GalleryBlob>(partition, assetKey(snapshot.id, visualId));
+    if (!asset || asset.digest !== description.digest) throw new SlideRequestError("Upload every current slide image before saving.", 422);
+    assets.push({ partition, key: assetKey(snapshot.id, visualId), value: asset });
+  }
+  const saved: SavedGalleryCopySummary = { copyId: copy.id, revision, savedAt: new Date().toISOString(), title: snapshot.draft?.title ?? snapshot.item!.title,
+    format: source.format, lessonNumber: source.lessonNumber, strategy: source.strategy, source: copy.source };
+  const pointer = { ...saved, snapshotId: snapshot.id };
+  try {
+    // The create-only revision record is the compare-and-swap guard. Snapshot,
+    // images and receipt pointer become durable in the very same transaction.
+    await workspacePut([{ partition, key, value: pointer, createOnly: true },
+      { partition, key: snapshotKey(snapshot.id), value: snapshot }, ...assets,
+      { partition, key: `COPY#${copy.id}`, value: { ...copy, saved: pointer } }]);
+  } catch (error) {
+    const winner = await workspaceGet<{ snapshotId: string }>(partition, key);
+    if (winner?.snapshotId !== snapshot.id) { if (winner) throw saveConflict(); throw error; }
+  }
+  return { saved };
+}
+async function savedSnapshot(context: AuthorizedSlideContext, copyId: unknown, revision?: number) {
+  const { copy, source } = await copiedSource(context, copyId);
+  const pointer = revision === undefined ? copy.saved : await workspaceGet<SavedGalleryCopySummary & { snapshotId: string }>(copyPartition(context), savedKey(copy.id, revision));
+  if (!pointer) throw new SlideRequestError("This copy has not been saved yet.", 404);
+  const snapshot = await workspaceGet<CopySnapshot>(copyPartition(context), snapshotKey(pointer.snapshotId));
+  if (!snapshot || snapshot.copyId !== copy.id) throw new SlideRequestError("The saved copy is unavailable.", 503);
+  return { copy, source, snapshot, pointer };
+}
+async function loadCopySave(context: AuthorizedSlideContext, copyId: unknown) {
+  const { copy, source, snapshot, pointer } = await savedSnapshot(context, copyId);
+  const common = { source: copy.source };
+  return { revision: pointer.revision, savedAt: pointer.savedAt,
+    copy: snapshot.format === "slides" ? { ...common, format: "slides", deck: { id: copy.id, lessonNumber: source.lessonNumber, strategy: source.strategy,
+      draft: snapshot.draft, assets: {}, gallerySource: copy.source, classroomContext: snapshot.classroomContext,
+      ...(source.metadata.focus ? { focus: source.metadata.focus } : {}) } } : { ...common, format: "video", item: { ...snapshot.item,
+      gallerySource: copy.source }, media: await videoUrls(snapshot) },
+    visualIds: Object.keys(snapshot.assets) };
+}
+async function savedCopyAsset(context: AuthorizedSlideContext, params: URLSearchParams) {
+  const revision = Number(params.get("revision"));
+  if (!Number.isSafeInteger(revision) || revision < 1) throw new SlideRequestError("Choose a saved revision.", 422);
+  const { snapshot } = await savedSnapshot(context, params.get("copyId"), revision);
+  const visualId = params.get("visualId");
+  if (!visualId || !Object.hasOwn(snapshot.assets, visualId)) throw new SlideRequestError("Saved image not found.", 404);
+  const asset = await workspaceGet<GalleryBlob>(copyPartition(context), assetKey(snapshot.id, visualId));
+  if (!asset) throw new SlideRequestError("The saved image is unavailable.", 503);
+  const bytes = await readGalleryBlob(asset);
+  if (bytes.length > MAX_IMAGE_BYTES || digest(bytes) !== snapshot.assets[visualId].digest) throw new SlideRequestError("The saved image could not be verified.", 503);
+  const description = snapshot.assets[visualId];
+  return { asset: { data: `data:${asset.mime};base64,${bytes.toString("base64")}`, width: asset.width, height: asset.height,
+    ...(description.sourcePrompt === undefined ? {} : { sourcePrompt: description.sourcePrompt }) }, referenceDigest: description.referenceDigest };
+}
 async function copyMaterial(body: Record<string, unknown>, context: AuthorizedSlideContext) {
   if (body.mode !== "use" && body.mode !== "adapt") throw new SlideRequestError("Choose use or adapt.");
   const source = await sharedSource(body.id);
@@ -274,7 +420,7 @@ async function copyMaterial(body: Record<string, unknown>, context: AuthorizedSl
   return { format: "video", copyId: copy.id, source: copy.source, item: { ...source.item, id: `gallery-copy-${copy.id}`, lessonNumber: source.lessonNumber,
     ...(source.metadata.focus ? { focus: source.metadata.focus } : {}), gallerySource: copy.source }, media: await videoUrls(source) };
 }
-async function videoUrls(source: Source) {
+async function videoUrls(source: { videoMedia?: Source["videoMedia"] }) {
   if (!source.videoMedia) throw new SlideRequestError("Saved video is missing.", 503);
   return { video: await galleryBlobUrl(source.videoMedia.video), ...(source.videoMedia.image ? { image: await galleryBlobUrl(source.videoMedia.image) } : {}) };
 }
@@ -317,6 +463,9 @@ export async function resolveGalleryContentMedia(classId: string, assignmentId: 
 export async function galleryPost(request: Request, body: Record<string, unknown>) {
   const context = await authorizeSlides(request, body);
   switch (body.action) {
+    case "start-save": return startCopySave(body, context);
+    case "upload-copy-asset": return uploadCopyAsset(body, context);
+    case "commit-save": return commitCopySave(body, context);
     case "start-share": return startShare(body, context);
     case "upload-asset": return uploadAsset(body, context);
     case "commit-share": return commitShare(body, context);
@@ -339,6 +488,13 @@ export async function galleryGet(request: Request) {
   const params = new URL(request.url).searchParams;
   if (new Set(params.keys()).size !== [...params.keys()].length) throw new SlideRequestError("Repeated query parameters are not allowed.");
   const context = await authorizeSlides(request, Object.fromEntries(params));
+  if (params.get("action") === "saved-copy") return loadCopySave(context, params.get("copyId"));
+  if (params.get("action") === "saved-asset") return savedCopyAsset(context, params);
+  if (params.get("action") === "saved-copies") {
+    const copies = await workspaceQuery<Copy>(copyPartition(context), "COPY#");
+    return { items: copies.filter(copy => copy.ownerId === context.userId && copy.classId === context.classId && copy.assignmentId === context.assignmentId && copy.saved)
+      .map(copy => { const { snapshotId: _id, ...summary } = copy.saved!; void _id; return summary; }).sort((a, b) => b.savedAt.localeCompare(a.savedAt)) };
+  }
   if (params.get("action") === "copy-media") return copyVideoMedia(context, params.get("copyId"));
   if (params.get("action") === "asset") {
     const { source } = params.has("copyId") ? await copiedSource(context, params.get("copyId")) : { source: await sharedSource(params.get("id")) };

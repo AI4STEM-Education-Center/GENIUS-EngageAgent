@@ -94,6 +94,27 @@ it("opens the library from the header before a lesson is selected, with copying 
   expect(mocks.list.mock.calls.every(([, filters]) => filters.lessonNumber !== 0)).toBe(true);
 });
 
+it.each([{ lessonNumber: 0, preview: false }, { lessonNumber: 8, preview: true }])("opens a standalone Gallery copy without changing or requiring the workflow lesson: %j", async ({ lessonNumber, preview }) => {
+  const onUse = vi.fn();
+  render(<MaterialGalleryPanel {...props({ lessonNumber, strategy: "analogy", standalone: true, onUse })} />);
+  const article = await card();
+  expect(screen.getByRole("heading", { name: "Shared materials" })).toBeTruthy();
+  expect(screen.queryByText("Choose Lesson 3 in Assessment to use this material.")).toBeNull();
+  expect(mocks.list.mock.calls.every(([, filters]) => filters.lessonNumber === undefined && filters.strategy === undefined)).toBe(true);
+  if (preview) {
+    fireEvent.click(within(article).getByRole("button", { name: "Preview" }));
+    await screen.findByLabelText("Rendered shared slide");
+    expect(mocks.copy).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Open and edit" }));
+  } else fireEvent.click(within(article).getByRole("button", { name: "Open" }));
+  await waitFor(() => expect(onUse).toHaveBeenCalledOnce());
+  expect(mocks.copy).toHaveBeenCalledWith(scope, material.id, "adapt", expect.any(AbortSignal));
+  expect(onUse.mock.calls[0][0].deck.lessonNumber).toBe(3);
+  expect(onUse.mock.calls[0][0].deck.id).toBe("independent-copy");
+  expect(onUse.mock.calls[0][1]).toEqual(material);
+  expect(await screen.findByText("Your copy is ready to edit.")).toBeTruthy();
+});
+
 it("previews a saved video without creating a copy", async () => {
   const video = { ...material, format: "video" as const };
   mocks.list.mockResolvedValue({ items: [video] });

@@ -32,13 +32,18 @@ type SlidesWorkspaceProps = {
   user: UserContext;
   embeddedContext?: { lessonNumber: number; strategy: SlideStrategy; classroomContext?: string; focus?: Partial<StrategyFocus> };
   incomingDeck?: SlideDeck;
+  incomingDeckSaved?: boolean;
+  draftNamespace?: string;
+  onSaveDraft?: (deck: SlideDeck) => Promise<void>;
+  onDraftChange?: (deck: SlideDeck) => void;
+  compactEditor?: boolean;
   onBusyChange?: (strategy: SlideStrategy, busy: boolean) => void;
   onReadyChange?: (strategy: SlideStrategy, ready: boolean) => void;
   onPublished?: () => void;
   onGalleryShared?: () => void;
 };
 
-const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceProps>(function SlidesWorkspaceEditor({ user, embeddedContext, incomingDeck, onBusyChange, onReadyChange, onPublished, onGalleryShared }, ref) {
+const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceProps>(function SlidesWorkspaceEditor({ user, embeddedContext, incomingDeck, incomingDeckSaved = true, draftNamespace, onSaveDraft, onDraftChange, compactEditor = false, onBusyChange, onReadyChange, onPublished, onGalleryShared }, ref) {
   const [lessons, setLessons] = useState<SlideLesson[]>([]);
   const [standaloneLesson, setLessonNumber] = useState(1);
   const [standaloneStrategy, setStrategy] = useState<SlideStrategy>("analogy");
@@ -72,6 +77,10 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const [undoDeck, setUndoDeck] = useState<SlideDeck | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [sharedDeck, setSharedDeck] = useState<SlideDeck | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [serverSavedDeck, setServerSavedDeck] = useState<SlideDeck | null>(null);
+  const saveJob = useRef<AbortController | null>(null);
+  const draftChangeCallback = useRef(onDraftChange);
   const importedDeckId = useRef<string | null>(null);
   const [reload, setReload] = useState(0);
   const job = useRef<AbortController | null>(null);
@@ -81,7 +90,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const reviewHelpId = useId();
   const imageRecovery = useRef<HTMLElement>(null);
   const { classId, assignmentId } = user;
-  const scope = useMemo(() => ({ userId: user.geniusId, classId: classId || "", assignmentId: assignmentId || "", lessonNumber, strategy }), [user.geniusId, classId, assignmentId, lessonNumber, strategy]);
+  const scope = useMemo(() => ({ userId: user.geniusId, classId: classId || "", assignmentId: assignmentId || "", lessonNumber, strategy,
+    ...(draftNamespace ? { draftNamespace } : {}) }), [user.geniusId, classId, assignmentId, lessonNumber, strategy, draftNamespace]);
   const scopeKey = slideDraftKey(scope);
   const [restoredScope, setRestoredScope] = useState("");
   const [savedDeck, setSavedDeck] = useState<SlideDeck | null>(null);
@@ -107,16 +117,21 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     job.current?.abort(); job.current = null;
     exportRequest.current++; exportJob.current?.abort(); exportJob.current = null;
     publishJob.current?.abort(); publishJob.current = null;
+    saveJob.current?.abort(); saveJob.current = null;
     setDeck(incomingDeck); setIndex(0); setBusy(false); setReviewed(false); setDownloaded(false);
+    setServerSavedDeck(incomingDeckSaved ? incomingDeck : null);
     setUndoDeck(null); setSharedDeck(null); setShareOpen(false); setFeedback("");
     setPreparedDownload(null); setPublishedContentKey(""); setPublicationWarning(""); setReviewWarnings([]); setError("");
     setClassroomContext(incomingDeck.classroomContext ?? "");
     if (!embeddedContext) { setLessonNumber(incomingDeck.lessonNumber); setStrategy(incomingDeck.strategy); }
     setRestoredScope(scopeKey);
-    setStatus("Gallery material copied into this task. Review or edit it, then send it to your students.");
-  }, [incomingDeck, embeddedContext, lessonNumber, strategy, scopeKey]);
+    setStatus(compactEditor ? "Edit your copy, save changes, or send it to students." : "Gallery material copied into this task. Review or edit it, then send it to your students.");
+  }, [incomingDeck, incomingDeckSaved, embeddedContext, lessonNumber, strategy, scopeKey, compactEditor]);
   useEffect(() => {
     if (!catalogLoaded || !lessons.some(lesson => lesson.lessonNumber === scope.lessonNumber)) return;
+    // The Gallery parent loads the authoritative server copy. A device cache
+    // must never replace it, including while that server request is pending.
+    if (draftNamespace) { setRestoredScope(scopeKey); return; }
     // Standalone controls can select settings for the next draft without replacing
     // the current one. Embedded workspace identity is isolated by the keyed wrapper.
     if (deck) { setRestoredScope(scopeKey); return; }
@@ -145,7 +160,10 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     });
     return () => { active = false; };
   }, [deck, restoredScope, scope]);
+  useEffect(() => { draftChangeCallback.current = onDraftChange; }, [onDraftChange]);
+  useEffect(() => { if (deck) draftChangeCallback.current?.(deck); }, [deck]);
   useEffect(() => () => { job.current?.abort(); }, []);
+  useEffect(() => () => { saveJob.current?.abort(); publishJob.current?.abort(); }, []);
   // Passive cleanup for the previous deck can run after the restored deck is
   // already interactive. Cancel only an operation owned by that previous deck.
   useEffect(() => () => { if (exportDeck.current === deck) { exportRequest.current++; exportJob.current?.abort(); } }, [deck]);
@@ -182,11 +200,14 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const assessment = useMemo(() => deck ? reviewAssessment(deck) : { complete: false, findings: [], pending: [] }, [deck]);
   const suggestions = assessment.findings;
   useEffect(() => {
-    if (!busy && (!deck || deck === savedDeck)) return;
+    // Gallery owns leave confirmation for its editor, including an explicit
+    // discard. A second child listener would reject that approved navigation.
+    if (compactEditor) return;
+    if (!busy && (!deck || deck === (onSaveDraft || compactEditor ? serverSavedDeck : savedDeck))) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [deck, savedDeck, busy]);
+  }, [deck, savedDeck, serverSavedDeck, onSaveDraft, compactEditor, busy]);
 
   async function post(path: string, body: object, controller: AbortController) {
     return postSlideRequest<{ draft: unknown; slide?: TeachingSlide; slideIndex?: number; asset: unknown; issues: string[]; model?: string; promptProvenance?: SlidePromptProvenance }>(
@@ -432,6 +453,13 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     const controller = new AbortController(); publishJob.current = controller; publishingDeck.current = deck;
     setBusy(true); setError("");
     try {
+      if (onSaveDraft || compactEditor) {
+        if (!onSaveDraft) throw new Error("Saving is unavailable. Your edits are retained; try again before sending.");
+        setStatus("Saving changes before sending...");
+        await onSaveDraft(deck);
+        if (controller.signal.aborted || publishJob.current !== controller) return;
+        setServerSavedDeck(deck);
+      }
       await publishSlideDeck(deck, { classId, assignmentId }, controller.signal, setStatus);
       if (controller.signal.aborted || publishJob.current !== controller) return;
       setPublishedContentKey(contentKey); setPublicationWarning("");
@@ -440,6 +468,19 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     } catch (err) {
       if (!controller.signal.aborted) { setError(err instanceof Error ? err.message : "Unable to send slides. Your draft is retained; try again."); setStatus(""); }
     } finally { if (publishJob.current === controller) { publishJob.current = null; publishingDeck.current = null; setBusy(false); } }
+  }
+  async function saveChanges() {
+    if (!deck || busy || saveJob.current) return;
+    const controller = new AbortController(); saveJob.current = controller;
+    setBusy(true); setError(""); setStatus("Saving changes...");
+    try {
+      if (!onSaveDraft) throw new Error("Saving is unavailable. Your edits are retained; try again when connected.");
+      await onSaveDraft(deck);
+      if (controller.signal.aborted || saveJob.current !== controller) return;
+      setServerSavedDeck(deck); setStatus("Changes saved.");
+    } catch (err) {
+      if (!controller.signal.aborted) { setError(err instanceof Error ? err.message : "Unable to save changes. Your edits are retained; try again."); setStatus(""); }
+    } finally { if (saveJob.current === controller) { saveJob.current = null; setBusy(false); } }
   }
   const missingImages = deck?.draft.visuals.some(visual => !isSlideAsset(deck.assets[visual.id]));
   const slide = deck?.draft.slides[index];
@@ -463,10 +504,10 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   const Heading = embedded ? "h3" : "h1";
   return <Container aria-label={embedded ? `${label(strategy)} slides` : undefined} className={embedded ? "min-w-0" : "mx-auto max-w-7xl px-5 pb-12"}>
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-4">
-      <Heading className="text-[22px] font-semibold tracking-tight text-ink">{embedded ? "Review, send & share" : "Teaching slides"}</Heading>
-      {deck && <span className="text-sm text-gray-500">{deck === savedDeck ? "Saved on this device" : storageError ? "Unsaved draft" : "Saving draft..."}{downloaded ? " · Export prepared" : ""}</span>}
+      <Heading className="text-[22px] font-semibold tracking-tight text-ink">{compactEditor ? "Edit slides" : embedded ? "Review, send & share" : "Teaching slides"}</Heading>
+      {deck && <span className="text-sm text-gray-500">{onSaveDraft || compactEditor ? deck === serverSavedDeck ? "Saved changes" : "Unsaved changes" : deck === savedDeck ? "Saved on this device" : storageError ? "Unsaved draft" : "Saving draft..."}{downloaded ? " · Export prepared" : ""}</span>}
     </div>
-    {(!embedded || sharedClassroomContext === undefined) && <div className="grid items-end gap-3 border-b border-gray-200 py-5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+    {!compactEditor && (!embedded || sharedClassroomContext === undefined) && <div className="grid items-end gap-3 border-b border-gray-200 py-5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
       {!embedded && <><label className="min-w-0 text-sm font-medium">Lesson<select aria-label="Lesson" className={`${input} mt-2`} value={lessonNumber} disabled={busy || !lessons.length} onChange={e => setLessonNumber(Number(e.target.value))}>{lessons.map(lesson => <option key={lesson.lessonNumber} value={lesson.lessonNumber}>{lesson.lessonNumber}. {lesson.lessonTitle}</option>)}</select></label>
       <label className="min-w-0 text-sm font-medium">Strategy<select aria-label="Strategy" className={`${input} mt-2`} value={strategy} disabled={busy} onChange={e => setStrategy(e.target.value as SlideStrategy)}>{STRATEGIES.map(value => <option key={value} value={value}>{label(value)}</option>)}</select></label></>}
       {sharedClassroomContext === undefined && <label className="min-w-0 text-sm font-medium sm:col-span-3">Classroom context (optional)
@@ -491,7 +532,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           <button className={icon} disabled={!!issues.length} title="Enlarge preview" aria-label="Enlarge preview" onClick={() => dialog.current?.showModal()}><Expand size={17} /></button>
         </div>
       </div>
-      <section aria-label="Revise slides" className="mb-4 rounded-xl border border-ai-mid bg-ai-light/50 p-4">
+      {compactEditor && <button type="button" className={`${button} mb-4`} aria-expanded={advancedOpen} onClick={() => setAdvancedOpen(open => !open)}>Advanced</button>}
+      {(!compactEditor || advancedOpen) && <section aria-label="Revise slides" className="mb-4 rounded-xl border border-ai-mid bg-ai-light/50 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-ink"><Sparkles size={16} className="text-ai" />Revise with AI</h3>
           <div role="group" aria-label="Revision scope" className="inline-flex rounded-lg bg-white p-1">
@@ -509,7 +551,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           <span>{(() => { const changed = deck.draft.slides.flatMap((s, i) => JSON.stringify(s) !== JSON.stringify(undoDeck.draft.slides[i]) ? [i + 1] : []); return changed.length ? `Changed slide${changed.length > 1 ? "s" : ""} ${changed.join(", ")}` : "Revision ready"; })()}</span>
           <button type="button" className={button} onClick={undoRevision}><Undo2 size={15} />Undo revision</button>
         </div>}
-      </section>
+      </section>}
       <nav aria-label="Choose slide" className="mb-4 overflow-x-auto pb-2">
         <ol className="grid grid-flow-col auto-cols-[minmax(145px,1fr)] gap-3">{deck.draft.slides.map((item, n) => <li key={`${item.stage}-${n}`}>
           <button type="button" className={`block w-full overflow-hidden rounded-lg border-2 text-left ${index === n ? "border-brand" : "border-line hover:border-slate-300"}`} aria-label={`Edit slide ${n + 1}: ${item.title}`} aria-current={index === n ? "step" : undefined} onClick={() => setIndex(n)}>
@@ -536,7 +578,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           : <label className="block text-[13px] font-semibold text-ink-2">Teacher notes<textarea aria-label="Slide teacher notes" className={`${input} mt-1.5 resize-y`} rows={8} disabled={busy} value={slide.teacherNotes.join("\n\n")} onChange={e => edit("teacherNotes", e.target.value.split(/\n\s*\n/u).filter(Boolean))} /><span className="mt-2 block text-xs font-normal text-mute">Private guidance for you. Students do not see these notes. Separate up to two notes with a blank line.</span></label>}
         </aside>
       </div>
-      <section aria-label="AI Review" className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
+      {(!compactEditor || advancedOpen) && <section aria-label="AI Review" className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-base font-semibold">AI Review</h3>
           <button className={button} disabled={busy} onClick={checkCurrent}><ScanEye size={16} />Check slides</button>
@@ -554,24 +596,25 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           <ul className="mt-3 list-disc space-y-2 pl-5">{suggestions.map((finding, n) => <li key={n} className="break-words">{finding}</li>)}</ul>
           <button type="button" className={`${button} mt-3`} disabled={!canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Refine with AI</button>
         </section>}
-      </section>
+      </section>}
       {!!issues.length && <div role="alert" className="mt-5 border-l-4 border-red-700 bg-red-50 p-4 text-sm text-red-900"><ul className="space-y-2">{issues.map((issue, n) => <li key={n} className="whitespace-pre-line break-words">{issue}</li>)}</ul></div>}
       {!!missingImages && !busy && <p className="mt-3 text-sm text-amber-900">Images pending. Download unavailable.</p>}
-      <section aria-label="Review and publish" className="mt-5 rounded-lg border border-teal-200 bg-teal-50/50 p-4">
-        <h3 className="text-base font-semibold text-gray-900">Review and publish</h3>
+      <section aria-label={compactEditor ? "Save and send" : "Review and publish"} className="mt-5 rounded-lg border border-teal-200 bg-teal-50/50 p-4">
+        <h3 className="text-base font-semibold text-gray-900">{compactEditor ? "Save and send" : "Review and publish"}</h3>
         <p id={reviewHelpId} aria-live="polite" className="mt-2 text-sm leading-6 text-gray-700">{reviewHelp}</p>
         {publicationWarning && <p role="status" className="mt-2 text-sm text-amber-900">{publicationWarning}</p>}
         {!busy && reviewBlock === "images" && <button type="button" className={`${button} mt-3`} onClick={() => { imageRecovery.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); imageRecovery.current?.focus({ preventScroll: true }); }}><ImagePlus size={16} />Go to image recovery</button>}
-        <p className="mt-4 text-xs text-gray-500">Optional review record — not required to send or download.</p>
+        {(!compactEditor || advancedOpen) && <><p className="mt-4 text-xs text-gray-500">Optional review record — not required to send or download.</p>
         <button id={reviewControlId} type="button" role="checkbox" aria-checked={reviewed} aria-describedby={reviewHelpId} disabled={!ready || busy}
           onClick={() => setReviewed(current => !current)} className={`mt-4 flex min-h-12 w-full items-start gap-3 rounded-md border bg-white px-3 py-3 text-left text-sm leading-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-800 ${ready && !busy ? "cursor-pointer border-teal-600 hover:bg-teal-50" : "border-gray-300 text-gray-500"}`}>
           <span aria-hidden="true" className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${reviewed ? "border-teal-800 bg-teal-800 text-white" : "border-gray-400 bg-white"}`}>{reviewed && <Check size={16} />}</span>
           <span>I have reviewed all {deck.draft.slides.length} slides and their images.</span>
-        </button>
+        </button></>}
         <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" className={button} disabled={!ready || busy || reviewed} onClick={() => setReviewed(true)}><ScanEye size={16} />{reviewed ? "Review confirmed" : "Confirm review"}</button>
+          {(compactEditor || onSaveDraft) && <button type="button" className={button} disabled={busy} onClick={saveChanges}>Save changes</button>}
+          {(!compactEditor || advancedOpen) && <button type="button" className={button} disabled={!ready || busy || reviewed} onClick={() => setReviewed(true)}><ScanEye size={16} />{reviewed ? "Review confirmed" : "Confirm review"}</button>}
           <button type="button" className={button} disabled={busy || !ready} onClick={download}><Download size={17} />Download PPTX</button>
-          <button type="button" className={button} disabled={busy || !ready || !classId || !assignmentId} onClick={() => setShareOpen(true)}><LayoutGrid size={17} />{sharedDeck === deck ? "In Gallery · share another version" : "Share to Gallery"}</button>
+          {(!compactEditor || advancedOpen) && <button type="button" className={button} disabled={busy || !ready || !classId || !assignmentId} onClick={() => setShareOpen(true)}><LayoutGrid size={17} />{sharedDeck === deck ? "In Gallery · share another version" : "Share to Gallery"}</button>}
           <button type="button" className={primaryButton} disabled={busy || !ready || !classId || !assignmentId || published} onClick={publish}><Send size={17} />{published ? "Published" : "Send to students"}</button>
           {preparedDownload?.deck === deck && !busy && ready && <a className={button} href={preparedDownload.httpUrl || preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>}
         </div>
@@ -596,8 +639,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
 });
 
 const SlidesWorkspace = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceProps>(function SlidesWorkspace(props, ref) {
-  const { user, embeddedContext } = props;
-  const key = JSON.stringify([user.geniusId, user.role, user.classId, user.assignmentId, embeddedContext?.lessonNumber, embeddedContext?.strategy]);
+  const { user, embeddedContext, draftNamespace } = props;
+  const key = JSON.stringify([user.geniusId, user.role, user.classId, user.assignmentId, embeddedContext?.lessonNumber, embeddedContext?.strategy, draftNamespace]);
   return <SlidesWorkspaceEditor key={key} {...props} ref={ref} />;
 });
 
