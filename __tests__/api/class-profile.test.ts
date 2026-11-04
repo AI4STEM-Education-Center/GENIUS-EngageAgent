@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // denial is covered in workspace-access.test.ts.
 vi.mock("@/lib/workspace-access", () => ({
   guardWorkspaceRequest: vi.fn(async () => null),
+  guardWorkspaceClassRequest: vi.fn(async () => null),
   workspaceRequestUser: vi.fn(async () => ({ role: "teacher", geniusId: "t1" })),
 }));
 
@@ -22,7 +23,7 @@ vi.mock("@/lib/nosql", () => {
 });
 
 import { GET, POST } from "@/app/api/class-profile/route";
-import { guardWorkspaceRequest } from "@/lib/workspace-access";
+import { guardWorkspaceClassRequest, guardWorkspaceRequest } from "@/lib/workspace-access";
 import { getClassProfile } from "@/lib/nosql";
 
 const { __resetStore } = (await import("@/lib/nosql")) as unknown as { __resetStore: () => void };
@@ -118,5 +119,37 @@ describe("POST /api/class-profile", () => {
       }),
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("which access check runs (#173)", () => {
+  const raw = (body: string) => POST(new Request("http://localhost:3000/api/class-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body }));
+
+  it("checks the task when opened from inside one, and the class on the class page", async () => {
+    await get("classId=c1&assignmentId=a1");
+    expect(guardWorkspaceRequest).toHaveBeenCalledTimes(1);
+    expect(guardWorkspaceClassRequest).not.toHaveBeenCalled();
+
+    vi.mocked(guardWorkspaceRequest).mockClear();
+    await get("classId=c1");
+    await raw(JSON.stringify({ classId: "c1", profile }));
+    expect(guardWorkspaceClassRequest).toHaveBeenCalledTimes(2);
+    expect(guardWorkspaceRequest).not.toHaveBeenCalled();
+  });
+
+  it("sends any request that names a task, even an empty one, to the task check", async () => {
+    await raw(JSON.stringify({ classId: "c1", assignmentId: "", profile }));
+    await get("classId=c1&assignmentId=");
+    expect(guardWorkspaceRequest).toHaveBeenCalledTimes(2);
+    expect(guardWorkspaceClassRequest).not.toHaveBeenCalled();
+  });
+
+  it("stops at the class check without reading or saving anything", async () => {
+    vi.mocked(guardWorkspaceClassRequest).mockResolvedValue(new Response(null, { status: 403 }) as never);
+    expect((await raw(JSON.stringify({ classId: "c1", profile }))).status).toBe(403);
+    expect((await get("classId=c1")).status).toBe(403);
+    expect((await raw("not json")).status).toBe(403);
+    expect(getClassProfile).not.toHaveBeenCalled();
+    vi.mocked(guardWorkspaceClassRequest).mockResolvedValue(null);
   });
 });

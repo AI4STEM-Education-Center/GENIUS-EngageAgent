@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 import { getClassProfile, upsertClassProfile } from "@/lib/nosql";
 import { EMPTY_CLASS_PROFILE, parseClassProfileAnswers, type ClassProfile } from "@/lib/class-profile";
-import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";
+import { guardWorkspaceClassRequest, guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";
 
-// Teacher-only: guardWorkspaceRequest denies students and guests on any
-// route outside its student allow-list, which this route is not on.
-// assignmentId is only used to authorize the request; the profile is per class.
+// Teacher-only. The profile belongs to the class, so it is set up on the class
+// page (no task) and seen or edited from inside a task:
+// - with an assignmentId, guardWorkspaceRequest checks the task (EngageAgent or
+//   GENIUS) and denies students and guests, as this route is not on its allow-list;
+// - without one, guardWorkspaceClassRequest only lets the class's own teacher in.
+async function guard(request: Request) {
+  let scope: unknown = Object.fromEntries(new URL(request.url).searchParams);
+  if (!["GET", "HEAD"].includes(request.method)) scope = await request.clone().json().catch(() => null);
+  const hasTask = Boolean(scope && typeof scope === "object" && "assignmentId" in scope);
+  return hasTask ? guardWorkspaceRequest(request) : guardWorkspaceClassRequest(request);
+}
 
 function storageError(action: "GET" | "POST", error: unknown) {
   const message = error instanceof Error ? error.message : "Failed to access class profile.";
@@ -21,7 +29,7 @@ function storageError(action: "GET" | "POST", error: unknown) {
 }
 
 export async function GET(request: Request) {
-  const denied = await guardWorkspaceRequest(request);
+  const denied = await guard(request);
   if (denied) return denied;
   const classId = new URL(request.url).searchParams.get("classId")?.trim();
   if (!classId) {
@@ -36,7 +44,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const denied = await guardWorkspaceRequest(request);
+  const denied = await guard(request);
   if (denied) return denied;
   try {
     const body = await request.json();

@@ -25,16 +25,16 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it.each([
-  [null, true],
-  [{ class_id: "ea-class-profile", status: "saved" }, false],
-  [{ class_id: "ea-class-profile", status: "skipped" }, false],
-])("asks about the class only on the teacher's first visit (#173, saved profile: %j)", async (saved, asks) => {
+  [null],
+  [{ class_id: "ea-class-profile", status: "saved" }],
+  [{ class_id: "ea-class-profile", status: "skipped" }],
+])("never asks for the class profile inside a task; that happens on the class page (#173, saved profile: %j)", async (saved) => {
   classProfile = saved;
   render(<TeacherView user={teacher} />);
   await screen.findByRole("button", { name: /Lesson 1 0 questions/ });
   await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url) === "/api/class-profile?classId=ea-class-profile&assignmentId=assignment")).toBe(true));
-  if (asks) expect(await screen.findByRole("dialog", { name: "Tell EngageAgent about this class" })).toBeTruthy();
-  else expect(screen.queryByRole("dialog", { name: "Tell EngageAgent about this class" })).toBeNull();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(screen.queryByRole("dialog", { name: "Tell EngageAgent about this class" })).toBeNull();
 });
 
 const savedProfile = {
