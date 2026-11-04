@@ -159,3 +159,37 @@ it("prevents saving when the parent disables the material and discards a stale e
   expect(screen.getByLabelText("Material title")).toHaveProperty("value", "Different video");
   expect(onChange).not.toHaveBeenCalled();
 });
+
+it.each(["Cancel", "Close material editor"])("reports modal editing until explicit %s without applying its text", button => {
+  const editing = vi.fn(), onChange = vi.fn();
+  render(<VideoMaterialEditor item={fixture()} onChange={onChange} onEditingChange={editing} draftOnly />);
+  open(); expect(editing).toHaveBeenLastCalledWith(true);
+  change("Activity text", "Unapplied words");
+  fireEvent.click(screen.getByRole("button", { name: button }));
+  expect(editing).toHaveBeenLastCalledWith(false);
+  expect(onChange).not.toHaveBeenCalled();
+});
+
+it("keeps the parent guarded after invalid modal edits, then applies before releasing it", () => {
+  const order: string[] = [];
+  const onChange = vi.fn(() => order.push("applied"));
+  const editing = vi.fn((value: boolean) => order.push(value ? "editing" : "closed"));
+  render(<VideoMaterialEditor item={fixture()} onChange={onChange} onEditingChange={editing} draftOnly />);
+  open(); change("Material title", " ");
+  fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+  expect(editing).toHaveBeenLastCalledWith(true); expect(onChange).not.toHaveBeenCalled();
+  change("Material title", "Valid title");
+  fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+  expect(order.indexOf("applied")).toBeLessThan(order.indexOf("closed"));
+  expect(editing).toHaveBeenLastCalledWith(false);
+});
+
+it("releases modal protection on a native close event and on unmount", () => {
+  const editing = vi.fn();
+  const view = render(<VideoMaterialEditor item={fixture()} onChange={vi.fn()} onEditingChange={editing} />);
+  open();
+  fireEvent(screen.getByRole("dialog"), new Event("close"));
+  expect(editing).toHaveBeenLastCalledWith(false);
+  open(); expect(editing).toHaveBeenLastCalledWith(true);
+  view.unmount(); expect(editing).toHaveBeenLastCalledWith(false);
+});

@@ -11,6 +11,10 @@ export type VideoMaterialEditorProps = {
   disabled?: boolean;
   videoUrl?: string;
   imageUrl?: string;
+  /** Gallery saves to the server separately; this dialog only applies edits to its draft. */
+  draftOnly?: boolean;
+  /** A parent can protect modal text that has not been applied to its draft yet. */
+  onEditingChange?: (editing: boolean) => void;
 };
 
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold hover:bg-canvas disabled:opacity-50";
@@ -24,7 +28,7 @@ function TextField({ label, value, onChange, maxLength, rows = 3, readOnly = fal
 }
 
 /** Edits the class's saved text; the parent owns persistence, media and sending. */
-export default function VideoMaterialEditor({ item, onChange, disabled, videoUrl, imageUrl }: VideoMaterialEditorProps) {
+export default function VideoMaterialEditor({ item, onChange, disabled, videoUrl, imageUrl, draftOnly = false, onEditingChange }: VideoMaterialEditorProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const editingId = useRef<string | null>(null);
   const [draft, setDraft] = useState<ContentItem>(() => structuredClone(item));
@@ -36,8 +40,13 @@ export default function VideoMaterialEditor({ item, onChange, disabled, videoUrl
     if (editingId.current !== null && editingId.current !== item.id) {
       dialog.current?.close();
       editingId.current = null;
+      onEditingChange?.(false);
     }
-  }, [item.id]);
+  }, [item.id, onEditingChange]);
+  useEffect(() => {
+    if (editingId.current !== null) onEditingChange?.(true);
+    return () => onEditingChange?.(false);
+  }, [onEditingChange]);
 
   function open() {
     setDraft(structuredClone(item));
@@ -45,6 +54,13 @@ export default function VideoMaterialEditor({ item, onChange, disabled, videoUrl
     setSavedId(null);
     editingId.current = item.id;
     dialog.current?.showModal();
+    onEditingChange?.(true);
+  }
+
+  function close() {
+    editingId.current = null;
+    onEditingChange?.(false);
+    dialog.current?.close();
   }
 
   function updateActivity(update: (activity: MaterialActivity) => MaterialActivity) {
@@ -84,17 +100,16 @@ export default function VideoMaterialEditor({ item, onChange, disabled, videoUrl
       ...(draft.visualBrief !== undefined ? { visualBrief: draft.visualBrief } : {}),
       ...(activity ? { activity } : {}),
     });
-    editingId.current = null;
-    dialog.current?.close();
+    close();
     setSavedId(item.id);
   }
 
   return <>
     <button type="button" className={`${button} mt-3`} disabled={disabled} onClick={open}><Pencil size={16} aria-hidden="true" />Edit material</button>
-    {savedId === item.id && <p role="status" className="mt-2 text-sm text-ok">Changes saved to this class’s material. Send it to students when it is ready.</p>}
-    <dialog ref={dialog} aria-label="Edit video material" onClose={() => { editingId.current = null; }} className="fixed inset-0 m-auto max-h-[90vh] w-[94vw] max-w-3xl overflow-auto rounded-2xl border border-line bg-white p-6 backdrop:bg-ink/50">
-      <div className="flex items-center justify-between gap-3"><h3 className="text-xl font-bold">Edit this class’s material</h3><button type="button" className={button} aria-label="Close material editor" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
-      <p className="mt-3 text-sm leading-6 text-mute">Save your changes to this class’s copy. The Gallery original stays unchanged. Sending to students is a separate action.</p>
+    {!draftOnly && savedId === item.id && <p role="status" className="mt-2 text-sm text-ok">Changes saved to this class’s material. Send it to students when it is ready.</p>}
+    <dialog ref={dialog} aria-label="Edit video material" onClose={() => { editingId.current = null; onEditingChange?.(false); }} className="fixed inset-0 m-auto max-h-[90vh] w-[94vw] max-w-3xl overflow-auto rounded-2xl border border-line bg-white p-6 backdrop:bg-ink/50">
+      <div className="flex items-center justify-between gap-3"><h3 className="text-xl font-bold">Edit this class’s material</h3><button type="button" className={button} aria-label="Close material editor" onClick={close}><X size={18} /></button></div>
+      <p className="mt-3 text-sm leading-6 text-mute">{draftOnly ? "Update your draft, then save it in Gallery when you are ready." : "Save your changes to this class’s copy. The Gallery original stays unchanged. Sending to students is a separate action."}</p>
       <div className="mt-4 rounded-xl border border-line bg-canvas p-3">
         {videoUrl && <video aria-label="Video being adapted" src={videoUrl} poster={imageUrl} controls playsInline preload="metadata" className="max-h-72 w-full rounded-lg bg-ink" />}
         <p className="mt-2 text-sm text-mute">Text edits do not change the video or image. Preview the media to make sure it still matches your activity.</p>
@@ -132,7 +147,7 @@ export default function VideoMaterialEditor({ item, onChange, disabled, videoUrl
         </details>}
       </fieldset>
       {error && <p role="alert" className="mt-4 text-sm text-bad">{error}</p>}
-      <div className="mt-5 flex justify-end gap-2"><button type="button" className={button} onClick={() => dialog.current?.close()}>Cancel</button><button type="button" className={`${button} !border-brand !bg-brand !text-white hover:!bg-brand-dark`} disabled={disabled} onClick={save}>Save changes</button></div>
+      <div className="mt-5 flex justify-end gap-2"><button type="button" className={button} onClick={close}>Cancel</button><button type="button" className={`${button} !border-brand !bg-brand !text-white hover:!bg-brand-dark`} disabled={disabled} onClick={save}>{draftOnly ? "Apply changes" : "Save changes"}</button></div>
     </dialog>
   </>;
 }

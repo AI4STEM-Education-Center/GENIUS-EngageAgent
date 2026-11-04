@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { LogOut, Sparkles } from "lucide-react";
 import { useAuth } from "../AuthContext";
@@ -33,6 +33,8 @@ type Props = {
   canSignOut?: boolean;
   /** Show the user's name beside the avatar (the student header does). */
   showName?: boolean;
+  /** Let an editor save or discard changes before leaving this task. */
+  beforeNavigate?: (proceed: () => void) => void;
 };
 
 const initials = (name: string) =>
@@ -43,10 +45,18 @@ const actionClass = (active?: boolean) =>
     active ? "bg-brand-light text-brand-dark" : "text-ink-2 hover:bg-canvas"
   } disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent`;
 
-export default function AppHeader({ userName, homeHref, context = [], actions = [], canSignOut, showName }: Props) {
+export default function AppHeader({ userName, homeHref, context = [], actions = [], canSignOut, showName, beforeNavigate }: Props) {
   const { isGeniusEmbed } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState("");
+
+  function navigate(event: MouseEvent<HTMLAnchorElement>, href: string) {
+    if (!beforeNavigate || event.defaultPrevented || event.button !== 0
+      || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+      || event.currentTarget.target === "_blank") return;
+    event.preventDefault();
+    beforeNavigate(() => window.location.assign(href));
+  }
 
   async function signOut() {
     setSigningOut(true); setError("");
@@ -66,14 +76,14 @@ export default function AppHeader({ userName, homeHref, context = [], actions = 
     <header className="border-b border-line bg-white">
       <div className="flex min-h-[58px] flex-wrap items-center gap-x-4 gap-y-2 px-5 py-2 sm:px-6">
         {homeHref
-          ? <Link href={homeHref} className="flex items-center gap-2.5 font-bold tracking-tight text-ink">{mark}</Link>
+          ? <Link href={homeHref} onClick={event => navigate(event, homeHref)} className="flex items-center gap-2.5 font-bold tracking-tight text-ink">{mark}</Link>
           : <span className="flex items-center gap-2.5 font-bold tracking-tight text-ink">{mark}</span>}
         {context.length > 0 && (
           <div className="flex min-w-0 items-center gap-2.5 border-l border-line pl-4 text-[13.5px] text-ink-2">
             {context.map((item, index) => (
               <span key={item.label} className={`flex min-w-0 items-center gap-2.5 ${index === 0 ? "font-semibold text-ink" : ""}`}>
                 {index > 0 && <span aria-hidden="true">·</span>}
-                {item.href ? <Link href={item.href} className="truncate hover:underline">{item.label}</Link> : <span className="truncate">{item.label}</span>}
+                {item.href ? <Link href={item.href} onClick={event => navigate(event, item.href!)} className="truncate hover:underline">{item.label}</Link> : <span className="truncate">{item.label}</span>}
               </span>
             ))}
           </div>
@@ -82,7 +92,7 @@ export default function AppHeader({ userName, homeHref, context = [], actions = 
           {actions.map(action => {
             const content = <>{action.icon}{action.label}</>;
             if (action.href && !action.comingSoon) {
-              return <Link key={action.label} href={action.href} aria-current={action.active ? "page" : undefined} className={actionClass(action.active)}>{content}</Link>;
+              return <Link key={action.label} href={action.href} onClick={event => navigate(event, action.href!)} aria-current={action.active ? "page" : undefined} className={actionClass(action.active)}>{content}</Link>;
             }
             return (
               <button key={action.label} type="button" onClick={action.onClick} disabled={action.comingSoon}
@@ -93,7 +103,7 @@ export default function AppHeader({ userName, homeHref, context = [], actions = 
           {showName && <span className="ml-2 text-[13.5px] text-ink-2">{userName}</span>}
           <span title={userName} aria-label={userName} className="ml-2 grid h-[30px] w-[30px] place-items-center rounded-full bg-line text-xs font-bold text-ink-2">{initials(userName)}</span>
           {canSignOut && (
-            <button type="button" title="Sign out of EngageAgent" aria-label="Sign out of EngageAgent" onClick={signOut} disabled={signingOut}
+            <button type="button" title="Sign out of EngageAgent" aria-label="Sign out of EngageAgent" onClick={() => beforeNavigate ? beforeNavigate(() => { void signOut(); }) : void signOut()} disabled={signingOut}
               className="grid h-9 w-9 place-items-center rounded-lg text-ink-2 hover:bg-canvas"><LogOut size={17} /></button>
           )}
         </nav>

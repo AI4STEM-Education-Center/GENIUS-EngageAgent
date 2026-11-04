@@ -40,3 +40,9 @@ export type GalleryPreviewSource = {
 export type GalleryCopy =
   | { format: "slides"; deck: SlideDeck & { gallerySource: GalleryProvenance }; source: GalleryProvenance }
   | { format: "video"; item: ContentItem & { gallerySource: GalleryProvenance }; media: { video: string; image?: string }; source: GalleryProvenance };
+
+export type SavedGalleryCopySummary = {
+  copyId: string; revision: number; savedAt: string; title: string;
+  format: "slides" | "video"; lessonNumber: number; strategy: string; source: GalleryProvenance;
+};
+export type SavedGalleryCopy = { copy: GalleryCopy; revision: number; savedAt: string };

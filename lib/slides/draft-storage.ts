@@ -3,7 +3,7 @@ import { isSlidePromptVersion, type SlidePromptProvenance } from "./prompt-versi
 import { isAnalogyMethod } from "./analogy-methods";
 import { resolveStrategyFocus, type StrategyFocus } from "../strategy-focus";
 
-export type SlideDraftScope = { userId: string; classId: string; assignmentId: string; lessonNumber: number; strategy: SlideStrategy };
+export type SlideDraftScope = { userId: string; classId: string; assignmentId: string; lessonNumber: number; strategy: SlideStrategy; draftNamespace?: string };
 const DATABASE = "engageagent-slide-drafts";
 const STORE = "drafts";
 const VERSION = 1;
@@ -11,7 +11,11 @@ const writes = new Map<string, Promise<void>>();
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const shortText = (value: unknown, limit: number): value is string => typeof value === "string" && value.length <= limit;
 
-export const slideDraftKey = (scope: SlideDraftScope) => JSON.stringify([scope.userId, scope.classId, scope.assignmentId, scope.lessonNumber, scope.strategy]);
+export const slideDraftKey = (scope: SlideDraftScope) => JSON.stringify([
+  scope.userId, scope.classId, scope.assignmentId, scope.lessonNumber, scope.strategy,
+  // Keep existing workflow keys intact. Gallery copies get independent caches.
+  ...(scope.draftNamespace ? [scope.draftNamespace] : []),
+]);
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {

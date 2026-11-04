@@ -19,7 +19,7 @@ describe("independent workspace", () => {
     const classroom = await createWorkspaceClass(teacher, "Physics");
     const task = await createWorkspaceAssignment(teacher, classroom.id, "Lesson 1");
     expect(await listWorkspaceClasses(teacher)).toEqual([{ id: classroom.id, name: "Physics" }]);
-    expect(await workspaceContext(teacher, classroom.id, task.id)).toMatchObject({ geniusId: teacher.geniusId, classId: classroom.id, assignmentId: task.id, role: "teacher" });
+    expect(await workspaceContext(teacher, classroom.id, task.id)).toMatchObject({ geniusId: teacher.geniusId, classId: classroom.id, assignmentId: task.id, taskTitle: "Lesson 1", role: "teacher" });
     expect((await workspaceClassDetail(teacher, classroom.id)).assignments).toEqual([task]);
   });
   it("requires enrollment and preserves GENIUS ID for student responses", async () => {

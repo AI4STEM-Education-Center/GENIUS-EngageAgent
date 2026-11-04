@@ -17,7 +17,8 @@ beforeEach(() => {
     ok: true,
     json: async () => input.startsWith("/api/lessons/")
       ? { lesson_number: Number(input.split("/").pop()), lesson_title: `Lesson ${input.split("/").pop()}`, quiz_items: [], learning_objective: "Test objective" }
-      : input.startsWith("/api/material-gallery") ? { items: [] } : {},
+      : input.startsWith("/api/material-gallery") ? { items: [] }
+        : input.startsWith("/api/slides?") ? { lessons: [] } : {},
   })));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -104,14 +105,28 @@ it("shows the v8.3 header and four teacher steps, with the dashboard as its own 
   expect(within(screen.getByRole("navigation", { name: "Teacher steps" })).queryByRole("button", { current: "step" })).toBeNull();
   expect(screen.queryByText("Back to workflow")).toBeNull();
   fireEvent.click(header.getByRole("button", { name: "Gallery" }));
-  expect(await screen.findByRole("heading", { name: "Engagement materials" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: /^Gallery$/ })).toBeTruthy();
   expect(screen.queryByText("Assignment summary")).toBeNull();
-  expect(stepTab(/Engagement materials/).getAttribute("aria-current")).toBe("step");
+  expect(screen.queryByRole("navigation", { name: "Teacher steps" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Engagement materials" })).toBeNull();
   expect(await screen.findByRole("textbox", { name: "Search shared materials" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Back to task" }));
   // Step 4 is the questions page; choosing a step leaves the dashboard.
   fireEvent.click(stepTab(/Questions & discussion/));
   expect(await screen.findByRole("heading", { name: "Questions & discussion" })).toBeTruthy();
   expect(screen.queryByText("Assignment summary")).toBeNull();
+});
+
+it("keeps Gallery out of Step 3 and opens a separate editor from a direct Gallery entry", async () => {
+  const view = render(<TeacherView user={{ ...teacher, classId: "ea-class-native" }} initialStep={3} />);
+  expect(await screen.findByRole("heading", { name: "Engagement materials" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Materials Gallery" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Open Gallery" })).toBeNull();
+  view.unmount();
+  render(<TeacherView user={{ ...teacher, classId: "ea-class-native" }} initialView="gallery" />);
+  expect(await screen.findByRole("region", { name: "Gallery workspace" })).toBeTruthy();
+  expect(screen.queryByRole("navigation", { name: "Teacher steps" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Generate new slide deck" })).toBeNull();
 });
 
 it("leaves out the top menu inside the GENIUS iframe, which has its own (#172)", async () => {
@@ -142,6 +157,67 @@ it("opens Step 4 when asked to, even with a saved draft on another step", async 
 it("opens the assignment dashboard for old dashboard links", async () => {
   render(<TeacherView user={{ ...teacher, classId: "ea-class-dash" }} initialView="dashboard" />);
   expect(await screen.findByText("Assignment summary")).toBeTruthy();
+});
+
+it.each([false, true])("does not restore an independent Gallery video into Step 3 on reload (existing workflow: %s)", async existingWorkflow => {
+  const scopedTeacher = { ...teacher, classId: "ea-class-gallery-publication" };
+  const draftKey = `engage-agent:draft:v3:${scopedTeacher.classId}:${scopedTeacher.assignmentId}`;
+  const expectedStep = existingWorkflow ? 2 : 1;
+  const expectedStrategies = existingWorkflow ? ["analogy"] : [];
+  if (existingWorkflow) localStorage.setItem(draftKey, JSON.stringify({
+    version: 2, classId: scopedTeacher.classId, assignmentId: scopedTeacher.assignmentId,
+    lessonNumber: 8, currentStep: 2, materialFormat: "video", plan: null, selectedStrategies: expectedStrategies,
+    annotationDecision: null, annotationReason: "", annotationStatus: "idle", content: [],
+  }));
+  const publication = {
+    id: "gallery-copy-11111111-1111-4111-8111-111111111111", type: "Video", title: "Independent Gallery video",
+    body: "Observe the ball during contact.", strategy: "cognitive conflict", lessonNumber: 3,
+    galleryWorkspace: true,
+    gallerySource: { templateId: "shared-ball", title: "Shared ball", revision: 2, mode: "adapt" },
+    media: { video: "https://media.test/gallery-video.mp4", image: "https://media.test/gallery-image.png" },
+  };
+  const fetchMock = vi.mocked(fetch); const defaultFetch = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (input, init) => String(input).startsWith("/api/content-publish")
+    ? { ok: true, json: async () => ({ items: [{ content_item_id: publication.id, content_json: JSON.stringify(publication) }] }) } as Response
+    : defaultFetch(input, init));
+  const assertWorkflowUnchanged = async () => {
+    await waitFor(() => expect(stepTab(/Engagement materials/).textContent).toContain("Sent to students"));
+    expect(stepTab(existingWorkflow ? /Strategy/ : /Assessment/).getAttribute("aria-current")).toBe("step");
+    expect(screen.queryByRole("heading", { name: publication.title })).toBeNull();
+    await waitFor(() => {
+      const draft = JSON.parse(localStorage.getItem(draftKey)!);
+      expect(draft).toMatchObject({ currentStep: expectedStep, selectedStrategies: expectedStrategies, content: [], images: {}, videos: {},
+        selectedForPublish: [], publishedContentIds: [], lessonNumber: existingWorkflow ? 8 : null, materialFormat: existingWorkflow ? "video" : "slides" });
+    });
+  };
+  const view = render(<TeacherView user={scopedTeacher} />);
+  await assertWorkflowUnchanged();
+  view.unmount(); fetchMock.mockClear();
+  render(<TeacherView user={scopedTeacher} />);
+  await assertWorkflowUnchanged();
+  expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/content-publish"))).toBe(true);
+  expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/media"))).toBe(false);
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+});
+
+it("still restores legacy Step 3 publications while excluding an independent Gallery video in the same task", async () => {
+  const scopedTeacher = { ...teacher, classId: "ea-class-mixed-publications" };
+  const draftKey = `engage-agent:draft:v3:${scopedTeacher.classId}:${scopedTeacher.assignmentId}`;
+  const legacy = { id: "legacy-video", type: "Video", title: "Existing task activity", body: "Keep the original task material.", strategy: "analogy" };
+  const gallery = { id: "gallery-copy-11111111-1111-4111-8111-111111111111", type: "Video", title: "Separate Gallery activity", body: "This belongs only to Gallery.", strategy: "cognitive conflict", galleryWorkspace: true };
+  const fetchMock = vi.mocked(fetch); const defaultFetch = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (input, init) => String(input).startsWith("/api/content-publish")
+    ? { ok: true, json: async () => ({ items: [legacy, gallery].map(item => ({ content_item_id: item.id, content_json: JSON.stringify(item) })) }) } as Response
+    : defaultFetch(input, init));
+  render(<TeacherView user={scopedTeacher} />);
+  await waitFor(() => expect(stepTab(/Engagement materials/).getAttribute("aria-current")).toBe("step"));
+  await waitFor(() => {
+    const draft = JSON.parse(localStorage.getItem(draftKey)!);
+    expect(draft.currentStep).toBe(3); expect(draft.selectedStrategies).toEqual(["analogy"]);
+    expect(draft.content).toEqual([legacy]);
+    expect(draft.publishedContentIds).toEqual([legacy.id]); expect(draft.selectedForPublish).toEqual([legacy.id]);
+  });
+  expect(screen.queryByRole("heading", { name: gallery.title })).toBeNull();
 });
 
 it("unlocks discussion questions after slides are published without a video", async () => {

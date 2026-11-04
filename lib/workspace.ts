@@ -76,6 +76,7 @@ export async function createWorkspaceAssignment(user: UserContext, classId: stri
 
 export async function workspaceContext(user: UserContext, classId: string, assignmentId: string): Promise<UserContext> {
   const classroom = await requireWorkspaceClass(user, classId);
-  if (!await workspaceGet(classPartition(classId), `ASSIGN#${assignmentId}`)) throw new WorkspaceError("Task not found in this class.", 404);
-  return { ...user, classId, className: classroom.name, assignmentId, taskId: assignmentId };
+  const assignment = await workspaceGet<WorkspaceAssignment>(classPartition(classId), `ASSIGN#${assignmentId}`);
+  if (!assignment) throw new WorkspaceError("Task not found in this class.", 404);
+  return { ...user, classId, className: classroom.name, assignmentId, taskId: assignmentId, taskTitle: assignment.title };
 }

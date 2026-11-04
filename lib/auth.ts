@@ -15,6 +15,7 @@ export type UserContext = {
   className?: string;
   assignmentId?: string;
   taskId?: string;
+  taskTitle?: string;
 };
 
 export type SSOPayload = JWTPayload & {

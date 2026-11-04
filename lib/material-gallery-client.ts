@@ -2,7 +2,7 @@ import { scopedClientAuthHeaders } from "./client-auth";
 import { imageReferenceId, imageSourcePrompt } from "./slides/quality";
 import { isSlideAsset, isSlideStrategy, parseDraft, type SlideAsset, type SlideDeck } from "./slides/model";
 import type { ContentItem } from "./types";
-import type { GalleryCopy, GalleryFilters, GalleryMaterial, GalleryMetadata, GalleryPreviewSource, GalleryProvenance, GalleryScope } from "./material-gallery";
+import type { GalleryCopy, GalleryFilters, GalleryMaterial, GalleryMetadata, GalleryPreviewSource, GalleryProvenance, GalleryScope, SavedGalleryCopy, SavedGalleryCopySummary } from "./material-gallery";
 
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const invalid = () => new Error("The material library returned incomplete data. Please retry.");
@@ -130,4 +130,70 @@ export async function refreshGalleryCopyMedia(scope: GalleryScope, contentItemId
 export async function unshareGalleryMaterial(scope: GalleryScope, id: string, signal?: AbortSignal) {
   const result = await json<{ removed: boolean }>(scope, { action: "unshare", id }, "POST", signal);
   if (result.removed !== true) throw invalid();
+}
+
+const validSource = (value: unknown): value is GalleryProvenance => record(value) && typeof value.templateId === "string" && !!value.templateId
+  && Number.isSafeInteger(value.revision) && Number(value.revision) > 0 && typeof value.title === "string" && ["use", "adapt"].includes(String(value.mode));
+const validSavedSummary = (value: unknown): value is SavedGalleryCopySummary => record(value) && typeof value.copyId === "string" && !!value.copyId
+  && Number.isSafeInteger(value.revision) && Number(value.revision) > 0 && typeof value.savedAt === "string" && typeof value.title === "string"
+  && ["slides", "video"].includes(String(value.format)) && Number.isInteger(value.lessonNumber) && typeof value.strategy === "string" && validSource(value.source);
+
+export async function listSavedGalleryCopies(scope: GalleryScope, signal?: AbortSignal): Promise<{ items: SavedGalleryCopySummary[] }> {
+  const result = await json<{ items: SavedGalleryCopySummary[] }>(scope, { action: "saved-copies" }, "GET", signal);
+  if (!Array.isArray(result.items) || !result.items.every(validSavedSummary)) throw invalid();
+  return result;
+}
+
+export async function saveGalleryCopy(scope: GalleryScope, copy: GalleryCopy, expectedRevision: number, signal?: AbortSignal): Promise<SavedGalleryCopySummary> {
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new Error("Provide the last saved revision.");
+  const copyId = copy.format === "slides" ? copy.deck.id : copy.item.id.replace(/^gallery-copy-/u, "");
+  let fields: Record<string, unknown>;
+  if (copy.format === "slides") {
+    const { id, lessonNumber, strategy, draft, focus, gallerySource, classroomContext } = copy.deck;
+    const assets = Object.fromEntries(await Promise.all(draft.visuals.map(async visual => {
+      const asset = copy.deck.assets[visual.id];
+      if (!asset) throw new Error("Include every current slide image before saving this copy.");
+      return [visual.id, { width: asset.width, height: asset.height, digest: await checksum(asset.data),
+        ...(asset.sourcePrompt === undefined ? {} : { sourcePrompt: asset.sourcePrompt }),
+        ...(asset.referenceData ? { referenceDigest: await checksum(asset.referenceData) } : {}) }];
+    })));
+    fields = { deck: { id, lessonNumber, strategy, draft, focus, gallerySource, classroomContext }, assets };
+  } else fields = { item: copy.item };
+  const started = await json<{ saveId: string }>(scope, { action: "start-save", copyId, expectedRevision, ...fields }, "POST", signal);
+  if (typeof started.saveId !== "string" || !started.saveId) throw invalid();
+  if (copy.format === "slides") {
+    for (const visual of copy.deck.draft.visuals) {
+      const { data, width, height } = copy.deck.assets[visual.id];
+      await json(scope, { action: "upload-copy-asset", copyId, saveId: started.saveId, visualId: visual.id, asset: { data, width, height } }, "POST", signal);
+    }
+  }
+  const result = await json<{ saved: SavedGalleryCopySummary }>(scope, { action: "commit-save", copyId, saveId: started.saveId }, "POST", signal);
+  if (!validSavedSummary(result.saved) || result.saved.copyId !== copyId || result.saved.revision !== expectedRevision + 1) throw invalid();
+  return result.saved;
+}
+
+export async function loadSavedGalleryCopy(scope: GalleryScope, copyId: string, signal?: AbortSignal): Promise<SavedGalleryCopy> {
+  const result = await json<SavedGalleryCopy & { visualIds?: string[] }>(scope, { action: "saved-copy", copyId }, "GET", signal);
+  if (!record(result.copy) || !validSource(result.copy.source) || !Number.isSafeInteger(result.revision) || result.revision < 1 || typeof result.savedAt !== "string") throw invalid();
+  const copy = result.copy;
+  if (copy.format === "video") {
+    if (!record(copy.item) || copy.item.id !== `gallery-copy-${copyId}` || typeof copy.item.body !== "string" || !record(copy.media) || typeof copy.media.video !== "string") throw invalid();
+  } else if (copy.format === "slides") {
+    if (!record(copy.deck) || copy.deck.id !== copyId || !isSlideStrategy(copy.deck.strategy) || !Array.isArray(result.visualIds) || !result.visualIds.every(v => typeof v === "string")) throw invalid();
+    try { parseDraft(copy.deck.draft, copy.deck.strategy, true); } catch { throw invalid(); }
+    const references: Record<string, string> = {}, assets: Record<string, SlideAsset> = {};
+    for (const visualId of result.visualIds) {
+      const saved = await json<{ asset: SlideAsset; referenceDigest?: string }>(scope, { action: "saved-asset", copyId, revision: result.revision, visualId }, "GET", signal);
+      if (!isSlideAsset(saved.asset) || (saved.asset.sourcePrompt !== undefined && typeof saved.asset.sourcePrompt !== "string")
+        || (saved.referenceDigest !== undefined && typeof saved.referenceDigest !== "string")) throw invalid();
+      assets[visualId] = saved.asset;
+      if (saved.referenceDigest) references[visualId] = saved.referenceDigest;
+    }
+    const byDigest = Object.fromEntries(await Promise.all(Object.values(assets).map(async asset => [await checksum(asset.data), asset.data])));
+    for (const [id, referenceDigest] of Object.entries(references)) {
+      if (byDigest[referenceDigest]) assets[id].referenceData = byDigest[referenceDigest];
+    }
+    copy.deck.assets = assets;
+  } else throw invalid();
+  return { copy, revision: result.revision, savedAt: result.savedAt };
 }

@@ -152,6 +152,106 @@ describe("teacher material library", () => {
   });
 });
 
+describe("private saved Gallery copies", () => {
+  async function copied() {
+    const id = await share({ metadata: { ...metadata, focus: { misconceptions: ["a"], coreIdeas: [] } } });
+    return { id, ...await (await post({ action: "copy", id, mode: "adapt" })).json() };
+  }
+  async function stage(copy: Awaited<ReturnType<typeof copied>>, revision: number, title: string) {
+    const response = await post({ action: "start-save", copyId: copy.copyId, expectedRevision: revision,
+      deck: { ...copy.deck, draft: { ...copy.deck.draft, title }, classroomContext: "PRIVATE_COPY_CONTEXT" },
+      assets: { evidence: { width: 1, height: 1, digest: hash, sourcePrompt: "Original image plan" } } });
+    expect(response.status).toBe(200);
+    return (await response.json()).saveId as string;
+  }
+  const uploadCopy = (copyId: string, saveId: string) => post({ action: "upload-copy-asset", copyId, saveId, visualId: "evidence", asset: { data: tinyImage, width: 1, height: 1 } });
+  const commit = (copyId: string, saveId: string) => post({ action: "commit-save", copyId, saveId });
+
+  it("saves and reloads complete private revisions without sharing, publishing or changing the source", async () => {
+    const copy = await copied();
+    expect((await (await get({ action: "saved-copies" })).json()).items).toEqual([]);
+    const saveId = await stage(copy, 0, "My first saved adaptation");
+    expect((await get({ action: "saved-copy", copyId: copy.copyId })).status).toBe(404);
+    expect((await uploadCopy(copy.copyId, saveId)).status).toBe(200);
+    const saved = await (await commit(copy.copyId, saveId)).json();
+    expect(saved.saved).toMatchObject({ copyId: copy.copyId, revision: 1, title: "My first saved adaptation", source: copy.source });
+    const loaded = await (await get({ action: "saved-copy", copyId: copy.copyId })).json();
+    expect(loaded).toMatchObject({ revision: 1, copy: { deck: { id: copy.copyId, classroomContext: "PRIVATE_COPY_CONTEXT", draft: { title: saved.saved.title }, focus: { misconceptions: ["a"], coreIdeas: [] }, gallerySource: copy.source } } });
+    const asset = await (await get({ action: "saved-asset", copyId: copy.copyId, revision: "1", visualId: "evidence" })).json();
+    expect(asset.asset).toEqual({ data: tinyImage, width: 1, height: 1, sourcePrompt: "Original image plan" });
+    expect((await (await get()).json()).items).toHaveLength(1);
+    expect((await (await get({ id: copy.id })).json()).draft.title).toBe(copy.deck.draft.title);
+    expect((await post({ action: "commit-share", id: saveId })).status).toBe(404);
+    expect((await (await get({ action: "saved-copies" })).json()).items).toEqual([saved.saved]);
+    const rows = JSON.parse(await fs.readFile(path.join(directory, "workspace.json"), "utf8"));
+    expect(rows.filter((r: { record_id: string }) => /CONTENT|PUBLISH/.test(r.record_id))).toEqual([]);
+    const snapshot = rows.find((r: { record_id: string }) => r.record_id === `DRAFT#${saveId}`);
+    expect(snapshot.expiresAt).toBeUndefined();
+    expect(snapshot.class_id).toMatch(/^GALLERY_COPIES#/);
+    expect((await post({ action: "unshare", id: copy.id })).status).toBe(200);
+    expect((await get({ action: "saved-copy", copyId: copy.copyId })).status).toBe(200);
+  });
+
+  it("keeps the last complete snapshot after failed uploads and resolves concurrent saves atomically", async () => {
+    const copy = await copied();
+    const first = await stage(copy, 0, "First version"); await uploadCopy(copy.copyId, first); await commit(copy.copyId, first);
+    const a = await stage(copy, 1, "Version A"), b = await stage(copy, 1, "Version B");
+    expect((await commit(copy.copyId, a)).status).toBe(422);
+    expect((await (await get({ action: "saved-copy", copyId: copy.copyId })).json()).copy.deck.draft.title).toBe("First version");
+    await uploadCopy(copy.copyId, a); await uploadCopy(copy.copyId, b);
+    const results = await Promise.all([commit(copy.copyId, a), commit(copy.copyId, b)]);
+    expect(results.map(r => r.status).sort()).toEqual([200, 409]);
+    const loaded = await (await get({ action: "saved-copy", copyId: copy.copyId })).json();
+    expect(loaded.revision).toBe(2); expect(["Version A", "Version B"]).toContain(loaded.copy.deck.draft.title);
+    // A late retry of an old successful commit is idempotent, not an overwrite.
+    expect((await (await commit(copy.copyId, first)).json()).saved.revision).toBe(1);
+    expect((await (await get({ action: "saved-copy", copyId: copy.copyId })).json()).copy.deck.draft.title).toBe(loaded.copy.deck.draft.title);
+    expect((await get({ action: "saved-asset", copyId: copy.copyId, revision: "1", visualId: "evidence" })).status).toBe(200);
+    const stale = await post({ action: "start-save", copyId: copy.copyId, expectedRevision: 1, deck: copy.deck });
+    expect(stale.status).toBe(409);
+  });
+
+  it("rejects identity/focus forgery and isolates saves, lists, snapshots and assets by teacher and task", async () => {
+    const copy = await copied();
+    for (const patch of [{ lessonNumber: 2 }, { strategy: "analogy" }, { focus: { misconceptions: ["b"], coreIdeas: [] } }, { gallerySource: { ...copy.source, title: "Forged" } }]) {
+      expect((await post({ action: "start-save", copyId: copy.copyId, expectedRevision: 0, deck: { ...copy.deck, ...patch } })).status).toBe(422);
+    }
+    const saveId = await stage(copy, 0, "Private"); await uploadCopy(copy.copyId, saveId); await commit(copy.copyId, saveId);
+    const other = { ...scope, assignmentId: "ea-task-other" };
+    expect((await get({ action: "saved-copy", copyId: copy.copyId }, other)).status).toBe(404);
+    expect((await (await get({ action: "saved-copies" }, other)).json()).items).toEqual([]);
+    mocks.session.mockResolvedValue({ ...teacher, geniusId: "other-teacher" });
+    expect((await get({ action: "saved-copy", copyId: copy.copyId })).status).toBe(404);
+    expect((await get({ action: "saved-asset", copyId: copy.copyId, revision: "1", visualId: "evidence" })).status).toBe(404);
+    expect((await (await get({ action: "saved-copies" })).json()).items).toEqual([]);
+    expect((await commit(copy.copyId, saveId)).status).toBe(404);
+    mocks.session.mockResolvedValue({ ...teacher, role: "student" });
+    expect((await get({ action: "saved-copies" })).status).toBe(403);
+  });
+
+  it("saves edited video text and durable media without trusting caller URLs or changing published fallback", async () => {
+    const item = { id: "video-source", type: "Video", title: "Source clip", body: "Observe contact.", lessonNumber: 3, strategy: "cognitive conflict" };
+    mocks.media.mockImplementation(async (_c, _a, _s, id, kind) => id === item.id && kind === "video" ? {
+      class_id: scope.classId, assignment_id: scope.assignmentId, student_id: "cohort", content_item_id: id,
+      mime_type: "video/mp4", data_url: "data:video/mp4;base64,dmlkZW8=",
+    } : null);
+    const template = (await (await post({ action: "share-video", item, lessonNumber: 3, metadata })).json()).material;
+    const copy = await (await post({ action: "copy", id: template.id, mode: "adapt" })).json();
+    const originalMedia = await resolveGalleryContentMedia(scope.classId, scope.assignmentId, copy.item.id);
+    const result = await post({ action: "start-save", copyId: copy.copyId, expectedRevision: 0, item: { ...copy.item, title: "My video", body: "My specific edited task." }, media: { video: "http://127.0.0.1/private" } });
+    expect(result.status).toBe(200); const saveId = (await result.json()).saveId;
+    expect((await commit(copy.copyId, saveId)).status).toBe(200);
+    expect(await resolveGalleryContentMedia(scope.classId, scope.assignmentId, copy.item.id)).toEqual(originalMedia);
+    await post({ action: "unshare", id: template.id });
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(Date.now() + 16 * 60_000);
+    const loaded = await (await get({ action: "saved-copy", copyId: copy.copyId })).json();
+    expect(loaded.copy.item).toMatchObject({ id: copy.item.id, title: "My video", body: "My specific edited task.", gallerySource: copy.source });
+    expect(loaded.copy.media.video).not.toBe(copy.media.video);
+    const media = await mediaGET(new Request(`${origin}${loaded.copy.media.video}`));
+    expect(media.status).toBe(200); expect(Buffer.from(await media.arrayBuffer()).toString()).toBe("video");
+  });
+});
+
 describe("saved video reuse", () => {
   const item = { id: "generated-video", title: "Ball during contact", type: "Video", body: "Observe the ball during contact.", strategy: "cognitive conflict" };
   const shareVideo = () => post({ action: "share-video", item, lessonNumber: 3, metadata });
