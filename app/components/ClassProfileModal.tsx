@@ -14,24 +14,27 @@ import {
   type ClassProfileAnswers,
 } from "@/lib/class-profile";
 
-type Scope = Required<ClientAuthScope>;
+/** The class, plus the task when it is opened from inside one (the class page has no task). */
+type Scope = ClientAuthScope & { classId: string };
 
 /** Loads the class profile; null when the teacher hasn't been asked yet. */
 export async function loadClassProfile(scope: Scope): Promise<ClassProfile | null> {
-  const params = new URLSearchParams({ classId: scope.classId, assignmentId: scope.assignmentId });
+  const params = new URLSearchParams({ classId: scope.classId });
+  if (scope.assignmentId) params.set("assignmentId", scope.assignmentId);
   const res = await scopedTaskFetch(scope, `/api/class-profile?${params}`);
   if (!res.ok) throw new Error("Couldn't load the class profile.");
   return ((await res.json()) as { classProfile: ClassProfile | null }).classProfile;
 }
 
 /**
- * Everything a teacher page needs for the class profile: loads it, opens the
- * form on the teacher's first visit to the class (asked once), and shows
+ * Everything a teacher page needs for the class profile: loads it and shows
  * "Class profile saved" after a save. Call `openEditor` from a "Class profile"
- * button to edit it later.
+ * button. With `askFirst` (the class page), it also opens the form the first
+ * time, before any tasks (asked once); task pages only show and edit it.
  */
-export function useClassProfile({ classId, assignmentId, enabled }: Scope & { enabled: boolean }) {
+export function useClassProfile({ classId, assignmentId, enabled, askFirst = false }: Scope & { enabled: boolean; askFirst?: boolean }) {
   const [profile, setProfile] = useState<ClassProfile | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState<"first" | "edit" | null>(null);
   const [savedNotice, setSavedNotice] = useState(false);
 
@@ -42,14 +45,15 @@ export function useClassProfile({ classId, assignmentId, enabled }: Scope & { en
       .then((loaded) => {
         if (cancelled) return;
         setProfile(loaded ?? null);
+        setLoaded(true);
         // Only a confirmed "never asked" opens it; a failed load stays quiet.
-        if (loaded === null) setOpen("first");
+        if (loaded === null && askFirst) setOpen("first");
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [classId, assignmentId, enabled]);
+  }, [classId, assignmentId, enabled, askFirst]);
 
   useEffect(() => {
     if (!savedNotice) return;
@@ -81,12 +85,12 @@ export function useClassProfile({ classId, assignmentId, enabled }: Scope & { en
     </>
   );
 
-  return { profile, openEditor: () => setOpen("edit"), element };
+  return { profile, loaded, openEditor: () => setOpen("edit"), element };
 }
 
 type Props = {
   classId: string;
-  assignmentId: string;
+  assignmentId?: string;
   /** First visit: shows "Before you start · asked once" and "Skip for now". Otherwise "Cancel". */
   firstVisit: boolean;
   profile: ClassProfile | null;
@@ -136,7 +140,7 @@ export default function ClassProfileModal({ classId, assignmentId, firstVisit, p
       const res = await scopedTaskFetch({ classId, assignmentId }, "/api/class-profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classId, assignmentId, ...body }),
+        body: JSON.stringify({ classId, ...(assignmentId ? { assignmentId } : {}), ...body }),
       });
       const data = (await res.json()) as { classProfile?: ClassProfile; error?: string };
       if (!res.ok || !data.classProfile) throw new Error(data.error || "Couldn't save the class profile.");

@@ -121,8 +121,9 @@ it("shows the error and stays open when saving fails", async () => {
   expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
 });
 
-function Page({ enabled = true }: { enabled?: boolean }) {
-  const classProfile = useClassProfile({ classId: "c1", assignmentId: "a1", enabled });
+// The class page by default: no task, and it asks the first time.
+function Page({ enabled = true, assignmentId, askFirst = true }: { enabled?: boolean; assignmentId?: string; askFirst?: boolean }) {
+  const classProfile = useClassProfile({ classId: "c1", assignmentId, enabled, askFirst });
   return (
     <>
       <button type="button" onClick={classProfile.openEditor}>Open class profile</button>
@@ -138,16 +139,29 @@ const respond = (...bodies: { ok: boolean; body: unknown }[]) => {
   });
 };
 
-it("opens by itself on the teacher's first visit, then confirms the save", async () => {
+it("opens by itself on the class page the first time, then confirms the save (no task needed)", async () => {
   respond({ ok: true, body: { classProfile: null } }, { ok: true, body: { classProfile: { ...EMPTY_CLASS_PROFILE, class_id: "c1", status: "saved", updated_at: "" } } });
   render(<Page />);
   expect(await screen.findByText("Before you start · asked once")).toBeTruthy();
-  expect(fetchMock.mock.calls[0][0]).toBe("/api/class-profile?classId=c1&assignmentId=a1");
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/class-profile?classId=c1");
   expect(document.activeElement).toBe(screen.getByRole("dialog"));
 
   press("Save");
   expect(await screen.findByText("Class profile saved")).toBeTruthy();
+  expect(JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body))).toEqual({ classId: "c1", profile: EMPTY_CLASS_PROFILE });
   expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("never opens by itself inside a task, but can be opened to add or edit it there", async () => {
+  respond({ ok: true, body: { classProfile: null } });
+  render(<Page assignmentId="a1" askFirst={false} />);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/class-profile?classId=c1&assignmentId=a1");
+  expect(screen.queryByRole("dialog")).toBeNull();
+
+  press("Open class profile");
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
 });
 
 it("does not open by itself once the teacher has saved or skipped", async () => {

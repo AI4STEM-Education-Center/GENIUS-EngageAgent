@@ -10,6 +10,7 @@ import { useAuth } from "./AuthContext";
 import GeniusSignIn from "./GeniusSignIn";
 import TeacherView from "./TeacherView";
 import StudentView from "./StudentView";
+import ClassProfileSection from "./ClassProfileSection";
 import AppHeader from "./layout/AppHeader";
 import { studentNavActions } from "./layout/studentNav";
 
@@ -98,6 +99,7 @@ export default function Workspace() {
       <main className="mx-auto max-w-7xl px-5 pb-12 pt-5">
         <h1 className="break-words text-2xl font-semibold">{data?.classroom?.name || "My classes"}</h1>
         {data?.classroom?.joinCode && <p className="mt-3 break-all text-sm text-gray-600">Class code: <strong className="font-mono text-gray-900">{data.classroom.joinCode}</strong></p>}
+        {teacher && classId && data?.classroom && <ClassProfileSection key={classId} classId={classId} />}
         {(!classId || teacher) && <form onSubmit={submit} className="my-6 flex max-w-xl flex-col gap-2 sm:flex-row sm:items-end">
           <label className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium" htmlFor="workspace-value">{classId ? "New task title" : teacher ? "New class name" : "Class code"}
             <input id="workspace-value" required maxLength={120} value={value} onChange={event => setValue(event.target.value)} className={inputClass} />

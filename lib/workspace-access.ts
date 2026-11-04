@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { sessionUser, sameOriginRequest } from "./session";
-import { isWorkspaceClass, workspaceContext, WorkspaceError } from "./workspace";
+import { isWorkspaceClass, requireWorkspaceClass, workspaceContext, WorkspaceError } from "./workspace";
 import { getQuizStatus } from "./nosql";
 import { computeActivityStatuses } from "./activity-status";
 import { verifySSOToken } from "./auth";
@@ -86,6 +86,41 @@ export async function guardWorkspaceRequest(request: Request, context?: { classI
     return null;
   } catch (error) {
     if (error instanceof WorkspaceError || error instanceof SlideRequestError) return deny(error.message, error.status);
+    return deny("Unable to verify class access.", 503);
+  }
+}
+
+/**
+ * For class-level teacher pages with no task in scope (the class profile, #173).
+ * Only the class's own teacher, signed in to EngageAgent, gets through: no GENIUS
+ * launch tokens (those are scoped to one task), no students or guests.
+ */
+export async function guardWorkspaceClassRequest(request: Request) {
+  const url = new URL(request.url);
+  const queryKeys = new Set<string>();
+  for (const key of url.searchParams.keys()) {
+    if (queryKeys.has(key)) return deny("Repeated query parameters are not allowed.", 400);
+    queryKeys.add(key);
+  }
+  const write = !["GET", "HEAD"].includes(request.method);
+  let fields: Record<string, unknown> = Object.fromEntries(url.searchParams);
+  if (write) {
+    try { fields = await request.clone().json(); }
+    catch { return deny("Invalid request body.", 400); }
+    if (!fields || typeof fields !== "object" || Array.isArray(fields)) return deny("Invalid request body.", 400);
+  }
+  const classId = typeof fields.classId === "string" ? fields.classId.trim() : "";
+  if (!classId || classId.length > 160) return deny("Class is required.", 400);
+  if (request.headers.has("authorization") || !isWorkspaceClass(classId)) return deny("Class and assignment are required.", 400);
+  try {
+    const user = await sessionUser();
+    if (!user) return deny("Sign-in required.", 401);
+    if (write && !sameOriginRequest(request)) return deny("Invalid request origin.", 403);
+    if (user.role !== "teacher") return deny("Teacher access required.", 403);
+    await requireWorkspaceClass(user, classId);
+    return null;
+  } catch (error) {
+    if (error instanceof WorkspaceError) return deny(error.message, error.status);
     return deny("Unable to verify class access.", 503);
   }
 }
