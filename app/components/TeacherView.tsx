@@ -352,7 +352,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   // Assessment step sub-tabs (quiz vs survey), mirrors the tab pattern in StudentView.
   const [assessmentTab, setAssessmentTab] = useState<"quiz" | "survey">("quiz");
 
-  // Class profile (#173): set up on the class page; here it's only shown and edited.
+  // Class profile (#173): answered when the class is added; here it's only shown and edited.
   const classProfile = useClassProfile({ classId, assignmentId, enabled: hasAssignmentContext });
 
   // Student answers

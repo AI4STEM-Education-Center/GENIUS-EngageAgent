@@ -56,7 +56,7 @@ export type ClassProfileAnswers = {
 
 export type ClassProfile = ClassProfileAnswers & {
   class_id: string;
-  /** "skipped" means the teacher chose "Skip for now": don't ask again, but nothing is set. */
+  /** "skipped" only appears on older records, from the "Skip for now" popup: nothing is set. */
   status: "saved" | "skipped";
   updated_by?: string;
   updated_at: string;
@@ -70,6 +70,19 @@ export const EMPTY_CLASS_PROFILE: ClassProfileAnswers = {
   englishLearners: false,
   iepOr504: false,
 };
+
+/** True once the teacher has answered anything; a blank form isn't worth saving as a profile. */
+export function hasClassProfileAnswers(answers: ClassProfileAnswers) {
+  return Boolean(
+    answers.locale || answers.groups.length || answers.groupAlternative || answers.classType
+    || answers.englishLearners || answers.iepOr504,
+  );
+}
+
+/** The record to store for answers that have already been checked. */
+export function savedClassProfile(answers: ClassProfileAnswers, classId: string, updatedBy?: string): ClassProfile {
+  return { ...answers, class_id: classId, status: "saved", updated_by: updatedBy, updated_at: new Date().toISOString() };
+}
 
 const ids = (list: readonly { id: string }[]) => new Set<string>(list.map((item) => item.id));
 const LOCALE_IDS = ids(SCHOOL_LOCALES);
