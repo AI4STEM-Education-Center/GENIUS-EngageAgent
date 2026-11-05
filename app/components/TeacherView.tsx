@@ -3,12 +3,14 @@
 import { scopedTaskFetch } from "@/lib/client-auth";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BarChart3, LayoutGrid, MessageCircle, Users } from "lucide-react";
+import { BarChart3, LayoutGrid, Users } from "lucide-react";
 import SurveyBuilderView from "./SurveyBuilderView";
 import TeacherDashboardView from "./TeacherDashboardView";
 import DiscussionStep from "./discussion/DiscussionStep";
 import AppFrame from "./layout/AppFrame";
 import AppHeader, { taskContext, type TaskShell } from "./layout/AppHeader";
+import AskEngageAgent from "./AskEngageAgent";
+import { ASK_STEP_PAGES } from "@/lib/ask-engageagent";
 import StepTabs, { type StepTab } from "./layout/StepTabs";
 import ActivityContextSuggestion from "./ActivityContextSuggestion";
 import MaterialActivityView from "./MaterialActivityView";
@@ -1809,7 +1811,6 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           { label: "Class profile", icon: <Users size={15} />, onClick: classProfile.openEditor, comingSoon: !hasAssignmentContext },
           { label: "Dashboard", icon: <BarChart3 size={15} />, onClick: () => leaveGallery(() => { setShowGallery(false); setShowDashboard(true); }), active: showDashboard },
           { label: "Gallery", icon: <LayoutGrid size={15} />, onClick: openGallery, active: showGallery },
-          { label: "Ask EngageAgent", icon: <MessageCircle size={15} />, comingSoon: true },
         ]} />}
       tabs={!showGallery && <>
         {(inGenius || isGeniusEmbed) && <nav aria-label="Material library" className="flex justify-end border-b border-line bg-white px-5 py-2"><button type="button" onClick={openGallery} disabled={generationBusy || !hasAssignmentContext} className="inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-ink hover:bg-canvas disabled:opacity-50"><LayoutGrid size={16} />Gallery</button></nav>}
@@ -2412,6 +2413,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           </div>
         )}
       <a ref={downloadRef} className="hidden" />
+      <AskEngageAgent key={materialWorkspace} role={user.role} classId={classId} assignmentId={assignmentId} lessonNumber={selectedLesson}
+        page={showGallery ? "gallery" : showDashboard ? "dashboard" : ASK_STEP_PAGES[currentStep - 1]}
+        pageLabel={showGallery ? "Gallery" : showDashboard ? "Dashboard" : `Step ${currentStep} · ${stepLabels[currentStep - 1]}`} />
     </AppFrame>
   );
 }
