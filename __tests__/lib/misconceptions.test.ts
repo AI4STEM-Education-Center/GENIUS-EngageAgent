@@ -75,3 +75,10 @@ describe("misconception enum", () => {
     expect(isMisconceptionId("a")).toBe(false);
   });
 });
+
+it("reads lessons added in the app, which use the shared IDs as their codes (#175)", () => {
+  expect(toMisconceptionIds(9, "MC01")).toEqual([MisconceptionId.NoVisibleDamageMeansWeakForce]);
+  expect(toMisconceptionIds(9, "MC01, MC02")).toEqual([MisconceptionId.NoVisibleDamageMeansWeakForce, MisconceptionId.HeavierAlwaysCausesMoreDamage]);
+  expect(toMisconceptionIds(1, "MC01, a")).toEqual([MisconceptionId.NoVisibleDamageMeansWeakForce]);
+  expect(toMisconceptionIds(9, "nope, MC99")).toEqual([]);
+});
