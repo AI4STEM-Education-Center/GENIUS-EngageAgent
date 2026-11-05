@@ -129,10 +129,10 @@ it("keeps Gallery reachable after a verified GENIUS launch in a new tab with no 
   fireEvent.click(entry);
   expect(await screen.findByRole("region", { name: "Gallery workspace" })).toBeTruthy();
   expect(screen.queryByRole("navigation", { name: "Teacher steps" })).toBeNull();
-  expect(screen.queryByRole("heading", { name: "Engagement materials" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Material Generation" })).toBeNull();
   expect(screen.queryByRole("banner")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Back to task" }));
-  const assessment = within(screen.getByRole("navigation", { name: "Teacher steps" })).getByRole("button", { name: /Assessment/ });
+  const assessment = within(screen.getByRole("navigation", { name: "Teacher steps" })).getByRole("button", { name: /Pre-knowledge assessment/ });
   expect(assessment.getAttribute("aria-current")).toBe("step");
   // The verified history entry survives a reload after the launch token is removed.
   view.unmount(); fetchMock.mockClear();

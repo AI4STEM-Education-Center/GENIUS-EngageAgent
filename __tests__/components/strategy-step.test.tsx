@@ -51,6 +51,12 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+it("calls this step Strategy recommendations (#197)", () => {
+  render(<Harness />);
+  expect(screen.getByRole("heading", { name: "Strategy recommendations" })).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "Engagement strategy" })).toBeNull();
+});
+
 it("shows the quiz answers as bars of wrong answers by misconception", () => {
   render(<Harness />);
   const quiz = screen.getByRole("region", { name: "From the quiz" });
