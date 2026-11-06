@@ -3,6 +3,7 @@
 import { scopedTaskFetch } from "@/lib/client-auth";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import QuizPerformanceSection from "./QuizPerformanceSection";
 import SurveyResultsSection from "./SurveyResultsSection";
 import { useAuth } from "./AuthContext";
 import Link from "next/link";
@@ -59,6 +60,7 @@ const emptyDashboardSource = (classId: string, assignmentId: string) => ({
   classId, assignmentId,
   lesson: null as number | null,
   quizStatus: "draft" as QuizStatus,
+  quizUpdatedAt: null as string | null,
   answers: [] as StudentAnswer[],
   published: [] as DashboardPublishedRecord[],
   ratings: [] as ContentRatingRecord[],
@@ -103,6 +105,8 @@ export default function TeacherDashboardView({ user, embedded }: Props) {
   const [dashboardReviewQuestions, setDashboardReviewQuestions] = useState<DashboardReviewQuestionRow[]>([]);
   const [dashboardMedia, setDashboardMedia] = useState<Record<string, { image: boolean; video: boolean }>>({});
   const [quizStatus, setQuizStatus] = useState<QuizStatus>("draft");
+  const [quizUpdatedAt, setQuizUpdatedAt] = useState<string | null>(null);
+  const [dashboardAnswers, setDashboardAnswers] = useState<StudentAnswer[]>([]);
   const [selectedLesson, setSelectedLesson] = useState<number | null>(null);
   const dashboardSource = useRef(emptyDashboardSource(classId, assignmentId));
   const refreshVersion = useRef(0);
@@ -121,6 +125,8 @@ export default function TeacherDashboardView({ user, embedded }: Props) {
       setDashboardUpdatedAt(null);
       setSelectedLesson(null);
       setQuizStatus("draft");
+      setQuizUpdatedAt(null);
+      setDashboardAnswers([]);
       return;
     }
 
@@ -148,6 +154,7 @@ export default function TeacherDashboardView({ user, embedded }: Props) {
       let partialFailure = false;
       let fetchedLesson = previous.lesson;
       let fetchedQuizStatus = previous.quizStatus;
+      let fetchedQuizUpdatedAt = previous.quizUpdatedAt;
       let fetchedAnswers = previous.answers;
       let fetchedPublished = previous.published;
       let fetchedRatings = previous.ratings;
@@ -157,10 +164,11 @@ export default function TeacherDashboardView({ user, embedded }: Props) {
 
       if (quizResult.status === "fulfilled" && quizResult.value.ok) {
         const quizData = (await quizResult.value.json()) as {
-          quizStatus?: { lesson_number?: number; status?: QuizStatus };
+          quizStatus?: { lesson_number?: number; status?: QuizStatus; updated_at?: string };
         };
         fetchedLesson = quizData.quizStatus?.lesson_number ?? null;
         fetchedQuizStatus = quizData.quizStatus?.status ?? "draft";
+        fetchedQuizUpdatedAt = quizData.quizStatus?.updated_at ?? null;
       } else if (quizResult.status === "fulfilled" || quizResult.status === "rejected") {
         partialFailure = true;
       }
@@ -219,6 +227,7 @@ export default function TeacherDashboardView({ user, embedded }: Props) {
 
       if (version !== refreshVersion.current) return;
       dashboardSource.current = { classId, assignmentId, lesson: fetchedLesson, quizStatus: fetchedQuizStatus,
+        quizUpdatedAt: fetchedQuizUpdatedAt,
         answers: fetchedAnswers, published: fetchedPublished, ratings: fetchedRatings, media: fetchedMedia,
         strategies: fetchedStrategyResults, questions: fetchedReviewQuestions };
       const strategyDistribution: Record<string, number> = {};
@@ -279,6 +288,8 @@ export default function TeacherDashboardView({ user, embedded }: Props) {
       setDashboardStudents(studentRows);
       setSelectedLesson(fetchedLesson);
       setQuizStatus(fetchedQuizStatus);
+      setQuizUpdatedAt(fetchedQuizUpdatedAt);
+      setDashboardAnswers(fetchedAnswers);
       setDashboardStrategyDistribution(strategyDistribution);
       setCohortRecommendation(recommendation);
       setDashboardPublishedRecords(fetchedPublished);
@@ -697,6 +708,16 @@ export default function TeacherDashboardView({ user, embedded }: Props) {
                 </div>
               )}
             </div>
+
+            <QuizPerformanceSection
+              classId={classId}
+              assignmentId={assignmentId}
+              className={user.className}
+              lessonNumber={selectedLesson}
+              quizStatus={quizStatus}
+              quizUpdatedAt={quizUpdatedAt}
+              answers={dashboardAnswers}
+            />
 
             <SurveyResultsSection classId={classId} assignmentId={assignmentId} />
           </section>
