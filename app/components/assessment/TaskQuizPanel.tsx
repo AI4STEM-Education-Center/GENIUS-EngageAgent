@@ -20,7 +20,7 @@ function LessonCard({ quiz, disabled }: { quiz: TaskQuizController; disabled?: b
   const [anchoring, setAnchoring] = useState<string | null>(null);
   const anchoringValue = anchoring ?? view.anchoringPhenomenon;
   return (
-    <section aria-label="Lesson" className="flex flex-col gap-6 rounded-2xl border border-line bg-white p-5 md:flex-row">
+    <section aria-label="Lesson details" className="flex flex-col gap-6 rounded-2xl border border-line bg-white p-5 md:flex-row">
       <div className="md:w-64 md:shrink-0">
         <label htmlFor="task-quiz-lesson" className={fieldLabel}>Lesson</label>
         <select id="task-quiz-lesson" value={card?.number ?? ""} disabled={locked || busy || !quiz.lessons.length} onChange={(event) => quiz.pickLesson(Number(event.target.value))} className={`${field} mt-1.5`}>

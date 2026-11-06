@@ -120,7 +120,7 @@ export default function TaskQuizPublishBar({ quiz, onGoToStep2 }: { quiz: TaskQu
                 {view.canPublish ? <Check size={15} className="text-ok" /> : <AlertTriangle size={15} className="text-warn" />}
                 {view.publishBarCount}
               </p>
-              {!view.canPublish && view.publishProblems[0] && <p className="mt-0.5 text-xs text-mute">{view.publishProblems[0]}</p>}
+              {!view.items.length && view.publishProblems[0] && <p className="mt-0.5 text-xs text-mute">{view.publishProblems[0]}</p>}
             </div>
             {previewButton}
             <button type="button" disabled={!view.canPublish || Boolean(quiz.busy)} onClick={quiz.publish} className={primary}>{quiz.busy === "publish" ? "Publishing…" : "Publish task"}</button>

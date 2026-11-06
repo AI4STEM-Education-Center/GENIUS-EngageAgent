@@ -284,10 +284,10 @@ describe("students can't reach the keys of a published quiz", () => {
     }
   });
 
-  it("the student route is the only one the guard's list opened: writes to it are refused", async () => {
+  it("the guard lets a student read that route, but not write to it", async () => {
     await publishUploaded();
     const denied = await (await import("@/lib/workspace-access")).guardWorkspaceRequest(post("/api/task-quiz/student", { ...task }));
-    expect(denied).toBeNull(); // This one is the teacher's.
+    expect(denied).toBeNull(); // A teacher passes the guard either way.
     const forStudent = await as(student, async () => (await import("@/lib/workspace-access")).guardWorkspaceRequest(post("/api/task-quiz/student", { ...task })));
     expect(forStudent?.status).toBe(403);
   });

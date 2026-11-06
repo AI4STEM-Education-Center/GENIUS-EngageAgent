@@ -84,7 +84,7 @@ function MatchSlot({ item, option, misconceptions, locked, busy, onChange }: Pro
       {match.state === "no_misconception" && (
         <span className={`${chip} ${chipColor}`}>{asSuggestion && <Sparkles size={12} className="shrink-0" aria-label="AI suggestion" />}{match.label}</span>
       )}
-      {match.state === "not_matched" && <span className={`${chip} border-dashed border-warn/40 bg-warn-light text-warn`}>{match.label}</span>}
+      {match.state === "not_matched" && !option.possibleNew.length && <span className={`${chip} border-dashed border-warn/40 bg-warn-light text-warn`}>{match.label}</span>}
       {!locked && (editing
         ? (
           <select autoFocus aria-label={`Misconception for option ${letter}`} defaultValue="" disabled={busy} onBlur={() => setEditing(false)} onChange={(event) => choose(event.target.value)}
