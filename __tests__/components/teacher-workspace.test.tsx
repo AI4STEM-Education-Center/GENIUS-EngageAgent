@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import TeacherView from "@/app/components/TeacherView";
 import type { UserContext } from "@/lib/auth";
+import { lessonResponse } from "../fixtures/lesson-responses";
 
 const stepTab = (name: RegExp) => within(screen.getByRole("navigation", { name: "Teacher steps" })).getByRole("button", { name });
 
@@ -15,10 +16,9 @@ beforeEach(() => {
   localStorage.clear();
   vi.stubGlobal("fetch", vi.fn(async (input: string) => ({
     ok: true,
-    json: async () => input.startsWith("/api/lessons/")
-      ? { lesson_number: Number(input.split("/").pop()), lesson_title: `Lesson ${input.split("/").pop()}`, quiz_items: [], learning_objective: "Test objective" }
-      : input.startsWith("/api/material-gallery") ? { items: [] }
-        : input.startsWith("/api/slides?") ? { lessons: [] } : {},
+    json: async () => lessonResponse(input, undefined, { learning_objective: "Test objective" })
+      ?? (input.startsWith("/api/material-gallery") ? { items: [] }
+        : input.startsWith("/api/slides?") ? { lessons: [] } : {}),
   })));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });

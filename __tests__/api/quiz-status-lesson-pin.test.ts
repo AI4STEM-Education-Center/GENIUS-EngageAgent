@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 // Saving a task's quiz also notes which lesson version it uses (#175). The quiz matters more.
 const mocks = vi.hoisted(() => ({ pin: vi.fn(), upsert: vi.fn(), user: vi.fn() }));
-vi.mock("@/lib/lessons-store", () => ({ pinTaskToLesson: mocks.pin }));
+vi.mock("@/lib/lessons-store", () => ({ pinTaskToLesson: mocks.pin, getTaskLesson: vi.fn(async () => ({ version: 1 })) }));
 vi.mock("@/lib/nosql", () => ({ getQuizStatus: vi.fn(), upsertQuizStatus: mocks.upsert }));
 vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null), workspaceRequestUser: mocks.user }));
 

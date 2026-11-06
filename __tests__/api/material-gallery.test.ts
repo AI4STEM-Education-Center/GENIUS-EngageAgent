@@ -6,6 +6,8 @@ import { createHash } from "node:crypto";
 const mocks = vi.hoisted(() => ({ session: vi.fn(), context: vi.fn(), media: vi.fn() }));
 vi.mock("@/lib/session", async original => ({ ...await original<object>(), sessionUser: mocks.session }));
 vi.mock("@/lib/workspace", async original => ({ ...await original<object>(), workspaceContext: mocks.context }));
+// Not about lessons: getLesson reads the lesson files here. See lesson-wiring.test.ts for the stored ones.
+vi.mock("@/lib/lesson-scope", () => ({ enterLessonScope: () => {}, loadTaskLessons: async () => new Map() }));
 vi.mock("@/lib/nosql", () => ({ getMedia: mocks.media }));
 import { GET, POST } from "@/app/api/material-gallery/route";
 import { GET as mediaGET } from "@/app/api/material-gallery/media/route";

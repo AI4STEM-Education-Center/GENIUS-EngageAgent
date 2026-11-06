@@ -467,6 +467,7 @@ const validateMessage = (payload) => {
     classId,
     assignmentId,
     lessonNumber,
+    lessonContext,
     forceRefresh,
     student,
     totalStudents,
@@ -488,6 +489,7 @@ const validateMessage = (payload) => {
     classId,
     assignmentId,
     lessonNumber: normalizeLessonNumber(lessonNumber),
+    lessonContext,
     forceRefresh: forceRefresh === true,
     totalStudents: Number(totalStudents ?? 1),
     student,
@@ -502,6 +504,7 @@ const processRecord = async (record) => {
     classId,
     assignmentId,
     lessonNumber,
+    lessonContext: sentLessonContext,
     forceRefresh,
     totalStudents,
     student,
@@ -512,10 +515,12 @@ const processRecord = async (record) => {
   let cacheReadMs = 0;
   let modelMs = 0;
   let cacheWriteMs = 0;
+  // The app sends the lesson its task reads (#175). The files are for older messages still on the queue.
   const lessonContext =
-    typeof lessonNumber === "number"
+    sentLessonContext ??
+    (typeof lessonNumber === "number"
       ? getLessonGenerationContext(lessonNumber)
-      : null;
+      : null);
 
   if (typeof lessonNumber === "number" && !lessonContext) {
     throw new Error(`Lesson ${lessonNumber} not found.`);
@@ -553,9 +558,10 @@ const processRecord = async (record) => {
       const prompt = buildPrompt(
         student,
         lessonContext,
-        typeof lessonNumber === "number"
-          ? resolveQuizEvidence(lessonNumber, student.answers)
-          : [],
+        student.quizEvidence ??
+          (typeof lessonNumber === "number"
+            ? resolveQuizEvidence(lessonNumber, student.answers)
+            : []),
       );
       const completion = await (async () => {
         const modelStartedAt = performance.now();

@@ -153,10 +153,19 @@ export async function listLessons(): Promise<LessonListRow[]> {
   return withCounts.sort((a, b) => a.lessonNumber - b.lessonNumber);
 }
 
-/** Lessons a task can use. A lesson that was never published isn't offered. */
-export async function listPublishedLessons() {
-  return (await listLessons()).filter((row) => row.currentVersion !== null);
-}
+const sortedEntries = <T,>(value: Record<string, T>) =>
+  Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })));
+
+/**
+ * DynamoDB doesn't keep the order of an object's keys, but students see options
+ * in key order, and ties between misconceptions go to the first listed. Sorting
+ * gives every read one order, which is the order all 8 lesson files already use.
+ */
+const inStableOrder = (lesson: Lesson): Lesson => ({
+  ...lesson,
+  misconceptions: sortedEntries(lesson.misconceptions),
+  quiz_items: lesson.quiz_items.map((item) => ({ ...item, options: sortedEntries(item.options) })),
+});
 
 /** One published version, or the current one. Never a draft. */
 export async function getLessonVersion(lessonNumber: number, version?: number): Promise<LessonVersion | null> {
@@ -164,7 +173,36 @@ export async function getLessonVersion(lessonNumber: number, version?: number): 
   const row = await workspaceGet<LessonRow>(LIST, rowKey(lessonNumber));
   const wanted = version ?? row?.currentVersion;
   if (!row || !wanted) return null;
-  return workspaceGet<LessonVersion>(lessonPartition(row.lessonId), versionKey(wanted));
+  const found = await workspaceGet<LessonVersion>(lessonPartition(row.lessonId), versionKey(wanted));
+  return found && { ...found, lesson: inStableOrder(found.lesson) };
+}
+
+/**
+ * The one place that decides which lesson a task reads: the version it's pinned
+ * to if it's pinned to this lesson, otherwise the current version. A pin to a
+ * version that can't be found gives null rather than a different version.
+ */
+export async function getTaskLesson(classId: string, assignmentId: string, lessonNumber: number): Promise<LessonVersion | null> {
+  const pin = await getTaskLessonPin(classId, assignmentId);
+  return getLessonVersion(lessonNumber, pin?.lessonNumber === lessonNumber ? pin.version : undefined);
+}
+
+export type TaskLessonOption = LessonRow & { version: number; learningObjective: string; questionCount: number };
+
+/** What a task can choose from: every published lesson, at the version this task would read. */
+export async function listTaskLessons(classId: string, assignmentId: string): Promise<TaskLessonOption[]> {
+  await ensureBuiltInLessons();
+  const [rows, pin] = await Promise.all([workspaceQuery<LessonRow>(LIST, "LESSON#"), getTaskLessonPin(classId, assignmentId)]);
+  const options = await Promise.all(rows.filter((row) => row.currentVersion !== null).map(async (row) => {
+    const version = pin?.lessonNumber === row.lessonNumber ? pin.version : row.currentVersion!;
+    const found = await workspaceGet<LessonVersion>(lessonPartition(row.lessonId), versionKey(version));
+    if (!found) throw new Error(`Lesson ${row.lessonNumber} version ${version} could not be loaded.`);
+    return {
+      ...row, title: found.lesson.lesson_title, version, learningObjective: found.lesson.learning_objective,
+      questionCount: found.lesson.quiz_items.filter((item) => item.type === "multiple_choice").length,
+    };
+  }));
+  return options.sort((a, b) => a.lessonNumber - b.lessonNumber);
 }
 
 /** The lesson new tasks get: its objective, core ideas, misconceptions and quiz. */

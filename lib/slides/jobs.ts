@@ -42,7 +42,7 @@ function boundedSpec(spec: SlideJobSpec): SlideJobSpec {
       } }; break;
     case "slide-revision": {
       const draft = requestDraft(spec.draft, spec.strategy, true, spec.draft.analogyMethod);
-      if (!validSlideRevisionIndex(draft, spec.slideIndex) || !Number.isInteger(spec.lessonNumber) || spec.lessonNumber < 1 || spec.lessonNumber > 8) throw new SlideRequestError("Choose one valid slide to revise.");
+      if (!validSlideRevisionIndex(draft, spec.slideIndex) || !Number.isInteger(spec.lessonNumber) || spec.lessonNumber < 1) throw new SlideRequestError("Choose one valid slide to revise.");
       value = { kind: spec.kind, model: spec.model, strategy: spec.strategy, lessonNumber: spec.lessonNumber, slideIndex: spec.slideIndex, draft };
       break;
     }

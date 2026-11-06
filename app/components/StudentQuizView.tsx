@@ -78,7 +78,7 @@ export default function StudentQuizView({ user, onProgress }: Props) {
       // loaded either way: a teacher can publish a survey without a quiz (#111).
       if (qs?.status === "published") {
         // Fetch quiz questions from lesson data
-        const lessonRes = await fetch(`/api/lessons/${qs.lesson_number}`);
+        const lessonRes = await fetch(`/api/lessons/${qs.lesson_number}?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`, { cache: "no-store" });
         const lessonData = await lessonRes.json();
         if (!lessonRes.ok) throw new Error(lessonData.error ?? "Failed to load quiz questions.");
         setQuestions(lessonData.quiz_items ?? []);

@@ -7,6 +7,7 @@ import {
   type LessonGenerationContext,
   type ResolvedQuizEvidence,
 } from "@/lib/lesson-context";
+import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import { getCachedPlanJson, upsertCachedPlanJson } from "@/lib/nosql";
 import {
   deserializeCachedPlan,
@@ -148,6 +149,7 @@ export async function POST(request: Request) {
       );
     }
 
+    enterLessonScope(await loadTaskLessons({ classId: classKey, assignmentId: assignmentKey }, lessonNumber));
     const lessonContext =
       typeof lessonNumber === "number"
         ? getLessonGenerationContext(lessonNumber)

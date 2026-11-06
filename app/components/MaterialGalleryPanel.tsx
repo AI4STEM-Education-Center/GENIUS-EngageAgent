@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, LayoutGrid, LoaderCircle, Search, X } from "
 import { copyGalleryMaterial, listMaterialGallery, previewGalleryMaterial, previewGallerySlideDeck, unshareGalleryMaterial } from "@/lib/material-gallery-client";
 import type { GalleryCopy, GalleryFilters, GalleryMaterial, GalleryPreviewSource, GalleryScope } from "@/lib/material-gallery";
 import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
+import { loadTaskLesson } from "@/lib/lesson-client";
 import SlidePreview from "./SlidePreview";
 import type { SlideDeck } from "@/lib/slides/model";
 import type { StrategyFocus } from "@/lib/strategy-focus";
@@ -90,6 +91,8 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
       setPreview(detail);
       if (material.format === "slides") {
         const deck = await previewGallerySlideDeck(scope, material.id, controller.signal);
+        // A lesson added in the app needs loading for its slide heading. If this fails, the preview says it can't show the slide.
+        await loadTaskLesson(scope, material.lessonNumber).catch(() => null);
         if (!controller.signal.aborted) setPreviewDeck(deck);
       }
     }

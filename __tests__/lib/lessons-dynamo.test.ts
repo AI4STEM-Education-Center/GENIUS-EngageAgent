@@ -27,6 +27,21 @@ const content = (title: string): LessonDraftContent => ({
   })),
 });
 
+const reversed = (value: unknown): unknown => Array.isArray(value) ? value.map(reversed)
+  : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reversed(item)])) : value;
+
+it("reads options and misconceptions in one order, whatever order the database returns them in", async () => {
+  const store = await import("@/lib/lessons-store");
+  const { getAllLessons } = await import("@/lib/quiz-data");
+  await store.ensureBuiltInLessons();
+  for (const [key, item] of items) items.set(key, reversed(item) as Item);
+  for (const file of getAllLessons()) {
+    const lesson = (await store.getTaskLesson("c", "t", file.lesson_number))!.lesson;
+    expect(Object.keys(lesson.misconceptions)).toEqual(Object.keys(file.misconceptions));
+    expect(lesson.quiz_items.map((item) => [item.item_id, Object.keys(item.options)])).toEqual(file.quiz_items.map((item) => [item.item_id, Object.keys(item.options)]));
+  }
+});
+
 beforeEach(() => {
   vi.stubEnv("DYNAMODB_TABLE", "lessons-test");
   vi.resetModules();

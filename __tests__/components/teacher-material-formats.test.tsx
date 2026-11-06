@@ -50,6 +50,7 @@ vi.mock("@/app/components/SlidesWorkspace", async () => {
 vi.mock("@/lib/material-export", () => ({ downloadStudentMaterial: mocks.download }));
 
 import TeacherView from "@/app/components/TeacherView";
+import { lessonResponse } from "../fixtures/lesson-responses";
 
 const stepTab = (name: RegExp) => within(screen.getByRole("navigation", { name: "Teacher steps" })).getByRole("button", { name });
 
@@ -91,10 +92,8 @@ beforeEach(() => {
   mocks.download.mockResolvedValue({ url: "blob:material", dataUri: "data:text/html;charset=utf-8;base64,aGVsbG8=", fileName: "Shared-activity.html" });
   mocks.fetch.mockImplementation(async (input: string, init?: RequestInit) => {
     if (input.startsWith("/api/material-gallery")) return reply({ items: [] });
-    if (input.startsWith("/api/lessons/")) {
-      const lesson = Number(input.split("/").pop());
-      return reply({ lesson_number: lesson, lesson_title: lesson === 8 ? "Energy" : `Lesson ${lesson}`, learning_objective: "Track energy", core_ideas: [], misconceptions: {}, quiz_items: [] });
-    }
+    const lesson = lessonResponse(input, (n) => (n === 8 ? "Energy" : `Lesson ${n}`), { learning_objective: "Track energy" });
+    if (lesson) return reply(lesson);
     if (input === "/api/engagement-content") {
       const body = JSON.parse(String(init?.body));
       return reply({ items: body.selectedStrategies.map((strategy: string) => ({
@@ -126,6 +125,7 @@ it("defaults new material generation to Slides and offers only Slides and Video"
   render(<TeacherView user={user} />);
   fireEvent.click(await screen.findByRole("button", { name: /Energy/ }));
   fireEvent.click(stepTab(/Strategy/));
+  await screen.findByRole("radiogroup", { name: "Strategy" });
   fireEvent.click(strategyRadio("Analogy"));
   useStrategy("Analogy");
   await ready();
@@ -663,6 +663,7 @@ it("hydrates an embedded teacher workflow and generates in memory when browser s
     render(<TeacherView user={host} />);
     fireEvent.click(await screen.findByRole("button", { name: /Energy/ }));
     fireEvent.click(stepTab(/Strategy/));
+    await screen.findByRole("radiogroup", { name: "Strategy" });
     fireEvent.click(strategyRadio("Analogy"));
     useStrategy("Analogy");
     await ready();
