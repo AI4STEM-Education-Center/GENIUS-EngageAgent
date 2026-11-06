@@ -229,6 +229,26 @@ describe("UC 4.1: the lesson and the provided quiz", () => {
     await waitFor(() => expect(callsTo("/api/task-quiz/anchoring")[0]?.body).toMatchObject({ anchoringPhenomenon: "Two carts collide" }));
   });
 
+  it("doesn't save the box again when it ends up the same as what's saved", async () => {
+    await start(withLesson({ anchoringPhenomenon: "Two carts collide" }));
+    const box = screen.getByLabelText(/Anchoring phenomenon/);
+    fireEvent.change(box, { target: { value: " Two carts collide " } });
+    fireEvent.blur(box);
+    expect(callsTo("/api/task-quiz/anchoring")).toEqual([]);
+  });
+
+  it("ignores a slow reply older than what's already on screen", async () => {
+    await start(withLesson({ revision: 5 }));
+    await findItem(1);
+    override["/api/task-quiz/anchoring"] = () => reply({ quiz: taskQuizView({ ...quiz, revision: 2, items: [] }) });
+    const box = screen.getByLabelText(/Anchoring phenomenon/);
+    fireEvent.change(box, { target: { value: "x" } });
+    fireEvent.blur(box);
+    await waitFor(() => expect(callsTo("/api/task-quiz/anchoring")).toHaveLength(1));
+    await act(async () => {});
+    expect(item(1)).toBeInTheDocument();
+  });
+
   it("lets the teacher change a provided item's misconceptions, which takes it back to review if it loses a match", async () => {
     await start(withLesson());
     const first = await findItem(1);
@@ -470,6 +490,7 @@ describe("UC 4.4: matching and confirming", () => {
     const { second } = await matched();
     expect(within(second).getByText("No answer key")).toBeInTheDocument();
     expect(within(second).getByText("AI suggests this is the correct answer")).toBeInTheDocument();
+    expect(within(second).queryByText("Not matched yet")).toBeNull(); // The option it suggests isn't a wrong one.
     expect(within(second).getByRole("button", { name: "Confirm item" })).toBeDisabled();
     expect(within(second).getByText("Set the correct answer")).toBeInTheDocument();
     fireEvent.click(within(second).getByRole("button", { name: "Set as answer" }));

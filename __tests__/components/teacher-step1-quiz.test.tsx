@@ -75,6 +75,8 @@ describe("the teacher page", () => {
     await waitFor(() => expect(lessonReads()).toBe(before + 1));
     fireEvent.click(screen.getByRole("button", { name: /Go to Step 2/ }));
     await waitFor(() => expect(stepTab(/Strategy/)).toHaveAttribute("aria-current", "step"));
+    // Step 2 counts this as a live quiz straight away, without a reload.
+    await waitFor(() => expect(log.some((line) => line.startsWith("GET /api/student-answers"))).toBe(true));
   });
 
   it("shows an old draft's lesson first, once it knows no lesson is picked here", async () => {
