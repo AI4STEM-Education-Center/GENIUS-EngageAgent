@@ -32,6 +32,8 @@ vi.mock("openai", () => {
   };
 });
 
+// Not about lessons: getLesson reads the lesson files here. See lesson-wiring.test.ts for the stored ones.
+vi.mock("@/lib/lesson-scope", () => ({ enterLessonScope: () => {}, loadTaskLessons: async () => new Map() }));
 vi.mock("@/lib/nosql", () => {
   const cache = new Map<string, string>();
 

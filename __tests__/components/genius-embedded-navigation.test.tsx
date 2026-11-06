@@ -6,6 +6,7 @@ import TeacherView from "@/app/components/TeacherView";
 import StudentView from "@/app/components/StudentView";
 import TeacherDashboardView from "@/app/components/TeacherDashboardView";
 import type { UserContext } from "@/lib/auth";
+import { lessonResponse } from "../fixtures/lesson-responses";
 
 vi.mock("@/lib/genius-notify", () => ({ notifyTaskCompleted: vi.fn(), notifyTaskReopened: vi.fn() }));
 vi.mock("@/app/components/StudentQuizView", () => ({ default: () => <section aria-label="Quiz content" /> }));
@@ -38,10 +39,8 @@ beforeEach(() => {
     json: async () => {
       if (input.startsWith("/api/auth/")) return { user: currentUser };
       if (input.startsWith("/api/material-gallery")) return { items: [] };
-      if (input.startsWith("/api/lessons/")) {
-        const number = Number(input.split("/").pop());
-        return { lesson_number: number, lesson_title: `Lesson ${number}`, quiz_items: [], learning_objective: "Test objective" };
-      }
+      const lesson = lessonResponse(input, undefined, { learning_objective: "Test objective" });
+      if (lesson) return lesson;
       if (input.startsWith("/api/activity-status")) return { activities: [
         { id: "assessment", status: "available" },
         { id: "content-review", status: "available" },

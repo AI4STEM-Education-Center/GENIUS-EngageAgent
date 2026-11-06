@@ -11,6 +11,8 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
 vi.mock("@aws-sdk/client-s3", async original => ({ ...await original<object>(), S3Client: class { send = mocks.s3; destroy() {} } }));
 vi.mock("@/lib/session", async original => ({ ...await original<object>(), sessionUser: async () => ({ geniusId: "cloud-teacher", role: "teacher" }) }));
 vi.mock("@/lib/workspace", async original => ({ ...await original<object>(), workspaceContext: async () => ({}) }));
+// Not about lessons: getLesson reads the lesson files here. See lesson-wiring.test.ts for the stored ones.
+vi.mock("@/lib/lesson-scope", () => ({ enterLessonScope: () => {}, loadTaskLessons: async () => new Map() }));
 vi.mock("@/lib/nosql", () => ({ getMedia: vi.fn() }));
 import { GET, POST } from "@/app/api/material-gallery/route";
 import { deckFixture, tinyImage } from "../fixtures/slides";

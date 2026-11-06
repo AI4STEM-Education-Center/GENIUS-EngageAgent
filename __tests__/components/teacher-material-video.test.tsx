@@ -11,6 +11,7 @@ vi.mock("@/app/components/SlidesWorkspace", async () => {
   return { default: forwardRef(function UnusedSlideEditor() { return null; }) };
 });
 import TeacherView from "@/app/components/TeacherView";
+import { lessonResponse } from "../fixtures/lesson-responses";
 
 const teacher: UserContext = {
   geniusId: "teacher-video", userId: "teacher-video", name: "Video teacher",
@@ -50,10 +51,8 @@ function seedDraft(content: ContentItem[] = [], images: Record<string, ImageStat
 function installApi(imageResponse: () => Promise<Response> = async () => reply({ url: sourceImage })) {
   fetchMock.mockImplementation(async (path) => {
     if (path.startsWith("/api/material-gallery")) return reply({ items: [] });
-    if (path.startsWith("/api/lessons/")) {
-      const number = Number(path.split("/").pop());
-      return reply({ lesson_number: number, lesson_title: `Lesson ${number}`, learning_objective: "Observe changes in shape.", quiz_items: [] });
-    }
+    const lesson = lessonResponse(path, undefined, { learning_objective: "Observe changes in shape." });
+    if (lesson) return reply(lesson);
     if (path.startsWith("/api/quiz-status?")) return reply({});
     if (path.startsWith("/api/content-publish?")) return reply({ items: [] });
     if (path.startsWith("/api/media?")) return reply({ results: [] });

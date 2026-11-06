@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import TeacherView from "@/app/components/TeacherView";
 import type { UserContext } from "@/lib/auth";
+import { lessonResponse } from "../fixtures/lesson-responses";
 
 const teacher: UserContext = {
   geniusId: "teacher", userId: "teacher", name: "Test teacher",
@@ -17,9 +18,7 @@ beforeEach(() => {
     ok: true,
     json: async () => input.startsWith("/api/class-profile")
       ? { classProfile }
-      : input.startsWith("/api/lessons/")
-        ? { lesson_number: Number(input.split("/").pop()), lesson_title: `Lesson ${input.split("/").pop()}`, quiz_items: [], learning_objective: "Test objective" }
-        : {},
+      : lessonResponse(input, undefined, { learning_objective: "Test objective" }) ?? {},
   })));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
