@@ -57,21 +57,40 @@ export async function workspaceQuery<T>(partition: string, prefix: string): Prom
   return values;
 }
 
-export async function workspacePut(records: { partition: string; key: string; value: RecordValue; createOnly?: boolean; expiresAt?: number }[]) {
+type WriteRecord =
+  | { partition: string; key: string; value: RecordValue; createOnly?: boolean; expiresAt?: number; remove?: undefined }
+  | { partition: string; key: string; remove: true };
+
+const LOCAL_CONFLICT = "Workspace record already exists.";
+
+/** True when a create-only write lost to another write, so the caller can reload or retry. */
+export function isWorkspaceConflict(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  if (error.message === LOCAL_CONFLICT) return true;
+  if (error.name !== "TransactionCanceledException") return false;
+  const reasons = (error as Error & { CancellationReasons?: { Code?: string }[] }).CancellationReasons ?? [];
+  return reasons.some(reason => reason.Code === "ConditionalCheckFailed" || reason.Code === "TransactionConflict");
+}
+
+/** Writes all of the records or none of them. */
+export async function workspacePut(records: WriteRecord[]) {
   const db = database();
   if (db) {
-    await db.send(new TransactWriteCommand({ TransactItems: records.map(row => ({ Put: {
-      TableName: process.env.DYNAMODB_TABLE,
-      Item: { class_id: row.partition, record_id: row.key, value: row.value, ...(row.expiresAt === undefined ? {} : { expiresAt: row.expiresAt }) },
-      ...(row.createOnly ? { ConditionExpression: "attribute_not_exists(record_id)" } : {}),
-    } })) }));
+    await db.send(new TransactWriteCommand({ TransactItems: records.map(row => row.remove
+      ? { Delete: { TableName: process.env.DYNAMODB_TABLE, Key: { class_id: row.partition, record_id: row.key } } }
+      : { Put: {
+        TableName: process.env.DYNAMODB_TABLE,
+        Item: { class_id: row.partition, record_id: row.key, value: row.value, ...(row.expiresAt === undefined ? {} : { expiresAt: row.expiresAt }) },
+        ...(row.createOnly ? { ConditionExpression: "attribute_not_exists(record_id)" } : {}),
+      } }) }));
     return;
   }
   const operation = writes.then(async () => {
     let stored = await localRecords();
     for (const row of records) {
       const matches = (item: Stored) => item.class_id === row.partition && item.record_id === row.key;
-      if (row.createOnly && stored.some(matches)) throw new Error("Workspace record already exists.");
+      if (row.remove) { stored = stored.filter(item => !matches(item)); continue; }
+      if (row.createOnly && stored.some(matches)) throw new Error(LOCAL_CONFLICT);
       stored = stored.filter(item => !matches(item));
       stored.push({ class_id: row.partition, record_id: row.key, value: row.value, ...(row.expiresAt === undefined ? {} : { expiresAt: row.expiresAt }) });
     }

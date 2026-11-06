@@ -179,7 +179,8 @@ export function listMisconceptions(): { id: MisconceptionId; text: string }[] {
 /**
  * Turns a lesson's code field into shared IDs. Quiz items sometimes list more
  * than one code in a field ("1-a, 2-a"), so the value is split on commas.
- * Codes the lesson doesn't define are skipped.
+ * Lessons added in the app (#175) use the shared IDs as their codes. Codes
+ * that are neither are skipped.
  */
 export function toMisconceptionIds(
   lessonNumber: number,
@@ -188,7 +189,8 @@ export function toMisconceptionIds(
   const lessonCodes = LESSON_MISCONCEPTIONS[lessonNumber] ?? {};
   const ids: MisconceptionId[] = [];
   for (const code of (codes ?? "").split(",")) {
-    const id = lessonCodes[code.trim()];
+    const trimmed = code.trim();
+    const id = lessonCodes[trimmed] ?? (isMisconceptionId(trimmed) ? trimmed : undefined);
     if (id && !ids.includes(id)) ids.push(id);
   }
   return ids;

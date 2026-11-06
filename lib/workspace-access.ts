@@ -95,6 +95,29 @@ export async function guardWorkspaceRequest(request: Request, context?: { classI
  * Only the class's own teacher, signed in to EngageAgent, gets through: no GENIUS
  * launch tokens (those are scoped to one task), no students or guests.
  */
+/**
+ * For teacher pages that belong to no class or task (the Lessons list, #175).
+ * Only a teacher signed in to EngageAgent gets through: no GENIUS launch tokens
+ * (those are scoped to one task), no students or guests.
+ */
+export async function guardTeacherSessionRequest(request: Request) {
+  const queryKeys = new Set<string>();
+  for (const key of new URL(request.url).searchParams.keys()) {
+    if (queryKeys.has(key)) return deny("Repeated query parameters are not allowed.", 400);
+    queryKeys.add(key);
+  }
+  if (request.headers.has("authorization")) return deny("Sign in to EngageAgent to manage lessons.", 401);
+  try {
+    const user = await sessionUser();
+    if (!user) return deny("Sign-in required.", 401);
+    if (!["GET", "HEAD"].includes(request.method) && !sameOriginRequest(request)) return deny("Invalid request origin.", 403);
+    if (user.role !== "teacher") return deny("Teacher access required.", 403);
+    return null;
+  } catch {
+    return deny("Unable to verify your account.", 503);
+  }
+}
+
 export async function guardWorkspaceClassRequest(request: Request) {
   const url = new URL(request.url);
   const queryKeys = new Set<string>();

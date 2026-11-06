@@ -77,6 +77,13 @@ export async function POST(request: Request) {
       status,
       publishedBy,
     );
+    // Note which lesson version this task uses (#175). It must not stop the quiz from saving.
+    try {
+      const user = await workspaceRequestUser(request);
+      if (user && Number.isInteger(lessonNumber)) await pinTaskToLesson(user, classId, assignmentId, lessonNumber);
+    } catch (error) {
+      console.error("Lesson version pin failed", { type: error instanceof Error ? error.name : "Unknown" });
+    }
     return NextResponse.json({ quizStatus: record });
   } catch (error) {
     logStorageError("POST", error);
@@ -86,4 +93,5 @@ export async function POST(request: Request) {
     );
   }
 }
-import { guardWorkspaceRequest } from "@/lib/workspace-access";
+import { pinTaskToLesson } from "@/lib/lessons-store";
+import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";

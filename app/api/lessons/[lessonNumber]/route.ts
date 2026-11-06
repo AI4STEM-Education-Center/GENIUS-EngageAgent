@@ -1,27 +1,20 @@
-import { NextResponse } from "next/server";
-import { getLesson } from "@/lib/quiz-data";
+import { getLessonVersion } from "@/lib/lessons-store";
+import { lessonFailure, lessonJson, positiveInteger } from "@/lib/lessons-api";
 
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ lessonNumber: string }> },
-) {
-  const { lessonNumber: lessonStr } = await params;
-  const lessonNumber = parseInt(lessonStr, 10);
+type Context = { params: Promise<{ lessonNumber: string }> };
 
-  if (isNaN(lessonNumber) || lessonNumber < 1 || lessonNumber > 8) {
-    return NextResponse.json(
-      { error: "lessonNumber must be between 1 and 8." },
-      { status: 400 },
-    );
-  }
-
-  const lesson = getLesson(lessonNumber);
-  if (!lesson) {
-    return NextResponse.json(
-      { error: `Lesson ${lessonNumber} not found.` },
-      { status: 404 },
-    );
-  }
-
-  return NextResponse.json(lesson);
+// A published lesson in the shape the app has always read, plus its version.
+// Add ?version=2 for a task that is pinned to an older one. Drafts are never served here.
+export async function GET(request: Request, { params }: Context) {
+  const { lessonNumber: raw } = await params;
+  const lessonNumber = positiveInteger(raw);
+  if (lessonNumber === null) return lessonJson({ error: "lessonNumber must be a positive whole number." }, 400);
+  const rawVersion = new URL(request.url).searchParams.get("version");
+  const version = rawVersion === null ? undefined : positiveInteger(rawVersion);
+  if (version === null) return lessonJson({ error: "version must be a positive whole number." }, 400);
+  try {
+    const found = await getLessonVersion(lessonNumber, version);
+    if (!found) return lessonJson({ error: `Lesson ${lessonNumber} not found.` }, 404);
+    return lessonJson({ ...found.lesson, lesson_version: found.version });
+  } catch (error) { return lessonFailure(error); }
 }

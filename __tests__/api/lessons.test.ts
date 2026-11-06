@@ -1,5 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
 import { GET } from "@/app/api/lessons/[lessonNumber]/route";
+
+let dir: string;
+beforeAll(async () => {
+  dir = await mkdtemp(path.join(os.tmpdir(), "engage-lessons-read-"));
+  vi.stubEnv("ENGAGE_LOCAL_DATA_DIR", dir);
+  vi.stubEnv("DYNAMODB_TABLE", "");
+});
+afterAll(async () => { await rm(dir, { recursive: true, force: true }); vi.unstubAllEnvs(); });
 
 describe("GET /api/lessons/[lessonNumber]", () => {
   it("should return lesson 1", async () => {
@@ -26,10 +37,10 @@ describe("GET /api/lessons/[lessonNumber]", () => {
     expect(res.status).toBe(400);
   });
 
-  it("should return 400 for lesson 9", async () => {
+  it("should return 404 for a lesson that doesn't exist yet", async () => {
     const req = new Request("http://localhost:3000/api/lessons/9");
     const res = await GET(req, { params: Promise.resolve({ lessonNumber: "9" }) });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
   });
 
   it("should return 400 for non-numeric", async () => {
