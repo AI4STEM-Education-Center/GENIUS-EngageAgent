@@ -121,8 +121,9 @@ export function useTaskQuiz({ classId, assignmentId, suggestedLesson, active, on
 
   // An old draft's lesson comes first, until a lesson is picked here.
   const pinnedLesson = view?.lesson?.number;
+  const quizLoaded = Boolean(view);
   useEffect(() => {
-    if (!enabled || !suggestedLesson || pinnedLesson || firstCard?.number === suggestedLesson) return;
+    if (!enabled || !quizLoaded || !suggestedLesson || pinnedLesson || firstCard?.number === suggestedLesson) return;
     let stale = false;
     scopedTaskFetch({ classId, assignmentId }, `/api/task-quiz/lesson?${query}&lessonNumber=${suggestedLesson}`, { cache: "no-store" })
       .then(async (response) => {
@@ -131,7 +132,7 @@ export function useTaskQuiz({ classId, assignmentId, suggestedLesson, active, on
       })
       .catch(() => {});
     return () => { stale = true; };
-  }, [enabled, classId, assignmentId, query, suggestedLesson, pinnedLesson, firstCard?.number]);
+  }, [enabled, quizLoaded, classId, assignmentId, query, suggestedLesson, pinnedLesson, firstCard?.number]);
 
   // Good news goes away by itself. A failure stays until it's closed or the teacher does something else.
   useEffect(() => {

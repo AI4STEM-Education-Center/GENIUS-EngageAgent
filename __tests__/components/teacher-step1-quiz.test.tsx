@@ -77,6 +77,14 @@ describe("the teacher page", () => {
     await waitFor(() => expect(stepTab(/Strategy/)).toHaveAttribute("aria-current", "step"));
   });
 
+  it("shows an old draft's lesson first, once it knows no lesson is picked here", async () => {
+    quiz = emptyTaskQuiz("ea-class-1", "ea-task-1");
+    quizStatus = { lesson_number: 2, status: "draft" };
+    render(<TeacherView user={teacher} />);
+    await waitFor(() => expect(log.some((line) => line.includes("/api/task-quiz/lesson") && line.includes("lessonNumber=2"))).toBe(true));
+    expect(log.some((line) => line.startsWith("POST /api/task-quiz/lesson"))).toBe(false);
+  });
+
   it("picking a lesson also saves it the way the rest of the page reads it", async () => {
     render(<TeacherView user={teacher} />);
     fireEvent.change(await screen.findByLabelText("Lesson"), { target: { value: "2" } });

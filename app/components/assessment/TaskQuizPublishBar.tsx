@@ -49,7 +49,7 @@ function PreviewQuestion({ item, confidence, number }: { item: QuizItem; confide
           <p className="text-sm text-mute">{confidence.stem}</p>
           <div className="mt-2.5 grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-line">
             {Object.entries(confidence.options).map(([key, value]) => (
-              <span key={key} className="min-h-12 min-w-0 break-words border-r border-line px-1 py-3 text-center text-xs font-medium leading-snug text-ink-2 last:border-r-0">{value}</span>
+              <span key={key} className="min-h-12 min-w-0 break-words border-r border-line px-1 py-3 text-center text-[11px] font-medium sm:text-xs leading-snug text-ink-2 last:border-r-0">{value}</span>
             ))}
           </div>
         </div>
