@@ -11,6 +11,8 @@ import type { UserContext } from "./auth";
 import { compareLessons, draftFromLesson, emptyLessonDraft, lessonFromDraft, lessonProblems, type LessonChanges, type LessonDraftContent, type LessonProblem } from "./lessons";
 import { getQuizStatus } from "./nosql";
 import { getAllLessons } from "./quiz-data";
+import { lessonFromTaskQuiz } from "./task-quiz";
+import { getPublishedTaskQuiz } from "./task-quiz-published";
 import type { Lesson } from "./types";
 import { WorkspaceError } from "./workspace";
 import { isWorkspaceConflict, workspaceGet, workspacePut, workspaceQuery } from "./workspace-store";
@@ -183,8 +185,11 @@ export async function getLessonVersion(lessonNumber: number, version?: number): 
  * version that can't be found gives null rather than a different version.
  */
 export async function getTaskLesson(classId: string, assignmentId: string, lessonNumber: number): Promise<LessonVersion | null> {
-  const pin = await getTaskLessonPin(classId, assignmentId);
-  return getLessonVersion(lessonNumber, pin?.lessonNumber === lessonNumber ? pin.version : undefined);
+  const [pin, quiz] = await Promise.all([getTaskLessonPin(classId, assignmentId), getPublishedTaskQuiz(classId, assignmentId)]);
+  const version = await getLessonVersion(lessonNumber, pin?.lessonNumber === lessonNumber ? pin.version : undefined);
+  // A quiz published for this task (#177) replaces the lesson's own, with its answer keys and matches.
+  const published = quiz?.lesson?.number === lessonNumber ? lessonFromTaskQuiz(quiz) : null;
+  return version && published ? { ...version, lesson: published } : version;
 }
 
 export type TaskLessonOption = LessonRow & { version: number; learningObjective: string; questionCount: number };
