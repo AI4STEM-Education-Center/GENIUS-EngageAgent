@@ -68,7 +68,7 @@ export async function guardWorkspaceRequest(request: Request, context?: { classI
     if (user.role !== "student" && !embeddedGuest) return deny("Student or teacher account required.", 403);
     const ownRecords = ["/api/student-answers", "/api/content-rating", "/api/review-questions", "/api/activity-status", "/api/survey-responses", "/api/quiz-report"].includes(url.pathname);
     if (ownRecords && fields.studentId !== user.geniusId) return deny("You can only access your own responses.", 403);
-    if (!ownRecords && (write || !["/api/quiz-status", "/api/content-publish", "/api/surveys", "/api/question-board"].includes(url.pathname))) return deny("Teacher access required.", 403);
+    if (!ownRecords && (write || !["/api/quiz-status", "/api/content-publish", "/api/surveys", "/api/question-board", "/api/task-quiz/student"].includes(url.pathname))) return deny("Teacher access required.", 403);
     if (write && url.pathname === "/api/quiz-report") return deny("Teacher access required.", 403);
     if (write && url.pathname === "/api/survey-responses" && fields.studentName !== undefined && fields.studentName !== user.name) return deny("Invalid student identity.", 403);
     if (write && url.pathname === "/api/student-answers") {

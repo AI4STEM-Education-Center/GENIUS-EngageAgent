@@ -22,6 +22,9 @@ import ShareVideoMaterial from "./ShareVideoMaterial";
 import VideoMaterialEditor from "./VideoMaterialEditor";
 import { focusKind, lessonCoreIdeas, lessonFocusMisconceptions, resolveStrategyFocus } from "@/lib/strategy-focus";
 import { listLessonOptions, loadTaskLesson, useTaskLesson, type LessonOption } from "@/lib/lesson-client";
+import TaskQuizPanel from "./assessment/TaskQuizPanel";
+import TaskQuizPublishBar from "./assessment/TaskQuizPublishBar";
+import { useTaskQuiz } from "./assessment/useTaskQuiz";
 import { refreshGalleryCopyMedia } from "@/lib/material-gallery-client";
 import { sameMediaResource } from "@/lib/stable-media-urls";
 import { STRATEGIES as SLIDE_STRATEGIES, type SlideStrategy } from "@/lib/slides/model";
@@ -1242,6 +1245,19 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     }
   };
 
+  // Step 1's quiz (#177). Tasks published the old way, and the view with no task, keep the older screen below.
+  const taskQuiz = useTaskQuiz({
+    classId, assignmentId, suggestedLesson: chosenLesson, active: currentStep === 1,
+    onLessonKnown: setSelectedLesson,
+    onLessonPicked: (lessonNumber) => void selectLesson(lessonNumber),
+    onPublished: (lessonNumber) => {
+      setQuizStatus("published");
+      // From here this task reads its published quiz, so steps 2 to 4 need that copy.
+      loadTaskLesson({ classId, assignmentId }, lessonNumber).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "The quiz could not be loaded."));
+    },
+  });
+  const useOlderQuizStep = !hasAssignmentContext || taskQuiz.legacy;
+
   const loadStudentAnswers = async (options?: { silent?: boolean }) => {
     if (!classId || !assignmentId || !selectedLesson) return;
     const silent = options?.silent ?? false;
@@ -1806,7 +1822,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const profileSummary = describeClassProfile(classProfile.profile);
   const classProfileCard = { name: "Class profile", title: `${profileSummary.location} · ${profileSummary.classType}`, detail: profileSummary.supports, edit: "Edit" };
   const stepStatus = [
-    quizStatus === "published" ? "Published" : quizStatus === "closed" ? "Closed" : selectedLesson ? "In progress" : "Not started",
+    quizStatus === "closed" ? "Closed" : !useOlderQuizStep && taskQuiz.view ? taskQuiz.view.stepStatus : quizStatus === "published" ? "Published" : selectedLesson ? "In progress" : "Not started",
     selectedStrategies.length ? getEngagementStrategyLabel(selectedStrategies[0])
       : studentAnswers.length ? `${studentAnswers.length} response${studentAnswers.length === 1 ? "" : "s"} in` : "Waiting for responses",
     publishedContentIds.size || publishedSlideCount || galleryPublished ? "Sent to students" : content.length ? "Draft ready" : "Not started",
@@ -1861,11 +1877,14 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                     }`}
                   >
                     {tab.label}
+                    {tab.id === "quiz" && !useOlderQuizStep && taskQuiz.view?.tabStatus && <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${taskQuiz.view.tabStatus === "Ready" ? "bg-ok-light text-ok" : "bg-warn-light text-warn"}`}>{taskQuiz.view.tabStatus}</span>}
                   </button>
                 ))}
               </div>
 
-              {assessmentTab === "quiz" && (
+              {assessmentTab === "quiz" && !useOlderQuizStep && <TaskQuizPanel quiz={taskQuiz} disabled={generationBusy || savingLesson} />}
+
+              {assessmentTab === "quiz" && useOlderQuizStep && (
                 <>
                 {selectedLessonData && (
                   <div className="rounded-2xl border border-[#BA0C2F]/15 bg-[#BA0C2F]/5 p-5">
@@ -1881,7 +1900,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                   <p className="text-xs font-semibold uppercase text-slate-400">Choose a lesson</p>
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                     {lessons.map((lesson) => (
-                      <button key={lesson.lessonNumber} type="button" onClick={() => selectLesson(lesson.lessonNumber)} disabled={generationBusy || savingLesson}
+                      <button key={lesson.lessonNumber} type="button" onClick={() => void selectLesson(lesson.lessonNumber).then(taskQuiz.reload)} disabled={generationBusy || savingLesson}
                         className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${chosenLesson === lesson.lessonNumber ? "border-[#BA0C2F] bg-[#BA0C2F]/5 ring-2 ring-[#BA0C2F]" : "border-slate-200 hover:border-slate-300"}`}>
                         <p className="font-semibold text-slate-800">{lesson.title}</p>
                         <p className="mt-1 text-xs text-slate-500">
@@ -1896,7 +1915,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
 
 
               {/* Quiz preview */}
-              {selectedLesson && quizItems.length > 0 && assessmentTab === "quiz" && (
+              {useOlderQuizStep && selectedLesson && quizItems.length > 0 && assessmentTab === "quiz" && (
                 <div className="grid gap-4">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-semibold uppercase text-slate-400">Quiz preview ({quizItems.filter((q) => q.type === "multiple_choice").length} questions + confidence checks)</p>
@@ -1965,6 +1984,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                   <SurveyBuilderView classId={classId} assignmentId={assignmentId} />
                 </div>
               )}
+
+              {!useOlderQuizStep && <TaskQuizPublishBar quiz={taskQuiz} onGoToStep2={() => setCurrentStep(2)} />}
 
               <div className="flex items-center justify-between">
                 <button type="button" disabled className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-300">Previous step</button>

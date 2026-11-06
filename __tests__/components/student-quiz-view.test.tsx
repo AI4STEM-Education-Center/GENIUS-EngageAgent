@@ -29,6 +29,7 @@ beforeEach(() => {
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     if (init?.method === "POST") return reply({});
     if (url.startsWith("/api/quiz-status")) return reply({ quizStatus: { lesson_number: 8, status: "published" } });
+    if (url.startsWith("/api/task-quiz/student")) return reply({ items: null });
     if (url.startsWith("/api/lessons/")) return reply(lesson);
     if (url.startsWith("/api/student-answers")) return reply({ answer: savedAnswers ? { answers: savedAnswers } : null });
     if (url.startsWith("/api/surveys?")) return reply({ surveys: [survey] });
