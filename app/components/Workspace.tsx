@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRight, LayoutGrid, Plus } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, LayoutGrid, Plus } from "lucide-react";
 import type { UserContext } from "@/lib/auth";
 import type { WorkspaceAssignment, WorkspaceMember } from "@/lib/workspace";
 import { useAuth } from "./AuthContext";
@@ -103,7 +103,7 @@ export default function Workspace() {
   return <div className="min-h-screen bg-canvas text-ink">
     <AppHeader userName={auth.user.name} homeHref={listHome} canSignOut
       context={data?.classroom ? [{ label: data.classroom.name, href: classPath(data.classroom.id) }] : []}
-      actions={teacher ? [{ label: "Gallery", icon: <LayoutGrid size={15} />, href: galleryHref, active: galleryView }]
+      actions={teacher ? [{ label: "Lessons", icon: <BookOpen size={15} />, href: "/teacher/lessons" }, { label: "Gallery", icon: <LayoutGrid size={15} />, href: galleryHref, active: galleryView }]
         : studentNavActions({ homeHref: home, classHref: classId ? classPath(classId) : undefined }, classId ? "tasks" : "classes")} />
     {error && <div role="alert" className="mx-auto max-w-7xl px-5 py-3 text-sm text-red-800">{error} <button onClick={() => setRefresh(n => n + 1)} className="underline">Retry</button></div>}
     {loading || (taskUser && classId && assignmentId && !taskContextMatches) ? <p role="status" className="mx-auto max-w-7xl px-5 py-8 text-sm">Loading workspace...</p> : !(classId && assignmentId) &&

@@ -21,8 +21,8 @@ export const OPTION_LETTERS = ["A", "B", "C", "D"] as const;
 export type OptionLetter = (typeof OPTION_LETTERS)[number];
 
 export const MIN_QUIZ_ITEMS = 4;
-const MAX_QUIZ_ITEMS = 50;
-const MAX_CORE_IDEAS = 30;
+export const MAX_QUIZ_ITEMS = 50;
+export const MAX_CORE_IDEAS = 30;
 
 /** The paired question students answer after each quiz item. Teachers don't edit it. */
 export const CONFIDENCE_STEM = "How confident are you about your answer?";
