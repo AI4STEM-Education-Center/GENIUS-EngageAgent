@@ -75,6 +75,8 @@ it.each(["teacher", "student"] as const)("keeps %s lesson steps usable while rem
   expect(screen.queryByRole("link", { name: "Gallery" })).toBeNull();
   expect(screen.queryByRole("link", { name: "My classes" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Sign out of EngageAgent" })).toBeNull();
+  // Ask EngageAgent floats over the page, so it needs no header, and only teachers get it (#198).
+  expect(screen.queryAllByRole("button", { name: "Ask EngageAgent" })).toHaveLength(role === "teacher" ? 1 : 0);
 
   const next = steps.getByRole("button", { name: role === "teacher" ? /Strategy/ : /Explore and ask/ });
   await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false));
@@ -108,6 +110,7 @@ it.each(["teacher", "student"] as const)("preserves the %s app header and lesson
   expect(header.getByRole(role === "teacher" ? "button" : "link", { name: role === "teacher" ? "Gallery" : "My classes" })).toBeTruthy();
   const steps = within(screen.getByRole("navigation", { name: role === "teacher" ? "Teacher steps" : "Student steps" }));
   expect(steps.getAllByRole("button")).toHaveLength(4);
+  expect(screen.queryAllByRole("button", { name: "Ask EngageAgent" })).toHaveLength(role === "teacher" ? 1 : 0);
   expect(fetchMock.mock.calls.some(([url]) => url === "/api/auth/me")).toBe(true);
   expect(fetchMock.mock.calls.some(([url]) => url === "/api/auth/verify")).toBe(false);
 });

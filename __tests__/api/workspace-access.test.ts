@@ -97,6 +97,11 @@ describe("native class authorization", () => {
     expect(await guardWorkspaceRequest(request("quiz-report", "GET", { studentId: "s9" }))).toBeNull();
     expect(await guardWorkspaceRequest(request("quiz-report-release", "POST", { reason: "taught" }))).toBeNull();
   });
+  it("keeps Ask EngageAgent teacher-only (#198)", async () => {
+    expect(await guardWorkspaceRequest(request("ask-engageagent", "POST"))).toBeNull();
+    vi.mocked(sessionUser).mockResolvedValue(student);
+    expect((await guardWorkspaceRequest(request("ask-engageagent", "POST")))?.status).toBe(403);
+  });
   it("keeps the class profile teacher-only (#173)", async () => {
     expect(await guardWorkspaceRequest(request("class-profile"))).toBeNull();
     expect(await guardWorkspaceRequest(request("class-profile", "POST", { profile: {} }))).toBeNull();
