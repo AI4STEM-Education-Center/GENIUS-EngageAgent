@@ -328,9 +328,9 @@ const parsePersistedContentItem = (
 };
 
 const stepLabels = [
-  "Assessment",
-  "Strategy",
-  "Engagement materials",
+  "Pre-knowledge assessment",
+  "Strategy recommendations",
+  "Material Generation",
   "Questions & discussion",
 ];
 
@@ -1824,7 +1824,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 1</p>
-                <h2 className="text-2xl font-semibold text-slate-900">Assessment</h2>
+                <h2 className="text-2xl font-semibold text-slate-900">Pre-knowledge assessment</h2>
                 <p className="mt-1 text-sm text-slate-500">Give students a quiz, a survey, or both for this learning task.</p>
               </div>
 
@@ -1973,7 +1973,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div className="flex flex-col gap-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 3</p>
-                <h2 className="text-2xl font-semibold text-slate-900">Engagement materials</h2>
+                <h2 className="text-2xl font-semibold text-slate-900">Material Generation</h2>
                 <p className="text-sm text-slate-600">Create teaching materials, then review and edit them before sending to your class.</p>
               </div>
 

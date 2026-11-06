@@ -306,7 +306,7 @@ export default function StrategyStep(props: Props) {
   return (
     <div>
       <p className={eyebrow}>Step 2</p>
-      <h1 className="mt-1 text-[28px] font-bold tracking-tight">Engagement strategy</h1>
+      <h1 className="mt-1 text-[28px] font-bold tracking-tight">Strategy recommendations</h1>
 
       {answers.length === 0 && !props.answersError && (
         <div role="status" className="mt-4 flex items-center gap-2.5 rounded-lg border border-info/20 bg-info-light px-4 py-3 text-sm text-info">
