@@ -2,12 +2,12 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { BookOpen, LayoutGrid } from "lucide-react";
 import type { LessonProblem } from "@/lib/lessons";
 import { useAuth } from "../AuthContext";
 import GeniusSignIn from "../GeniusSignIn";
 import AppFrame from "../layout/AppFrame";
 import AppHeader from "../layout/AppHeader";
+import { teacherNavActions } from "../layout/teacherNav";
 
 export const LESSONS_HOME = "/teacher/lessons";
 export const editHref = (lessonNumber: number) => `${LESSONS_HOME}/${lessonNumber}/edit`;
@@ -85,10 +85,7 @@ export function LessonsFrame({ children, beforeNavigate }: { children: ReactNode
   if (auth.isGeniusEmbed) return <GeniusSignIn />;
   return (
     <AppFrame header={<AppHeader userName={auth.user.name} homeHref="/teacher/classes" canSignOut beforeNavigate={beforeNavigate}
-      actions={[
-        { label: "Lessons", icon: <BookOpen size={15} />, href: LESSONS_HOME, active: true },
-        { label: "Gallery", icon: <LayoutGrid size={15} />, href: "/teacher/classes?view=gallery" },
-      ]} />}>
+      actions={teacherNavActions({ current: "lessons", dashboardComingSoon: true })} />}>
       {children}
     </AppFrame>
   );

@@ -13,6 +13,8 @@ export type HeaderAction = {
   active?: boolean;
   /** Shown but disabled until the feature is built (e.g. Class profile, #173). */
   comingSoon?: boolean;
+  /** Shown but disabled for now, with this reason as its tooltip (e.g. "Choose a class first"). */
+  disabledReason?: string;
 };
 
 /** How a task view's header links back into the app. Omitted inside GENIUS, which has its own navigation. */
@@ -91,12 +93,13 @@ export default function AppHeader({ userName, homeHref, context = [], actions = 
         <nav aria-label="EngageAgent" className="ml-auto flex flex-wrap items-center gap-1">
           {actions.map(action => {
             const content = <>{action.icon}{action.label}</>;
-            if (action.href && !action.comingSoon) {
+            const disabled = action.comingSoon || Boolean(action.disabledReason);
+            if (action.href && !disabled) {
               return <Link key={action.label} href={action.href} onClick={event => navigate(event, action.href!)} aria-current={action.active ? "page" : undefined} className={actionClass(action.active)}>{content}</Link>;
             }
             return (
-              <button key={action.label} type="button" onClick={action.onClick} disabled={action.comingSoon}
-                title={action.comingSoon ? "Coming soon" : undefined} aria-current={action.active ? "page" : undefined}
+              <button key={action.label} type="button" onClick={action.onClick} disabled={disabled}
+                title={action.comingSoon ? "Coming soon" : action.disabledReason} aria-current={action.active ? "page" : undefined}
                 className={actionClass(action.active)}>{content}</button>
             );
           })}

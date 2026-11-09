@@ -3,13 +3,14 @@
 import { scopedTaskFetch } from "@/lib/client-auth";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BarChart3, BookOpen, LayoutGrid, MessageCircle, Users } from "lucide-react";
+import { LayoutGrid, MessageCircle, Users } from "lucide-react";
 import SurveyBuilderView from "./SurveyBuilderView";
 import TeacherDashboardView from "./TeacherDashboardView";
 import DiscussionStep from "./discussion/DiscussionStep";
 import AppFrame from "./layout/AppFrame";
 import AppHeader, { taskContext, type TaskShell } from "./layout/AppHeader";
 import StepTabs, { type StepTab } from "./layout/StepTabs";
+import { teacherNavActions } from "./layout/teacherNav";
 import ActivityContextSuggestion from "./ActivityContextSuggestion";
 import MaterialActivityView from "./MaterialActivityView";
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "./SlidesWorkspace";
@@ -1822,10 +1823,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
       header={<AppHeader userName={user.name} homeHref={shell?.homeHref} context={taskContext(user, shell)} canSignOut={shell?.canSignOut}
         beforeNavigate={showGallery ? leaveGallery : undefined}
         actions={[
-          { label: "Lessons", icon: <BookOpen size={15} />, href: "/teacher/lessons" },
+          // The top menu (#208), with this task's gallery opening in place; then the task's own tools.
+          ...teacherNavActions({ classId, gallery: { onClick: openGallery, active: showGallery }, dashboardComingSoon: true }),
           { label: "Class profile", icon: <Users size={15} />, onClick: classProfile.openEditor, comingSoon: !hasAssignmentContext },
-          { label: "Dashboard", icon: <BarChart3 size={15} />, onClick: () => leaveGallery(() => { setShowGallery(false); setShowDashboard(true); }), active: showDashboard },
-          { label: "Gallery", icon: <LayoutGrid size={15} />, onClick: openGallery, active: showGallery },
           { label: "Ask EngageAgent", icon: <MessageCircle size={15} />, comingSoon: true },
         ]} />}
       tabs={!showGallery && <>
