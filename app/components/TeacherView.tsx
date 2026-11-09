@@ -12,6 +12,7 @@ import AppHeader, { taskContext, type TaskShell } from "./layout/AppHeader";
 import AskEngageAgent from "./AskEngageAgent";
 import { ASK_STEP_PAGES } from "@/lib/ask-engageagent";
 import StepTabs, { type StepTab } from "./layout/StepTabs";
+import { activityProgress, type ActivityProgress } from "@/lib/activity-progress";
 import ActivityContextSuggestion from "./ActivityContextSuggestion";
 import MaterialActivityView from "./MaterialActivityView";
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "./SlidesWorkspace";
@@ -435,6 +436,11 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const inGenius = useInGenius();
   const { isGeniusEmbed } = useAuth();
   const [discussionStatus, setDiscussionStatus] = useState("Class results");
+  // Step 4 is done once reports are released (#176, v8.4 prototype).
+  // Null until Step 4 has loaded; then it wins over the saved progress (e.g. after Unpublish).
+  const [discussionDone, setDiscussionDone] = useState<boolean | null>(null);
+  // The activity's saved progress, for what this page only learns inside a step (#176).
+  const [savedProgress, setSavedProgress] = useState<ActivityProgress | null>(null);
 
   // Strategy
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
@@ -662,6 +668,15 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!classId || !assignmentId) return;
+    const query = new URLSearchParams({ classId, assignmentId });
+    scopedTaskFetch({ classId, assignmentId }, `/api/activity-progress?${query}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data?.progress) setSavedProgress(data.progress); })
+      .catch(() => {});
+  }, [classId, assignmentId]);
 
   // Load quiz status on mount
   useEffect(() => {
@@ -1798,7 +1813,17 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     publishedContentIds.size || publishedSlideCount || galleryPublished ? "Sent to students" : content.length ? "Draft ready" : "Not started",
     discussionStatus,
   ];
-  const stepDone = [quizStatus !== "draft", selectedStrategies.length > 0, publishedContentIds.size > 0 || publishedSlideCount > 0 || galleryPublished, false];
+  const materialsSent = publishedContentIds.size > 0 || publishedSlideCount > 0 || galleryPublished;
+  const progress = activityProgress({
+    lessonChosen: Boolean(selectedLesson),
+    assessmentPublished: quizStatus !== "draft" || savedProgress?.assessment === "done",
+    strategyChosen: selectedStrategies.length > 0 || savedProgress?.strategy === "done",
+    materialsDrafted: content.length > 0,
+    materialsSent: materialsSent || savedProgress?.materials === "done",
+    boardPublished: false,
+    reportsReleased: discussionDone ?? savedProgress?.discussion === "done",
+  });
+  const stepDone = [progress.assessment, progress.strategy, progress.materials, progress.discussion].map((state) => state === "done");
   const stepTabs: StepTab<string>[] = stepLabels.map((title, index) => ({
     id: String(index + 1), title, status: stepStatus[index], marker: index + 1, done: stepDone[index],
   }));
@@ -2245,7 +2270,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           </div>
 
           {visibleStep === 4 && classId && assignmentId && (
-            <DiscussionStep classId={classId} assignmentId={assignmentId} materialsSent={publishedContentIds.size > 0 || publishedSlideCount > 0} onStatusChange={setDiscussionStatus} />
+            <DiscussionStep classId={classId} assignmentId={assignmentId} materialsSent={publishedContentIds.size > 0 || publishedSlideCount > 0} onStatusChange={setDiscussionStatus} onDoneChange={setDiscussionDone} />
           )}
           {showDashboard && <TeacherDashboardView user={user} embedded />}
 
