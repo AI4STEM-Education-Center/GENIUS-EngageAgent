@@ -225,7 +225,7 @@ export default function DiscussionStep({ classId, assignmentId, materialsSent, o
           <button key={id} ref={(el) => { tabRefs.current[id] = el; }} type="button" role="tab" id={`step4-tab-${id}`}
             aria-selected={tab === id} aria-controls={`step4-panel-${id}`} tabIndex={tab === id ? 0 : -1} onClick={() => setTab(id)}
             className={`-mb-px inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold ${tab === id ? "border-brand text-ink" : "border-transparent text-mute hover:text-ink"}`}>
-            <Icon size={16} aria-hidden />{label}
+            <Icon size={16} aria-hidden />{label}{id === "questions" && total > 0 && ` (${total})`}
           </button>
         ))}
       </div>

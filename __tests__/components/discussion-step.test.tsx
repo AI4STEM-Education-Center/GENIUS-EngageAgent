@@ -159,7 +159,7 @@ it("says there are no reports before anyone submits", async () => {
 
 it("splits Step 4 into two tabs, with reports still loading behind the first", async () => {
   view();
-  const questionsTab = screen.getByRole("tab", { name: "Questions & board" });
+  const questionsTab = screen.getByRole("tab", { name: /^Questions & board/ });
   const reportsTab = screen.getByRole("tab", { name: "Feedback reports" });
   expect(screen.getAllByRole("tab")).toHaveLength(2);
   expect(screen.getByRole("tablist", { name: "Step 4 sections" })).toBeVisible();
@@ -168,10 +168,12 @@ it("splits Step 4 into two tabs, with reports still loading behind the first", a
   expect(reportsTab).toHaveAttribute("tabindex", "-1");
 
   // First tab: questions and the board; reports are hidden but already loaded.
-  expect(screen.getByRole("tabpanel", { name: "Questions & board" })).toContainElement(questionsCard());
+  expect(screen.getByRole("tabpanel", { name: /^Questions & board/ })).toContainElement(questionsCard());
   expect(screen.getByRole("region", { name: "Class Question Board" })).toBeVisible();
   expect(screen.queryByRole("region", { name: "Feedback reports" })).toBeNull();
   await waitFor(() => expect(calls("/api/quiz-report?")).toHaveLength(1));
+  // The questions tab carries the question count once they load.
+  await waitFor(() => expect(questionsTab).toHaveAccessibleName("Questions & board (4)"));
 
   // Arrow keys move focus and selection, wrapping at the ends.
   fireEvent.keyDown(questionsTab, { key: "ArrowRight" });
