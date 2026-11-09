@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Flag, Lock, Pencil, Sparkles } from "lucide-react";
+import { Check, FileText, Flag, Lock, MessageSquare, Pencil, Sparkles } from "lucide-react";
 import { scopedTaskFetch } from "@/lib/client-auth";
 import type { BoardQuestion, QuestionBoard } from "@/lib/class-questions";
 import type { TaskQuestions } from "@/lib/class-questions-server";
@@ -26,6 +26,11 @@ const ghost = "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-
 const TAG_STYLE: Record<string, string> = {
   Investigable: "bg-ok-light text-ok", "Explanation-seeking": "bg-info-light text-info", Clarifying: "bg-warn-light text-warn", "Off-topic": "bg-line-2 text-mute",
 };
+const TABS = [
+  { id: "questions", label: "Questions & board", Icon: MessageSquare },
+  { id: "reports", label: "Feedback reports", Icon: FileText },
+] as const;
+type Tab = (typeof TABS)[number]["id"];
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const errorText = async (res: Response, fallback: string) => ((await res.json().catch(() => ({}))) as { error?: string }).error ?? fallback;
 
@@ -33,9 +38,11 @@ function Empty({ children, locked }: { children: React.ReactNode; locked?: boole
   return <div className="mt-4 flex items-center justify-center gap-2 rounded-lg border border-dashed border-line px-4 py-8 text-sm text-mute">{locked && <Lock size={15} />}{children}</div>;
 }
 
-// Step 4 in the v8.3 layout (#182): the students' questions sorted for
-// discussion, the Class Question Board the teacher publishes from them, and
-// the release of quiz feedback reports.
+// Step 4 (#182), in two tabs per the v8.4 layout: "Questions & board" holds
+// the students' questions sorted for discussion and the Class Question Board
+// the teacher publishes from them; "Feedback reports" holds the release of
+// quiz feedback reports. Both panels stay mounted (hidden when not selected),
+// so loading and polling carry on whichever tab is shown.
 export default function DiscussionStep({ classId, assignmentId, materialsSent, onStatusChange }: Props) {
   const scope = { classId, assignmentId };
   const query = new URLSearchParams(scope).toString();
@@ -47,6 +54,8 @@ export default function DiscussionStep({ classId, assignmentId, materialsSent, o
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<string | null>(null);
   const preselected = useRef(false);
+  const [tab, setTab] = useState<Tab>("questions");
+  const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
 
   // 2 · Board
   const [board, setBoard] = useState<QuestionBoard | null>(null);
@@ -190,143 +199,164 @@ export default function DiscussionStep({ classId, assignmentId, materialsSent, o
     }
   };
 
+  // Arrow keys move between tabs (and select them), Home/End jump to the ends.
+  const onTabKey = (event: React.KeyboardEvent) => {
+    const index = TABS.findIndex((t) => t.id === tab);
+    const next = event.key === "ArrowRight" ? (index + 1) % TABS.length
+      : event.key === "ArrowLeft" ? (index - 1 + TABS.length) % TABS.length
+      : event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1 : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    setTab(TABS[next].id);
+    tabRefs.current[TABS[next].id]?.focus();
+  };
+
   const suggested = all.filter((q) => q.suggested).length;
   const students = reports?.students ?? [];
   const lesson = reports?.lessonNumber;
 
   return (
     <div>
-      <nav aria-label="Step 4 sections" className="mb-4 flex flex-wrap gap-2 text-sm">
-        <a href="#questions" className={pill}>1 · Student questions{total ? ` (${total})` : ""}</a>
-        <a href="#board" className={pill}>2 · Class Question Board</a>
-        <a href="#reports" className={pill}>3 · Feedback reports</a>
-      </nav>
       <p className="text-xs font-bold uppercase tracking-[0.08em] text-faint">Step 4</p>
       <h1 className="mt-1 text-[28px] font-bold tracking-tight">Questions &amp; discussion</h1>
 
-      <section id="questions" aria-labelledby="questions-title" className={`${card} mt-4`}>
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 id="questions-title" className="text-xl font-bold">Student questions</h2>
-          {questions && total > 0 && <span className="ml-auto text-sm text-mute">{plural(total, "question")} from {plural(questions.students, "student")}</span>}
-        </div>
-        {!materialsSent ? <Empty locked>Available after materials are sent in Step 3</Empty>
-          : questionsError ? (
-            <div role="alert" className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-bad/20 bg-bad-light px-4 py-3 text-sm text-bad">
-              {questionsError}<button type="button" onClick={() => void loadQuestions()} className="ml-auto font-semibold underline">Try again</button>
-            </div>)
-          : !questions ? <p role="status" className="mt-4 text-sm text-mute">Loading and sorting questions…</p>
-          : total === 0 ? <Empty>No questions yet</Empty>
-          : <>
-            {questions.analysisError
-              ? <div role="status" className="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-warn-light px-4 py-3 text-sm text-warn">
-                  {questions.analysisError} You can still choose questions for the board.
-                  <button type="button" onClick={() => void loadQuestions()} className="ml-auto font-semibold underline">Try again</button>
-                </div>
-              : suggested > 0 && <div className="mt-4 flex items-center gap-2 rounded-lg bg-ai-light px-4 py-3 text-sm text-ai"><Sparkles size={16} /><b>{suggested} suggested for discussion</b></div>}
-            {questions.groups.map((group) => {
-              const ids = group.questions.map((q) => q.id);
-              return (
-                <div key={group.title} role="group" aria-label={group.title} className="mt-5">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold">{group.title}</h3><span className={pill}>{group.questions.length}</span>
-                    <button type="button" onClick={() => toggle(ids, !ids.every((id) => selected.has(id)))} className={`ml-auto ${ghost}`}>
-                      {ids.every((id) => selected.has(id)) ? "Clear all" : "Select all"}
-                    </button>
+      <div role="tablist" aria-label="Step 4 sections" onKeyDown={onTabKey} className="mt-4 flex border-b border-line">
+        {TABS.map(({ id, label, Icon }) => (
+          <button key={id} ref={(el) => { tabRefs.current[id] = el; }} type="button" role="tab" id={`step4-tab-${id}`}
+            aria-selected={tab === id} aria-controls={`step4-panel-${id}`} tabIndex={tab === id ? 0 : -1} onClick={() => setTab(id)}
+            className={`-mb-px inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold ${tab === id ? "border-brand text-ink" : "border-transparent text-mute hover:text-ink"}`}>
+            <Icon size={16} aria-hidden />{label}
+          </button>
+        ))}
+      </div>
+
+      <div role="tabpanel" id="step4-panel-questions" aria-labelledby="step4-tab-questions" hidden={tab !== "questions"}>
+        <section id="questions" aria-labelledby="questions-title" className={`${card} mt-4`}>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 id="questions-title" className="text-xl font-bold">Student questions</h2>
+            {questions && total > 0 && <span className="ml-auto text-sm text-mute">{plural(total, "question")} from {plural(questions.students, "student")}</span>}
+          </div>
+          {!materialsSent ? <Empty locked>Available after materials are sent in Step 3</Empty>
+            : questionsError ? (
+              <div role="alert" className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-bad/20 bg-bad-light px-4 py-3 text-sm text-bad">
+                {questionsError}<button type="button" onClick={() => void loadQuestions()} className="ml-auto font-semibold underline">Try again</button>
+              </div>)
+            : !questions ? <p role="status" className="mt-4 text-sm text-mute">Loading and sorting questions…</p>
+            : total === 0 ? <Empty>No questions yet</Empty>
+            : <>
+              {questions.analysisError
+                ? <div role="status" className="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-warn-light px-4 py-3 text-sm text-warn">
+                    {questions.analysisError} You can still choose questions for the board.
+                    <button type="button" onClick={() => void loadQuestions()} className="ml-auto font-semibold underline">Try again</button>
                   </div>
-                  <ul className="mt-2 grid gap-2">
-                    {group.questions.map((q) => (
-                      <li key={q.id} className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 ${selected.has(q.id) ? "border-brand bg-brand-light/50" : "border-line-2"}`}>
-                        <input type="checkbox" aria-label={textOf(q.id)} checked={selected.has(q.id)} onChange={(event) => toggle([q.id], event.target.checked)} className="mt-1 h-4 w-4 accent-brand" />
-                        <div className="min-w-0 flex-1">
-                          {editing === q.id
-                            ? <input type="text" aria-label="Board wording" autoFocus defaultValue={textOf(q.id)} maxLength={300}
-                                onBlur={(event) => { const text = event.target.value.trim(); setEdits((prev) => { const next = { ...prev }; if (text && text !== q.text) next[q.id] = text; else delete next[q.id]; return next; }); setEditing(null); }}
-                                onKeyDown={(event) => { if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur(); }}
-                                className="w-full rounded-md border border-line px-2 py-1 text-[14.5px] focus:border-brand focus:outline-none" />
-                            : <p className="text-[14.5px]">{textOf(q.id)}{edits[q.id] && <span className={`ml-2 ${pill}`}>Edited for the board</span>}</p>}
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-mute">
-                            <span>{q.studentName}</span>
-                            {q.tag && <span className={`rounded-full px-2 py-0.5 font-semibold ${TAG_STYLE[q.tag]}`}>{q.tag}</span>}
-                            {q.suggested && <span className="inline-flex items-center gap-1 rounded-full bg-ai-light px-2 py-0.5 font-semibold text-ai"><Sparkles size={11} />Suggested</span>}
+                : suggested > 0 && <div className="mt-4 flex items-center gap-2 rounded-lg bg-ai-light px-4 py-3 text-sm text-ai"><Sparkles size={16} /><b>{suggested} suggested for discussion</b></div>}
+              {questions.groups.map((group) => {
+                const ids = group.questions.map((q) => q.id);
+                return (
+                  <div key={group.title} role="group" aria-label={group.title} className="mt-5">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold">{group.title}</h3><span className={pill}>{group.questions.length}</span>
+                      <button type="button" onClick={() => toggle(ids, !ids.every((id) => selected.has(id)))} className={`ml-auto ${ghost}`}>
+                        {ids.every((id) => selected.has(id)) ? "Clear all" : "Select all"}
+                      </button>
+                    </div>
+                    <ul className="mt-2 grid gap-2">
+                      {group.questions.map((q) => (
+                        <li key={q.id} className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 ${selected.has(q.id) ? "border-brand bg-brand-light/50" : "border-line-2"}`}>
+                          <input type="checkbox" aria-label={textOf(q.id)} checked={selected.has(q.id)} onChange={(event) => toggle([q.id], event.target.checked)} className="mt-1 h-4 w-4 accent-brand" />
+                          <div className="min-w-0 flex-1">
+                            {editing === q.id
+                              ? <input type="text" aria-label="Board wording" autoFocus defaultValue={textOf(q.id)} maxLength={300}
+                                  onBlur={(event) => { const text = event.target.value.trim(); setEdits((prev) => { const next = { ...prev }; if (text && text !== q.text) next[q.id] = text; else delete next[q.id]; return next; }); setEditing(null); }}
+                                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur(); }}
+                                  className="w-full rounded-md border border-line px-2 py-1 text-[14.5px] focus:border-brand focus:outline-none" />
+                              : <p className="text-[14.5px]">{textOf(q.id)}{edits[q.id] && <span className={`ml-2 ${pill}`}>Edited for the board</span>}</p>}
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-mute">
+                              <span>{q.studentName}</span>
+                              {q.tag && <span className={`rounded-full px-2 py-0.5 font-semibold ${TAG_STYLE[q.tag]}`}>{q.tag}</span>}
+                              {q.suggested && <span className="inline-flex items-center gap-1 rounded-full bg-ai-light px-2 py-0.5 font-semibold text-ai"><Sparkles size={11} />Suggested</span>}
+                            </div>
                           </div>
-                        </div>
-                        <button type="button" onClick={() => setEditing(q.id)} className={ghost}><Pencil size={12} />Edit wording</button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
-            <div className="mt-5 flex flex-wrap items-center gap-2 text-sm">
-              <b>{selected.size}</b> selected<span className="text-xs text-mute">· Shown without names</span>
-              <button type="button" onClick={() => void publish()} disabled={chosen.length === 0 || boardBusy} className={`ml-auto ${primary}`}>
-                {boardBusy ? "Saving…" : board ? `Update board (${chosen.length})` : `Publish ${chosen.length} to Class Question Board`}
-              </button>
-            </div>
-          </>}
-      </section>
-
-      <section id="board" aria-labelledby="board-title" className={`${card} mt-6`}>
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 id="board-title" className="text-xl font-bold">Class Question Board</h2>
-          {board && <>
-            <span className="ml-auto rounded-full bg-ok-light px-2.5 py-0.5 text-xs font-semibold text-ok">Live for students</span>
-            <button type="button" onClick={() => void unpublish()} disabled={boardBusy} className={ghost}>Unpublish</button>
-          </>}
-        </div>
-        {boardError && <p role="alert" className="mt-3 text-sm text-bad">{boardError}</p>}
-        {!board ? <Empty>Not published yet</Empty> : (
-          <ul aria-label="Questions on the board" className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {board.questions.map((q) => (
-              <li key={q.id} className="rounded-lg border border-warn/20 bg-warn-light/60 p-3.5 text-sm">
-                {q.theme && <p className="text-xs font-semibold text-warn">{q.theme}</p>}
-                <p className="mt-1 leading-6">{q.text}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section id="reports" aria-labelledby="reports-title" className={`${card} mt-6`}>
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 id="reports-title" className="text-xl font-bold">Feedback reports</h2>
-          {reports?.release ? <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-ok-light px-2.5 py-0.5 text-xs font-semibold text-ok"><Check size={13} />Released</span>
-            : students.length > 0 && <>
-              <span className="ml-auto rounded-full bg-ok-light px-2.5 py-0.5 text-xs font-semibold text-ok">{plural(students.length, "report")} ready</span>
-              <span className={`inline-flex items-center gap-1 ${pill}`}><Lock size={12} />Held until Lesson {lesson} is taught</span>
+                          <button type="button" onClick={() => setEditing(q.id)} className={ghost}><Pencil size={12} />Edit wording</button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+              <div className="mt-5 flex flex-wrap items-center gap-2 text-sm">
+                <b>{selected.size}</b> selected<span className="text-xs text-mute">· Shown without names</span>
+                <button type="button" onClick={() => void publish()} disabled={chosen.length === 0 || boardBusy} className={`ml-auto ${primary}`}>
+                  {boardBusy ? "Saving…" : board ? `Update board (${chosen.length})` : `Publish ${chosen.length} to Class Question Board`}
+                </button>
+              </div>
             </>}
-        </div>
-        {reportsError && <p role="alert" className="mt-3 text-sm text-bad">{reportsError}</p>}
-        {students.length === 0 ? <Empty>No reports yet</Empty> : (
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            {reports?.release
-              ? <p role="status" className="flex items-center gap-1.5 text-sm text-ok"><Check size={15} />Released to {plural(students.length, "student")}</p>
-              : <>
-                <button type="button" onClick={() => void release("taught")} disabled={releasing} className={primary}><Flag size={15} />Mark Lesson {lesson} as taught</button>
-                <button type="button" onClick={() => void release("early")} disabled={releasing} className={ghost}>Release now instead</button>
+        </section>
+
+        <section id="board" aria-labelledby="board-title" className={`${card} mt-6`}>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 id="board-title" className="text-xl font-bold">Class Question Board</h2>
+            {board && <>
+              <span className="ml-auto rounded-full bg-ok-light px-2.5 py-0.5 text-xs font-semibold text-ok">Live for students</span>
+              <button type="button" onClick={() => void unpublish()} disabled={boardBusy} className={ghost}>Unpublish</button>
+            </>}
+          </div>
+          {boardError && <p role="alert" className="mt-3 text-sm text-bad">{boardError}</p>}
+          {!board ? <Empty>Not published yet</Empty> : (
+            <ul aria-label="Questions on the board" className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {board.questions.map((q) => (
+                <li key={q.id} className="rounded-lg border border-warn/20 bg-warn-light/60 p-3.5 text-sm">
+                  {q.theme && <p className="text-xs font-semibold text-warn">{q.theme}</p>}
+                  <p className="mt-1 leading-6">{q.text}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+
+      <div role="tabpanel" id="step4-panel-reports" aria-labelledby="step4-tab-reports" hidden={tab !== "reports"}>
+        <section id="reports" aria-labelledby="reports-title" className={`${card} mt-4`}>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 id="reports-title" className="text-xl font-bold">Feedback reports</h2>
+            {reports?.release ? <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-ok-light px-2.5 py-0.5 text-xs font-semibold text-ok"><Check size={13} />Released</span>
+              : students.length > 0 && <>
+                <span className="ml-auto rounded-full bg-ok-light px-2.5 py-0.5 text-xs font-semibold text-ok">{plural(students.length, "report")} ready</span>
+                <span className={`inline-flex items-center gap-1 ${pill}`}><Lock size={12} />Held until Lesson {lesson} is taught</span>
               </>}
-            <label className="ml-auto flex items-center gap-2 text-sm text-ink-2">
-              Preview a report
-              <select value="" onChange={(event) => { const student = students.find((s) => s.id === event.target.value); if (student) void openPreview(student); }}
-                className="rounded-lg border border-line bg-white px-2 py-1.5 text-sm">
-                <option value="">Choose a student</option>
-                {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </label>
           </div>
-        )}
-        {preview && (
-          <div role="region" aria-label={`Report preview for ${preview.name}`} className="mt-5 rounded-xl bg-canvas p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <p className="text-xs font-bold uppercase tracking-[0.08em] text-faint">Preview{reports?.release ? "" : " · not yet released"}</p>
-              <button type="button" onClick={() => setPreview(null)} className={`ml-auto ${button}`}>Close preview</button>
+          {reportsError && <p role="alert" className="mt-3 text-sm text-bad">{reportsError}</p>}
+          {students.length === 0 ? <Empty>No reports yet</Empty> : (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              {reports?.release
+                ? <p role="status" className="flex items-center gap-1.5 text-sm text-ok"><Check size={15} />Released to {plural(students.length, "student")}</p>
+                : <>
+                  <button type="button" onClick={() => void release("taught")} disabled={releasing} className={primary}><Flag size={15} />Mark Lesson {lesson} as taught</button>
+                  <button type="button" onClick={() => void release("early")} disabled={releasing} className={ghost}>Release now instead</button>
+                </>}
+              <label className="ml-auto flex items-center gap-2 text-sm text-ink-2">
+                Preview a report
+                <select value="" onChange={(event) => { const student = students.find((s) => s.id === event.target.value); if (student) void openPreview(student); }}
+                  className="rounded-lg border border-line bg-white px-2 py-1.5 text-sm">
+                  <option value="">Choose a student</option>
+                  {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </label>
             </div>
-            {preview.report ? <QuizReportView report={preview.report} name={preview.name} />
-              : preview.error ? <p role="alert" className="text-sm text-bad">{preview.error}</p>
-              : <p role="status" className="text-sm text-mute">Loading…</p>}
-          </div>
-        )}
-      </section>
+          )}
+          {preview && (
+            <div role="region" aria-label={`Report preview for ${preview.name}`} className="mt-5 rounded-xl bg-canvas p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <p className="text-xs font-bold uppercase tracking-[0.08em] text-faint">Preview{reports?.release ? "" : " · not yet released"}</p>
+                <button type="button" onClick={() => setPreview(null)} className={`ml-auto ${button}`}>Close preview</button>
+              </div>
+              {preview.report ? <QuizReportView report={preview.report} name={preview.name} />
+                : preview.error ? <p role="alert" className="text-sm text-bad">{preview.error}</p>
+                : <p role="status" className="text-sm text-mute">Loading…</p>}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
