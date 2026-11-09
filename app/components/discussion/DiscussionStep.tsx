@@ -31,6 +31,11 @@ const TABS = [
   { id: "reports", label: "Feedback reports", Icon: FileText },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
+/** Step 4's status line, as in the v8.4 prototype. TeacherView uses it before Step 4 has loaded. */
+export function discussionStatus({ released = false, boardPublished = false, questions = 0, materialsSent }: { released?: boolean; boardPublished?: boolean; questions?: number; materialsSent: boolean }) {
+  return released ? "Reports released" : boardPublished ? "Board published" : questions ? `${plural(questions, "question")} in`
+    : materialsSent ? "Waiting for questions" : "After materials are sent";
+}
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const errorText = async (res: Response, fallback: string) => ((await res.json().catch(() => ({}))) as { error?: string }).error ?? fallback;
 
@@ -124,9 +129,11 @@ export default function DiscussionStep({ classId, assignmentId, materialsSent, o
   }, [board, boardLoaded, questions]);
 
   const total = questions?.total ?? 0;
+  // The Step 4 status in the step bar, worded as in the v8.4 prototype.
+  const released = Boolean(reports?.release);
   useEffect(() => {
-    onStatusChange?.(board ? "Board live" : total ? plural(total, "question") : "Class results");
-  }, [board, total, onStatusChange]);
+    onStatusChange?.(discussionStatus({ released, boardPublished: Boolean(board), questions: total, materialsSent }));
+  }, [released, board, total, materialsSent, onStatusChange]);
 
   const all = questions?.groups.flatMap((group) => group.questions.map((q) => ({ ...q, group: group.title }))) ?? [];
   const textOf = (id: string) => edits[id] ?? all.find((q) => q.id === id)?.text ?? board?.questions.find((q) => q.id === id)?.text ?? "";

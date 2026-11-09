@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, LayoutGrid, Users } from "lucide-react";
 import SurveyBuilderView from "./SurveyBuilderView";
 import TeacherDashboardView from "./TeacherDashboardView";
-import DiscussionStep from "./discussion/DiscussionStep";
+import DiscussionStep, { discussionStatus } from "./discussion/DiscussionStep";
 import AppFrame from "./layout/AppFrame";
 import AppHeader, { taskContext, type TaskShell } from "./layout/AppHeader";
 import AskEngageAgent from "./AskEngageAgent";
@@ -434,7 +434,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const registerGalleryLeaveGuard = useCallback((guard: ((proceed: () => void) => void) | null) => { galleryLeaveGuard.current = guard; }, []);
   const inGenius = useInGenius();
   const { isGeniusEmbed } = useAuth();
-  const [discussionStatus, setDiscussionStatus] = useState("Class results");
+  // Step 4's status once it has loaded; until then it follows the materials.
+  const [loadedDiscussionStatus, setDiscussionStatus] = useState<string | null>(null);
 
   // Strategy
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
@@ -1796,7 +1797,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     selectedStrategies.length ? getEngagementStrategyLabel(selectedStrategies[0])
       : studentAnswers.length ? `${studentAnswers.length} response${studentAnswers.length === 1 ? "" : "s"} in` : "Waiting for responses",
     publishedContentIds.size || publishedSlideCount || galleryPublished ? "Sent to students" : content.length ? "Draft ready" : "Not started",
-    discussionStatus,
+    loadedDiscussionStatus ?? discussionStatus({ materialsSent: publishedContentIds.size > 0 || publishedSlideCount > 0 }),
   ];
   const stepDone = [quizStatus !== "draft", selectedStrategies.length > 0, publishedContentIds.size > 0 || publishedSlideCount > 0 || galleryPublished, false];
   const stepTabs: StepTab<string>[] = stepLabels.map((title, index) => ({
