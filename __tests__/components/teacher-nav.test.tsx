@@ -37,12 +37,9 @@ it("waits for a class before Tasks and Dashboard, and says why", () => {
   expect(menu.getByRole("link", { name: "Gallery" }).getAttribute("href")).toBe("/teacher/classes?view=gallery");
 });
 
-it("can hold the Dashboard back and open a task's gallery in place", () => {
+it("opens a task's gallery in place", () => {
   const openGallery = vi.fn();
-  const menu = header(teacherNavActions({ classId: "ea-class-1", dashboardComingSoon: true, gallery: { onClick: openGallery, active: true } }));
-  const dashboard = menu.getByRole("button", { name: "Dashboard" }) as HTMLButtonElement;
-  expect(dashboard.disabled).toBe(true);
-  expect(dashboard.title).toBe("Coming soon");
+  const menu = header(teacherNavActions({ classId: "ea-class-1", gallery: { onClick: openGallery, active: true } }));
   const gallery = menu.getByRole("button", { name: "Gallery" });
   expect(gallery.getAttribute("aria-current")).toBe("page");
   fireEvent.click(gallery);

@@ -85,7 +85,7 @@ export function LessonsFrame({ children, beforeNavigate }: { children: ReactNode
   if (auth.isGeniusEmbed) return <GeniusSignIn />;
   return (
     <AppFrame header={<AppHeader userName={auth.user.name} homeHref="/teacher/classes" canSignOut beforeNavigate={beforeNavigate}
-      actions={teacherNavActions({ current: "lessons", dashboardComingSoon: true })} />}>
+      actions={teacherNavActions({ current: "lessons" })} />}>
       {children}
     </AppFrame>
   );

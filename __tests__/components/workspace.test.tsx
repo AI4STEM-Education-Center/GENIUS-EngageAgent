@@ -233,3 +233,23 @@ it("links teachers to Lessons from their class pages, but not students", async (
   render(<Workspace />); await screen.findByText("No classes yet.");
   expect(screen.queryByRole("link", { name: "Lessons" })).toBeNull();
 });
+it("opens the class dashboard from the top menu (#207, #208)", async () => {
+  mocks.query = "classId=ea-class-a&view=dashboard";
+  mocks.fetch.mockImplementation(async (url: string) => String(url).startsWith("/api/class-dashboard")
+    ? reply({ tasks: [], misconceptions: [], questions: [] })
+    : reply({ classroom: { id: "ea-class-a", name: "Physics" }, assignments: [], members: [] }));
+  render(<Workspace />);
+  expect(await screen.findByText("EngageAgent dashboard")).toBeTruthy();
+  expect(await screen.findByText("No quiz answers yet")).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Dashboard" }).getAttribute("aria-current")).toBe("page");
+  expect(screen.queryByText("New task title")).toBeNull();
+  expect(mocks.fetch.mock.calls.some(([url]) => String(url) === "/api/class-dashboard?classId=ea-class-a")).toBe(true);
+});
+it("keeps the dashboard from students", async () => {
+  mocks.role = "student"; mocks.query = "classId=ea-class-a&view=dashboard";
+  mocks.fetch.mockResolvedValue(reply({ classroom: { id: "ea-class-a", name: "Physics" }, assignments: [], members: [] }));
+  render(<Workspace />);
+  await screen.findByRole("heading", { name: "Physics" });
+  expect(screen.queryByText("EngageAgent dashboard")).toBeNull();
+  expect(mocks.fetch.mock.calls.some(([url]) => String(url).startsWith("/api/class-dashboard"))).toBe(false);
+});

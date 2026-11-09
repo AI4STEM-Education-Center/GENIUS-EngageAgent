@@ -37,6 +37,8 @@ export const MAX_BOARD_TEXT = 300;
 const MAX_THEME_TEXT = 80;
 
 const hash = (value: string) => crypto.createHash("sha256").update(value).digest("hex").slice(0, 16);
+/** A question's ID: the same student asking the same thing keeps one ID. */
+export const questionId = (studentId: string, text: string) => hash(`${studentId}\n${text.trim()}`);
 
 /**
  * Every non-empty question, once per student and wording, in submission order.
@@ -53,7 +55,7 @@ export function collectQuestions(
     for (const raw of record.questions) {
       const text = raw.trim();
       if (!text) continue;
-      const id = hash(`${record.student_id}\n${text}`);
+      const id = questionId(record.student_id, text);
       if (seen.has(id)) continue;
       seen.add(id);
       questions.push({ id, text, studentId: record.student_id, studentName: names.get(record.student_id) || "A student" });

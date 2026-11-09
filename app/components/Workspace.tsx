@@ -11,6 +11,7 @@ import GeniusSignIn from "./GeniusSignIn";
 import TeacherView from "./TeacherView";
 import StudentView from "./StudentView";
 import ClassProfileSection from "./ClassProfileSection";
+import ClassDashboard from "./ClassDashboard";
 import AppHeader from "./layout/AppHeader";
 import { studentNavActions } from "./layout/studentNav";
 import { teacherNavActions } from "./layout/teacherNav";
@@ -39,6 +40,8 @@ export default function Workspace() {
   const [refresh, setRefresh] = useState(0);
   const teacher = auth.user?.role === "teacher";
   const galleryView = teacher && params.get("view") === "gallery";
+  // The class dashboard (#207): a class, no task, view=dashboard.
+  const dashboardView = teacher && Boolean(classId) && !assignmentId && params.get("view") === "dashboard";
   const home = teacher ? "/teacher/classes" : "/student/classes";
   const listHome = galleryView ? `${home}?view=gallery` : home;
   const classPath = useCallback((id: string) => `${home}?classId=${encodeURIComponent(id)}${galleryView ? "&view=gallery" : ""}`, [home, galleryView]);
@@ -103,10 +106,10 @@ export default function Workspace() {
   return <div className="min-h-screen bg-canvas text-ink">
     <AppHeader userName={auth.user.name} homeHref={listHome} canSignOut
       context={data?.classroom ? [{ label: data.classroom.name, href: classPath(data.classroom.id) }] : []}
-      actions={teacher ? teacherNavActions({ classId, current: galleryView ? "gallery" : classId ? "tasks" : "classes", dashboardComingSoon: true })
+      actions={teacher ? teacherNavActions({ classId, current: galleryView ? "gallery" : dashboardView ? "dashboard" : classId ? "tasks" : "classes" })
         : studentNavActions({ homeHref: home, classHref: classId ? classPath(classId) : undefined }, classId ? "tasks" : "classes")} />
     {error && <div role="alert" className="mx-auto max-w-7xl px-5 py-3 text-sm text-red-800">{error} <button onClick={() => setRefresh(n => n + 1)} className="underline">Retry</button></div>}
-    {loading || (taskUser && classId && assignmentId && !taskContextMatches) ? <p role="status" className="mx-auto max-w-7xl px-5 py-8 text-sm">Loading workspace...</p> : !(classId && assignmentId) &&
+    {loading || (taskUser && classId && assignmentId && !taskContextMatches) ? <p role="status" className="mx-auto max-w-7xl px-5 py-8 text-sm">Loading workspace...</p> : dashboardView && classId ? <ClassDashboard classId={classId} className={data?.classroom?.name} /> : !(classId && assignmentId) &&
       <main className="mx-auto max-w-7xl px-5 pb-12 pt-5">
         <h1 className="break-words text-2xl font-semibold">{galleryView ? classId ? "Choose a task for your materials" : "Choose a class for your materials" : data?.classroom?.name || "My classes"}</h1>
         {!galleryView && data?.classroom?.joinCode && <p className="mt-3 break-all text-sm text-gray-600">Class code: <strong className="font-mono text-gray-900">{data.classroom.joinCode}</strong></p>}

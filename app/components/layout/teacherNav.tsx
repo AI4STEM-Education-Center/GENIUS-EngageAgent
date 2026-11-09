@@ -35,8 +35,6 @@ export function teacherNavActions(options: {
   current?: TeacherNavPage;
   /** Replaces the Gallery link, e.g. a task page opens its own gallery in place. */
   gallery?: Pick<HeaderAction, "onClick" | "active" | "comingSoon">;
-  /** Shown but disabled until the class dashboard exists (#207). */
-  dashboardComingSoon?: boolean;
 }): HeaderAction[] {
   const links = teacherNavLinks(options.classId);
   const current = options.current;
@@ -46,7 +44,7 @@ export function teacherNavActions(options: {
     { label: "Tasks", icon: <ClipboardList size={15} />, href: links.tasks, active: current === "tasks", disabledReason: links.tasks ? undefined : needsClass },
     { label: "Lessons", icon: <BookOpen size={15} />, href: links.lessons, active: current === "lessons" },
     { label: "Dashboard", icon: <BarChart3 size={15} />, href: links.dashboard, active: current === "dashboard",
-      comingSoon: options.dashboardComingSoon, disabledReason: links.dashboard ? undefined : needsClass },
+      disabledReason: links.dashboard ? undefined : needsClass },
     options.gallery
       ? { label: "Gallery", icon: <LayoutGrid size={15} />, ...options.gallery }
       : { label: "Gallery", icon: <LayoutGrid size={15} />, href: links.gallery, active: current === "gallery" },

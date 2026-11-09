@@ -104,8 +104,8 @@ it("shows the header with the top menu and four teacher steps (#172, #182, #208)
   expect(Array.from(header.getByRole("navigation", { name: "EngageAgent" }).querySelectorAll("a, button"), item => item.textContent).slice(0, 7))
     .toEqual(["My class", "Tasks", "Lessons", "Dashboard", "Gallery", "Class profile", "Ask EngageAgent"]);
   expect(header.getByRole("link", { name: "Tasks" }).getAttribute("href")).toBe("/teacher/classes?classId=ea-class-native");
-  // The class dashboard comes with #207.
-  expect((header.getByRole("button", { name: "Dashboard" }) as HTMLButtonElement).disabled).toBe(true);
+  // Dashboard opens the class dashboard (#207).
+  expect(header.getByRole("link", { name: "Dashboard" }).getAttribute("href")).toBe("/teacher/classes?classId=ea-class-native&view=dashboard");
   fireEvent.click(header.getByRole("button", { name: "Gallery" }));
   expect(await screen.findByRole("heading", { name: /^Gallery$/ })).toBeTruthy();
   expect(screen.queryByRole("navigation", { name: "Teacher steps" })).toBeNull();
