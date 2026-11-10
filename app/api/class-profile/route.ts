@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { getClassProfile, upsertClassProfile } from "@/lib/nosql";
-import { EMPTY_CLASS_PROFILE, parseClassProfileAnswers, type ClassProfile } from "@/lib/class-profile";
+import { parseClassProfileAnswers, savedClassProfile } from "@/lib/class-profile";
 import { guardWorkspaceClassRequest, guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";
 
-// Teacher-only. The profile belongs to the class, so it is set up on the class
-// page (no task) and seen or edited from inside a task:
+// Teacher-only. The profile is first answered when the class is added (see
+// /api/workspace), then seen or edited on the class page (no task) or inside a task:
 // - with an assignmentId, guardWorkspaceRequest checks the task (EngageAgent or
 //   GENIUS) and denies students and guests, as this route is not on its allow-list;
 // - without one, guardWorkspaceClassRequest only lets the class's own teacher in.
@@ -54,35 +54,11 @@ export async function POST(request: Request) {
     }
 
     const user = await workspaceRequestUser(request);
-    const updatedAt = new Date().toISOString();
-
-    // "Skip for now" only records that the teacher was asked; it never
-    // replaces answers that were already saved.
-    if (body.skip === true) {
-      const existing = await getClassProfile(classId);
-      if (existing) return NextResponse.json({ classProfile: existing });
-      const record: ClassProfile = {
-        ...EMPTY_CLASS_PROFILE,
-        class_id: classId,
-        status: "skipped",
-        updated_by: user?.geniusId,
-        updated_at: updatedAt,
-      };
-      return NextResponse.json({ classProfile: await upsertClassProfile(record) });
-    }
-
     const parsed = parseClassProfileAnswers(body.profile);
     if ("error" in parsed) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
-    const record: ClassProfile = {
-      ...parsed.answers,
-      class_id: classId,
-      status: "saved",
-      updated_by: user?.geniusId,
-      updated_at: updatedAt,
-    };
-    return NextResponse.json({ classProfile: await upsertClassProfile(record) });
+    return NextResponse.json({ classProfile: await upsertClassProfile(savedClassProfile(parsed.answers, classId, user?.geniusId)) });
   } catch (error) {
     return storageError("POST", error);
   }

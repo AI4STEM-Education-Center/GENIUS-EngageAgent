@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import DiscussionStep from "@/app/components/discussion/DiscussionStep";
+import DiscussionStep, { discussionStatus } from "@/app/components/discussion/DiscussionStep";
 import type { TaskQuestions } from "@/lib/class-questions-server";
 import type { QuestionBoard } from "@/lib/class-questions";
 
@@ -49,6 +49,10 @@ const view = (props: Partial<{ materialsSent: boolean; onStatusChange: (s: strin
   render(<DiscussionStep classId="ea-class-1" assignmentId="ea-task-1" materialsSent {...props} />);
 const questionsCard = () => screen.getByRole("region", { name: "Student questions" });
 const box = (text: string) => within(questionsCard()).getByRole("checkbox", { name: text });
+const openReports = () => {
+  fireEvent.click(screen.getByRole("tab", { name: "Feedback reports" }));
+  return screen.getByRole("region", { name: "Feedback reports" });
+};
 
 it("waits for materials before showing questions", async () => {
   view({ materialsSent: false });
@@ -68,7 +72,7 @@ it("shows the sorted questions with names and tags, and pre-selects the AI's sug
   expect(theme).toHaveTextContent("Investigable");
   expect(theme).toHaveTextContent("Suggested");
   expect(box("Why does my phone crack on tile?")).not.toBeChecked();
-  expect(onStatusChange).toHaveBeenLastCalledWith("4 questions");
+  expect(onStatusChange).toHaveBeenLastCalledWith("4 questions in");
 });
 
 it("publishes the chosen questions without names, with edited wording", async () => {
@@ -130,7 +134,7 @@ it("shows a load error with Try again", async () => {
 
 it("holds reports until the teacher releases them, with a preview first", async () => {
   view();
-  const reports = screen.getByRole("region", { name: "Feedback reports" });
+  const reports = openReports();
   expect(await within(reports).findByText("1 report ready")).toBeVisible();
   expect(reports).toHaveTextContent("Held until Lesson 3 is taught");
 
@@ -148,7 +152,65 @@ it("holds reports until the teacher releases them, with a preview first", async 
 it("says there are no reports before anyone submits", async () => {
   state.students = [];
   view();
-  const reports = screen.getByRole("region", { name: "Feedback reports" });
+  const reports = openReports();
   expect(await within(reports).findByText("No reports yet")).toBeVisible();
   expect(within(reports).queryByRole("button", { name: /Mark Lesson/ })).toBeNull();
+});
+
+it("splits Step 4 into two tabs, with reports still loading behind the first", async () => {
+  view();
+  const questionsTab = screen.getByRole("tab", { name: /^Questions & board/ });
+  const reportsTab = screen.getByRole("tab", { name: "Feedback reports" });
+  expect(screen.getAllByRole("tab")).toHaveLength(2);
+  expect(screen.getByRole("tablist", { name: "Step 4 sections" })).toBeVisible();
+  expect(questionsTab).toHaveAttribute("aria-selected", "true");
+  expect(questionsTab).toHaveAttribute("tabindex", "0");
+  expect(reportsTab).toHaveAttribute("tabindex", "-1");
+
+  // First tab: questions and the board; reports are hidden but already loaded.
+  expect(screen.getByRole("tabpanel", { name: /^Questions & board/ })).toContainElement(questionsCard());
+  expect(screen.getByRole("region", { name: "Class Question Board" })).toBeVisible();
+  expect(screen.queryByRole("region", { name: "Feedback reports" })).toBeNull();
+  await waitFor(() => expect(calls("/api/quiz-report?")).toHaveLength(1));
+  // The questions tab carries the question count once they load.
+  await waitFor(() => expect(questionsTab).toHaveAccessibleName("Questions & board (4)"));
+
+  // Arrow keys move focus and selection, wrapping at the ends.
+  fireEvent.keyDown(questionsTab, { key: "ArrowRight" });
+  expect(reportsTab).toHaveAttribute("aria-selected", "true");
+  expect(reportsTab).toHaveFocus();
+  const panel = screen.getByRole("tabpanel", { name: "Feedback reports" });
+  expect(within(panel).getByText("1 report ready")).toBeVisible();
+  expect(screen.queryByRole("region", { name: "Student questions" })).toBeNull();
+
+  fireEvent.keyDown(reportsTab, { key: "ArrowRight" });
+  expect(questionsTab).toHaveAttribute("aria-selected", "true");
+  expect(questionsTab).toHaveFocus();
+  fireEvent.keyDown(questionsTab, { key: "ArrowLeft" });
+  expect(reportsTab).toHaveFocus();
+  fireEvent.keyDown(reportsTab, { key: "Home" });
+  expect(questionsTab).toHaveFocus();
+
+  // Selections made on the first tab survive a trip to the second.
+  await waitFor(() => expect(box("Does the post bend?")).toBeChecked());
+  fireEvent.click(box("What does force mean?"));
+  fireEvent.click(reportsTab);
+  fireEvent.click(questionsTab);
+  expect(box("What does force mean?")).toBeChecked();
+});
+
+it("words the Step 4 status as in the v8.4 prototype", async () => {
+  expect(discussionStatus({ materialsSent: false })).toBe("After materials are sent");
+  expect(discussionStatus({ materialsSent: true })).toBe("Waiting for questions");
+  expect(discussionStatus({ materialsSent: true, questions: 1 })).toBe("1 question in");
+  expect(discussionStatus({ materialsSent: true, questions: 4, boardPublished: true })).toBe("Board published");
+  expect(discussionStatus({ materialsSent: true, questions: 4, boardPublished: true, released: true })).toBe("Reports released");
+
+  // Live: releasing the reports updates the step bar.
+  const onStatusChange = vi.fn();
+  view({ onStatusChange });
+  await waitFor(() => expect(onStatusChange).toHaveBeenLastCalledWith("4 questions in"));
+  const reports = openReports();
+  fireEvent.click(await within(reports).findByRole("button", { name: "Release now instead" }));
+  await waitFor(() => expect(onStatusChange).toHaveBeenLastCalledWith("Reports released"));
 });

@@ -58,3 +58,10 @@ it("reads a skipped profile with no answers (#173)", async () => {
     status: "skipped", locale: null, groups: [], groupAlternative: null, classType: null, englishLearners: false, iepOr504: false,
   });
 });
+
+it("reads the newest profile, so a class just added doesn't look empty on its page (#173)", async () => {
+  const { getClassProfile } = await import("@/lib/nosql");
+  await getClassProfile("ea-class-1");
+  const read = mocks.send.mock.calls.map(([command]) => command).find(command => command instanceof GetCommand);
+  expect(read?.input.ConsistentRead).toBe(true);
+});

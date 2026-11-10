@@ -74,6 +74,8 @@ GROK_API_KEY=your_grok_api_key_here
 # Optional — model overrides
 OPENAI_MODEL=gpt-5-nano
 OPENAI_IMAGE_MODEL=gpt-image-2
+# Ask EngageAgent chatbot. Leave blank for the app default (gpt-4o-mini).
+OPENAI_CHAT_MODEL=
 
 # Optional — AWS-backed persistence
 # If these are omitted, the app falls back to local JSON storage in `data/engage-nosql.json`.

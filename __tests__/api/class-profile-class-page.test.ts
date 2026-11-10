@@ -5,8 +5,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { UserContext } from "@/lib/auth";
 
 // End to end with the real route, access checks and local storage; only the
-// signed-in user is faked. The class page has no task, so only the class's own
-// teacher may read or save its profile there (#173).
+// signed-in user is faked. The profile is answered when the class is added, and
+// the class page has no task, so only the class's own teacher may read or save
+// it there (#173).
 const signedIn = vi.hoisted(() => ({ user: null as UserContext | null }));
 vi.mock("@/lib/session", async original => ({
   ...await original<typeof import("@/lib/session")>(),
@@ -21,6 +22,8 @@ const answers = { locale: "rural", groups: ["white"], groupAlternative: null, cl
 
 let dir: string;
 let route: typeof import("@/app/api/class-profile/route");
+let workspaceRoute: typeof import("@/app/api/workspace/route");
+let workspace: typeof import("@/lib/workspace");
 let classId: string;
 let taskId: string;
 
@@ -28,6 +31,8 @@ const get = (query: string, headers: Record<string, string> = {}) =>
   route.GET(new Request(`${origin}/api/class-profile?${query}`, { headers }));
 const post = (body: Record<string, unknown>, headers: Record<string, string> = { origin }) =>
   route.POST(new Request(`${origin}/api/class-profile`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) }));
+const addClass = (body: Record<string, unknown>, headers: Record<string, string> = { origin }) =>
+  workspaceRoute.POST(new Request(`${origin}/api/workspace`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ action: "createClass", ...body }) }));
 
 beforeEach(async () => {
   dir = await mkdtemp(path.join(os.tmpdir(), "engage-class-profile-"));
@@ -35,8 +40,9 @@ beforeEach(async () => {
   vi.stubEnv("DYNAMODB_TABLE", "");
   vi.stubEnv("ENGAGE_APP_URL", origin);
   vi.resetModules();
-  const workspace = await import("@/lib/workspace");
+  workspace = await import("@/lib/workspace");
   route = await import("@/app/api/class-profile/route");
+  workspaceRoute = await import("@/app/api/workspace/route");
   const classroom = await workspace.createWorkspaceClass(teacher, "Physics");
   classId = classroom.id;
   taskId = (await workspace.createWorkspaceAssignment(teacher, classId, "Collisions")).id;
@@ -84,8 +90,53 @@ it("refuses GENIUS tokens, GENIUS class IDs, other websites, repeated IDs and un
   expect((await (await get(`classId=${classId}`)).json()).classProfile).toBeNull();
 });
 
-it("records Skip for now on the class page without overwriting a saved profile", async () => {
-  expect((await (await post({ classId, skip: true })).json()).classProfile.status).toBe("skipped");
+it("adds a class and its profile together, then shows it on the class page and in every task", async () => {
+  const response = await addClass({ name: "Biology", profile: answers });
+  expect(response.status).toBe(201);
+  const body = await response.json();
+  expect(body).not.toHaveProperty("profileSaved");
+  const added = body.classroom.id as string;
+
+  expect((await (await get(`classId=${added}`)).json()).classProfile).toMatchObject({ ...answers, class_id: added, status: "saved", updated_by: "teacher-1" });
+  const task = await workspace.createWorkspaceAssignment(teacher, added, "Cells");
+  expect((await (await get(`classId=${added}&assignmentId=${task.id}`)).json()).classProfile).toMatchObject({ locale: "rural", classType: "honors" });
+  // It belongs to the new class only.
+  expect((await (await get(`classId=${classId}`)).json()).classProfile).toBeNull();
+});
+
+it("adds a class with no profile when none is sent", async () => {
+  const response = await addClass({ name: "Biology" });
+  expect(response.status).toBe(201);
+  const added = (await response.json()).classroom.id as string;
+  expect((await (await get(`classId=${added}`)).json()).classProfile).toBeNull();
+  expect((await post({ classId: added, profile: answers })).status).toBe(200);
+});
+
+it.each([
+  ["answers that aren't options", { name: "Biology", profile: { ...answers, locale: "moon" } }],
+  ["too many groups", { name: "Biology", profile: { ...answers, groups: ["white", "asian", "hispanic_latino", "black_african_american"] } }],
+  ["a profile that isn't an object", { name: "Biology", profile: null }],
+  ["no class name", { name: "   ", profile: answers }],
+  ["a class name that's too long", { name: "x".repeat(121), profile: answers }],
+])("adds nothing when given %s", async (_label, body) => {
+  const before = await workspace.listWorkspaceClasses(teacher);
+  expect((await addClass(body)).status).toBe(400);
+  expect(await workspace.listWorkspaceClasses(teacher)).toEqual(before);
+});
+
+it("only lets signed-in teachers on this site add a class with a profile", async () => {
+  const before = await workspace.listWorkspaceClasses(teacher);
+  expect((await addClass({ name: "Biology", profile: answers }, { origin: "https://evil.example" })).status).toBe(403);
+  signedIn.user = student;
+  expect((await addClass({ name: "Biology", profile: answers })).status).toBe(403);
+  signedIn.user = null;
+  expect((await addClass({ name: "Biology", profile: answers })).status).toBe(401);
+  signedIn.user = teacher;
+  expect(await workspace.listWorkspaceClasses(teacher)).toEqual(before);
+});
+
+it("no longer takes a skip on the class page, and leaves saved answers alone", async () => {
   await post({ classId, profile: answers });
-  expect((await (await post({ classId, skip: true })).json()).classProfile.status).toBe("saved");
+  expect((await post({ classId, skip: true })).status).toBe(400);
+  expect((await (await get(`classId=${classId}`)).json()).classProfile.status).toBe("saved");
 });

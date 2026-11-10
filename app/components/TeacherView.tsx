@@ -3,14 +3,17 @@
 import { scopedTaskFetch } from "@/lib/client-auth";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LayoutGrid, MessageCircle, Users } from "lucide-react";
+import { LayoutGrid, Users } from "lucide-react";
 import SurveyBuilderView from "./SurveyBuilderView";
 import TeacherDashboardView from "./TeacherDashboardView";
-import DiscussionStep from "./discussion/DiscussionStep";
+import DiscussionStep, { discussionStatus } from "./discussion/DiscussionStep";
 import AppFrame from "./layout/AppFrame";
 import AppHeader, { taskContext, type TaskShell } from "./layout/AppHeader";
+import AskEngageAgent from "./AskEngageAgent";
+import { ASK_STEP_PAGES } from "@/lib/ask-engageagent";
 import StepTabs, { type StepTab } from "./layout/StepTabs";
 import { teacherNavActions } from "./layout/teacherNav";
+import { activityProgress, type ActivityProgress } from "@/lib/activity-progress";
 import ActivityContextSuggestion from "./ActivityContextSuggestion";
 import MaterialActivityView from "./MaterialActivityView";
 import SlidesWorkspace, { type SlidesWorkspaceHandle } from "./SlidesWorkspace";
@@ -335,9 +338,9 @@ const savedItemLessons = (items: PublishedContentPayloadItem[] | undefined) => [
 }))];
 
 const stepLabels = [
-  "Assessment",
-  "Strategy",
-  "Engagement materials",
+  "Pre-knowledge assessment",
+  "Strategy recommendations",
+  "Material Generation",
   "Questions & discussion",
 ];
 
@@ -364,7 +367,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   // Assessment step sub-tabs (quiz vs survey), mirrors the tab pattern in StudentView.
   const [assessmentTab, setAssessmentTab] = useState<"quiz" | "survey">("quiz");
 
-  // Class profile (#173): set up on the class page; here it's only shown and edited.
+  // Class profile (#173): answered when the class is added; here it's only shown and edited.
   const classProfile = useClassProfile({ classId, assignmentId, enabled: hasAssignmentContext });
 
   // Student answers
@@ -444,7 +447,46 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const registerGalleryLeaveGuard = useCallback((guard: ((proceed: () => void) => void) | null) => { galleryLeaveGuard.current = guard; }, []);
   const inGenius = useInGenius();
   const { isGeniusEmbed } = useAuth();
-  const [discussionStatus, setDiscussionStatus] = useState("Class results");
+  // Step 4's status once it has loaded; until then it follows the materials.
+  const [loadedDiscussionStatus, setDiscussionStatus] = useState<string | null>(null);
+  // Step 4 is done once reports are released (#176, v8.4 prototype).
+  // Null until Step 4 has loaded; then it wins over the saved progress (e.g. after Unpublish).
+  const [discussionDone, setDiscussionDone] = useState<boolean | null>(null);
+  // The activity's saved progress, for what this page only learns inside a step (#176).
+  const [storedProgress, setStoredProgress] = useState<{ workspace: string; value: ActivityProgress } | null>(null);
+  const savedProgress = storedProgress?.workspace === materialWorkspace ? storedProgress.value : null;
+  const progressScope = useRef<string | null>(null);
+  const progressRequest = useRef(0);
+  const progressController = useRef<AbortController | null>(null);
+  const loadSavedProgress = useCallback(async () => {
+    if (!classId || !assignmentId || progressScope.current !== materialWorkspace) return;
+    const request = ++progressRequest.current;
+    progressController.current?.abort();
+    const controller = new AbortController();
+    progressController.current = controller;
+    try {
+      const query = new URLSearchParams({ classId, assignmentId });
+      const response = await scopedTaskFetch({ classId, assignmentId }, `/api/activity-progress?${query}`, { signal: controller.signal });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!controller.signal.aborted && request === progressRequest.current && progressScope.current === materialWorkspace && data?.progress) {
+        setStoredProgress({ workspace: materialWorkspace, value: data.progress });
+      }
+    } catch {
+      // Live step state remains usable when saved progress cannot be loaded.
+    } finally {
+      if (progressController.current === controller) progressController.current = null;
+    }
+  }, [classId, assignmentId, materialWorkspace]);
+  const refreshAssessmentProgress = useCallback(() => {
+    if (progressScope.current !== materialWorkspace) return;
+    // The old aggregate belongs to the previous quiz state. A fresh read also
+    // preserves completion from a published survey when the quiz becomes a draft.
+    setStoredProgress(null);
+    setDiscussionDone(null);
+    setDiscussionStatus(null);
+    void loadSavedProgress();
+  }, [materialWorkspace, loadSavedProgress]);
 
   // Strategy
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
@@ -677,6 +719,19 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     );
     return () => { cancelled = true; };
   }, [classId, assignmentId]);
+
+  useEffect(() => {
+    progressScope.current = materialWorkspace;
+    setDiscussionDone(null);
+    setDiscussionStatus(null);
+    void loadSavedProgress();
+    return () => {
+      progressScope.current = null;
+      progressRequest.current += 1;
+      progressController.current?.abort();
+      progressController.current = null;
+    };
+  }, [materialWorkspace, loadSavedProgress]);
 
   // Load quiz status on mount
   useEffect(() => {
@@ -1192,6 +1247,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
         });
         if (!saved.ok) throw new Error("This lesson couldn't be chosen. Please try again.");
         setQuizStatus("draft");
+        refreshAssessmentProgress();
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "This lesson couldn't be chosen. Please try again.");
         return;
@@ -1234,6 +1290,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
       }
 
       setQuizStatus("published");
+      refreshAssessmentProgress();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to publish quiz.",
@@ -1811,9 +1868,19 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     selectedStrategies.length ? getEngagementStrategyLabel(selectedStrategies[0])
       : studentAnswers.length ? `${studentAnswers.length} response${studentAnswers.length === 1 ? "" : "s"} in` : "Waiting for responses",
     publishedContentIds.size || publishedSlideCount || galleryPublished ? "Sent to students" : content.length ? "Draft ready" : "Not started",
-    discussionStatus,
+    loadedDiscussionStatus ?? discussionStatus({ released: discussionDone ?? (savedProgress?.discussion === "done"), materialsSent: publishedContentIds.size > 0 || publishedSlideCount > 0 }),
   ];
-  const stepDone = [quizStatus !== "draft", selectedStrategies.length > 0, publishedContentIds.size > 0 || publishedSlideCount > 0 || galleryPublished, false];
+  const materialsSent = publishedContentIds.size > 0 || publishedSlideCount > 0 || galleryPublished;
+  const progress = activityProgress({
+    lessonChosen: Boolean(selectedLesson),
+    assessmentPublished: quizStatus !== "draft" || savedProgress?.assessment === "done",
+    strategyChosen: selectedStrategies.length > 0 || savedProgress?.strategy === "done",
+    materialsDrafted: content.length > 0,
+    materialsSent: materialsSent || savedProgress?.materials === "done",
+    boardPublished: false,
+    reportsReleased: discussionDone ?? savedProgress?.discussion === "done",
+  });
+  const stepDone = [progress.assessment, progress.strategy, progress.materials, progress.discussion].map((state) => state === "done");
   const stepTabs: StepTab<string>[] = stepLabels.map((title, index) => ({
     id: String(index + 1), title, status: stepStatus[index], marker: index + 1, done: stepDone[index],
   }));
@@ -1826,7 +1893,6 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           // The top menu (#208), with this task's gallery opening in place; then the task's own tools.
           ...teacherNavActions({ classId, gallery: { onClick: openGallery, active: showGallery } }),
           { label: "Class profile", icon: <Users size={15} />, onClick: classProfile.openEditor, comingSoon: !hasAssignmentContext },
-          { label: "Ask EngageAgent", icon: <MessageCircle size={15} />, comingSoon: true },
         ]} />}
       tabs={!showGallery && <>
         {(inGenius || isGeniusEmbed) && <nav aria-label="Material library" className="flex justify-end border-b border-line bg-white px-5 py-2"><button type="button" onClick={openGallery} disabled={generationBusy || !hasAssignmentContext} className="inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-ink hover:bg-canvas disabled:opacity-50"><LayoutGrid size={16} />Gallery</button></nav>}
@@ -1841,7 +1907,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 1</p>
-                <h2 className="text-2xl font-semibold text-slate-900">Assessment</h2>
+                <h2 className="text-2xl font-semibold text-slate-900">Pre-knowledge assessment</h2>
                 <p className="mt-1 text-sm text-slate-500">Give students a quiz, a survey, or both for this learning task.</p>
               </div>
 
@@ -1990,7 +2056,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div className="flex flex-col gap-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 3</p>
-                <h2 className="text-2xl font-semibold text-slate-900">Engagement materials</h2>
+                <h2 className="text-2xl font-semibold text-slate-900">Material Generation</h2>
                 <p className="text-sm text-slate-600">Create teaching materials, then review and edit them before sending to your class.</p>
               </div>
 
@@ -2261,7 +2327,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           </div>
 
           {visibleStep === 4 && classId && assignmentId && (
-            <DiscussionStep classId={classId} assignmentId={assignmentId} materialsSent={publishedContentIds.size > 0 || publishedSlideCount > 0} onStatusChange={setDiscussionStatus} />
+            <DiscussionStep classId={classId} assignmentId={assignmentId} materialsSent={publishedContentIds.size > 0 || publishedSlideCount > 0} onStatusChange={setDiscussionStatus} onDoneChange={setDiscussionDone} />
           )}
           {showDashboard && <TeacherDashboardView user={user} embedded />}
 
@@ -2429,6 +2495,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           </div>
         )}
       <a ref={downloadRef} className="hidden" />
+      <AskEngageAgent key={materialWorkspace} role={user.role} classId={classId} assignmentId={assignmentId} lessonNumber={selectedLesson}
+        page={showGallery ? "gallery" : showDashboard ? "dashboard" : ASK_STEP_PAGES[currentStep - 1]}
+        pageLabel={showGallery ? "Gallery" : showDashboard ? "Dashboard" : `Step ${currentStep} · ${stepLabels[currentStep - 1]}`} />
     </AppFrame>
   );
 }

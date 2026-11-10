@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowRight, Plus } from "lucide-react";
@@ -10,6 +10,7 @@ import { useAuth } from "./AuthContext";
 import GeniusSignIn from "./GeniusSignIn";
 import TeacherView from "./TeacherView";
 import StudentView from "./StudentView";
+import AddClassDialog, { type AddedClass } from "./AddClassDialog";
 import ClassProfileSection from "./ClassProfileSection";
 import ClassDashboard from "./ClassDashboard";
 import AppHeader from "./layout/AppHeader";
@@ -38,6 +39,10 @@ export default function Workspace() {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [addingClass, setAddingClass] = useState(false);
+  // A class that was added but whose profile didn't save, so its page can say so.
+  const [unsavedProfileClass, setUnsavedProfileClass] = useState<string | null>(null);
+  const addClassButton = useRef<HTMLButtonElement>(null);
   const teacher = auth.user?.role === "teacher";
   const galleryView = teacher && params.get("view") === "gallery";
   // The class dashboard (#207): a class, no task, view=dashboard.
@@ -75,9 +80,9 @@ export default function Workspace() {
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
     try {
-      const action = classId ? "createTask" : teacher ? "createClass" : "joinClass";
+      const action = classId ? "createTask" : "joinClass";
       const response = await fetch("/api/workspace", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, classId, name: value, title: value, code: value }) });
+        body: JSON.stringify({ action, classId, title: value, code: value }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to save.");
       setValue("");
@@ -85,6 +90,12 @@ export default function Workspace() {
       else router.push(classPath(result.classroom.id));
     } catch (err) { setError(err instanceof Error ? err.message : "Unable to save."); }
     finally { setBusy(false); }
+  }
+
+  function classAdded(added: AddedClass) {
+    setAddingClass(false);
+    setUnsavedProfileClass(added.profileSaved === false ? added.classroom.id : null);
+    router.push(classPath(added.classroom.id));
   }
 
   if (auth.loading) return <p role="status" className="p-8 text-sm">Checking your session...</p>;
@@ -113,12 +124,15 @@ export default function Workspace() {
       <main className="mx-auto max-w-7xl px-5 pb-12 pt-5">
         <h1 className="break-words text-2xl font-semibold">{galleryView ? classId ? "Choose a task for your materials" : "Choose a class for your materials" : data?.classroom?.name || "My classes"}</h1>
         {!galleryView && data?.classroom?.joinCode && <p className="mt-3 break-all text-sm text-gray-600">Class code: <strong className="font-mono text-gray-900">{data.classroom.joinCode}</strong></p>}
-        {!galleryView && teacher && classId && data?.classroom && <ClassProfileSection key={classId} classId={classId} />}
-        {!galleryView && (!classId || teacher) && <form onSubmit={submit} className="my-6 flex max-w-xl flex-col gap-2 sm:flex-row sm:items-end">
-          <label className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium" htmlFor="workspace-value">{classId ? "New task title" : teacher ? "New class name" : "Class code"}
+        {!galleryView && teacher && classId && data?.classroom && <ClassProfileSection key={classId} classId={classId} saveFailed={unsavedProfileClass === classId} />}
+        {!galleryView && teacher && !classId && <div className="my-6">
+          <button ref={addClassButton} type="button" className={buttonClass} onClick={() => setAddingClass(true)}><Plus size={17} />Add class</button>
+        </div>}
+        {!galleryView && (classId ? teacher : !teacher) && <form onSubmit={submit} className="my-6 flex max-w-xl flex-col gap-2 sm:flex-row sm:items-end">
+          <label className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium" htmlFor="workspace-value">{classId ? "New task title" : "Class code"}
             <input id="workspace-value" required maxLength={120} value={value} onChange={event => setValue(event.target.value)} className={inputClass} />
           </label>
-          <button className={buttonClass} disabled={busy || !value.trim()}><Plus size={17} />{busy ? "Saving..." : classId ? "Create task" : teacher ? "Create class" : "Join class"}</button>
+          <button className={buttonClass} disabled={busy || !value.trim()}><Plus size={17} />{busy ? "Saving..." : classId ? "Create task" : "Join class"}</button>
         </form>}
         <section aria-label={classId ? "Class tasks" : "Classes"} className="mt-6 border-y border-gray-200 bg-white">
           {(classId ? data?.assignments || [] : data?.classes || []).map(item => <Link key={item.id}
@@ -137,5 +151,7 @@ export default function Workspace() {
           {galleryView && <Link className="inline-flex items-center gap-2 text-sm text-red-800" href={classId ? `${home}?classId=${encodeURIComponent(classId)}` : home}><ArrowLeft size={16} />{classId ? "Back to class" : "Back to my classes"}</Link>}
         </div>}
       </main>}
+    {addingClass && teacher && !classId && !galleryView && <AddClassDialog onAdded={classAdded}
+      onClose={() => { setAddingClass(false); addClassButton.current?.focus(); }} />}
   </div>;
 }
