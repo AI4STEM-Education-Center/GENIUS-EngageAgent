@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import Workspace from "@/app/components/Workspace";
 const mocks = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), query: "", role: "teacher", fetch: vi.fn(), workflow: vi.fn() }));
@@ -22,24 +22,29 @@ it("lets teachers create a class inside EngageAgent", async () => {
   mocks.fetch.mockResolvedValueOnce(reply({ classes: [] })).mockResolvedValueOnce(reply({ classroom: { id: "ea-class-created" } }));
   render(<Workspace />);
   await screen.findByText("No classes yet.");
-  fireEvent.change(screen.getByLabelText("New class name"), { target: { value: "Physics" } });
-  fireEvent.click(screen.getByRole("button", { name: "Create class" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add class" }));
+  const dialog = screen.getByRole("dialog", { name: "Add a class" });
+  fireEvent.change(within(dialog).getByLabelText("Class name"), { target: { value: "Physics" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add class" }));
   await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/teacher/classes?classId=ea-class-created"));
-  expect(JSON.parse(mocks.fetch.mock.calls[1][1].body)).toMatchObject({ action: "createClass", name: "Physics" });
+  expect(JSON.parse(mocks.fetch.mock.calls[1][1].body)).toEqual({ action: "createClass", name: "Physics" });
 });
 it("gives students join controls without teacher create controls", async () => {
   mocks.role = "student"; mocks.fetch.mockResolvedValue(reply({ classes: [] }));
   render(<Workspace />); await screen.findByText("No classes yet.");
   expect(screen.getByRole("button", { name: "Join class" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Create class" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Add class" })).toBeNull();
 });
 it("retains form input on a save failure", async () => {
   mocks.fetch.mockResolvedValueOnce(reply({ classes: [] })).mockResolvedValueOnce(reply({ error: "Storage unavailable" }, false));
   render(<Workspace />); await screen.findByText("No classes yet.");
-  fireEvent.change(screen.getByLabelText("New class name"), { target: { value: "Keep my name" } });
-  fireEvent.click(screen.getByRole("button", { name: "Create class" }));
-  await screen.findByRole("alert");
-  expect((screen.getByLabelText("New class name") as HTMLInputElement).value).toBe("Keep my name");
+  fireEvent.click(screen.getByRole("button", { name: "Add class" }));
+  const dialog = screen.getByRole("dialog", { name: "Add a class" });
+  fireEvent.change(within(dialog).getByLabelText("Class name"), { target: { value: "Keep my name" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add class" }));
+  await within(dialog).findByText("Storage unavailable");
+  expect((within(dialog).getByLabelText("Class name") as HTMLInputElement).value).toBe("Keep my name");
+  expect(mocks.push).not.toHaveBeenCalled();
 });
 it("renders the existing workflow only after the server verifies the selected context", async () => {
   mocks.query = "classId=ea-class-a&assignmentId=ea-task-a";
@@ -149,8 +154,7 @@ it("opens Gallery from the class list through existing workspace classes", async
   expect(screen.getByRole("link", { name: "Physics" }).getAttribute("href")).toBe("/teacher/classes?classId=ea-class-a&view=gallery");
   expect(screen.getByRole("link", { name: "Gallery" }).getAttribute("aria-current")).toBe("page");
   expect(screen.getByRole("link", { name: "Back to my classes" }).getAttribute("href")).toBe("/teacher/classes");
-  expect(screen.queryByLabelText("New class name")).toBeNull();
-  expect(screen.queryByRole("button", { name: "Create class" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Add class" })).toBeNull();
   expect(mocks.fetch).toHaveBeenCalledTimes(1);
   expect(mocks.fetch.mock.calls[0][0]).toBe("/api/workspace?");
   expect(mocks.fetch.mock.calls[0][1]).toMatchObject({ cache: "no-store" });

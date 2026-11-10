@@ -101,13 +101,10 @@ describe("POST /api/class-profile", () => {
     expect((await post({})).status).toBe(400);
   });
 
-  it("records Skip for now without answers, and never overwrites a saved profile", async () => {
-    const skipped = (await (await post({ skip: true })).json()).classProfile;
-    expect(skipped).toMatchObject({ status: "skipped", locale: null, groups: [], classType: null });
-
+  it("no longer takes a skip, so it can't touch a saved profile", async () => {
     await post({ profile });
-    const again = (await (await post({ skip: true })).json()).classProfile;
-    expect(again).toMatchObject({ ...profile, status: "saved" });
+    expect((await post({ skip: true })).status).toBe(400);
+    expect((await (await get()).json()).classProfile).toMatchObject({ ...profile, status: "saved" });
   });
 
   it("requires a classId", async () => {
