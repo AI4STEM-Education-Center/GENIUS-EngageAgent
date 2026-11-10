@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import DiscussionStep from "@/app/components/discussion/DiscussionStep";
+import DiscussionStep, { discussionStatus } from "@/app/components/discussion/DiscussionStep";
 import type { TaskQuestions } from "@/lib/class-questions-server";
 import type { QuestionBoard } from "@/lib/class-questions";
 
@@ -72,7 +72,7 @@ it("shows the sorted questions with names and tags, and pre-selects the AI's sug
   expect(theme).toHaveTextContent("Investigable");
   expect(theme).toHaveTextContent("Suggested");
   expect(box("Why does my phone crack on tile?")).not.toBeChecked();
-  expect(onStatusChange).toHaveBeenLastCalledWith("4 questions");
+  expect(onStatusChange).toHaveBeenLastCalledWith("4 questions in");
 });
 
 it("publishes the chosen questions without names, with edited wording", async () => {
@@ -197,4 +197,20 @@ it("splits Step 4 into two tabs, with reports still loading behind the first", a
   fireEvent.click(reportsTab);
   fireEvent.click(questionsTab);
   expect(box("What does force mean?")).toBeChecked();
+});
+
+it("words the Step 4 status as in the v8.4 prototype", async () => {
+  expect(discussionStatus({ materialsSent: false })).toBe("After materials are sent");
+  expect(discussionStatus({ materialsSent: true })).toBe("Waiting for questions");
+  expect(discussionStatus({ materialsSent: true, questions: 1 })).toBe("1 question in");
+  expect(discussionStatus({ materialsSent: true, questions: 4, boardPublished: true })).toBe("Board published");
+  expect(discussionStatus({ materialsSent: true, questions: 4, boardPublished: true, released: true })).toBe("Reports released");
+
+  // Live: releasing the reports updates the step bar.
+  const onStatusChange = vi.fn();
+  view({ onStatusChange });
+  await waitFor(() => expect(onStatusChange).toHaveBeenLastCalledWith("4 questions in"));
+  const reports = openReports();
+  fireEvent.click(await within(reports).findByRole("button", { name: "Release now instead" }));
+  await waitFor(() => expect(onStatusChange).toHaveBeenLastCalledWith("Reports released"));
 });

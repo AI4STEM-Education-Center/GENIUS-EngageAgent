@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, LayoutGrid, Users } from "lucide-react";
 import SurveyBuilderView from "./SurveyBuilderView";
 import TeacherDashboardView from "./TeacherDashboardView";
-import DiscussionStep from "./discussion/DiscussionStep";
+import DiscussionStep, { discussionStatus } from "./discussion/DiscussionStep";
 import AppFrame from "./layout/AppFrame";
 import AppHeader, { taskContext, type TaskShell } from "./layout/AppHeader";
 import AskEngageAgent from "./AskEngageAgent";
@@ -446,7 +446,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const registerGalleryLeaveGuard = useCallback((guard: ((proceed: () => void) => void) | null) => { galleryLeaveGuard.current = guard; }, []);
   const inGenius = useInGenius();
   const { isGeniusEmbed } = useAuth();
-  const [discussionStatus, setDiscussionStatus] = useState("Class results");
+  // Step 4's status once it has loaded; until then it follows the materials.
+  const [loadedDiscussionStatus, setDiscussionStatus] = useState<string | null>(null);
   // Step 4 is done once reports are released (#176, v8.4 prototype).
   // Null until Step 4 has loaded; then it wins over the saved progress (e.g. after Unpublish).
   const [discussionDone, setDiscussionDone] = useState<boolean | null>(null);
@@ -482,6 +483,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     // preserves completion from a published survey when the quiz becomes a draft.
     setStoredProgress(null);
     setDiscussionDone(null);
+    setDiscussionStatus(null);
     void loadSavedProgress();
   }, [materialWorkspace, loadSavedProgress]);
 
@@ -720,6 +722,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   useEffect(() => {
     progressScope.current = materialWorkspace;
     setDiscussionDone(null);
+    setDiscussionStatus(null);
     void loadSavedProgress();
     return () => {
       progressScope.current = null;
@@ -1864,7 +1867,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     selectedStrategies.length ? getEngagementStrategyLabel(selectedStrategies[0])
       : studentAnswers.length ? `${studentAnswers.length} response${studentAnswers.length === 1 ? "" : "s"} in` : "Waiting for responses",
     publishedContentIds.size || publishedSlideCount || galleryPublished ? "Sent to students" : content.length ? "Draft ready" : "Not started",
-    discussionStatus,
+    loadedDiscussionStatus ?? discussionStatus({ released: discussionDone ?? (savedProgress?.discussion === "done"), materialsSent: publishedContentIds.size > 0 || publishedSlideCount > 0 }),
   ];
   const materialsSent = publishedContentIds.size > 0 || publishedSlideCount > 0 || galleryPublished;
   const progress = activityProgress({
