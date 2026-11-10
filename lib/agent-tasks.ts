@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { UserContext } from "./auth";
 import { isWorkspaceClass, WorkspaceError } from "./workspace";
-import { workspaceGet, workspacePut, workspaceQuery } from "./workspace-store";
+import { isWorkspaceConflict, workspaceGet, workspacePut, workspaceQuery } from "./workspace-store";
 
 /** An EngageAgent activity that GENIUS embeds by `task_id` (/create, /edit, /view,
  * /delete, /launch). Separate from GENIUS's class, learning-task and assignment IDs,
@@ -33,12 +33,46 @@ function scopeId(value: unknown) {
   return typeof value === "string" && value.trim() && value.length <= 160 ? value.trim() : null;
 }
 
-async function save(task: AgentTask, createOnly = false) {
-  await workspacePut([
+/** The store writes for one activity: its record and its owner's index entry. */
+export function agentTaskWrites(task: AgentTask, createOnly = false) {
+  return [
     { partition: taskPartition(task.agentTaskId), key: "META", value: task, createOnly },
     { partition: ownerPartition(task.ownerGeniusId), key: `TASK#${task.agentTaskId}`,
       value: { agentTaskId: task.agentTaskId, title: task.title, archived: task.archived }, createOnly },
-  ]);
+  ];
+}
+
+async function save(task: AgentTask, createOnly = false) {
+  await workspacePut(agentTaskWrites(task, createOnly));
+}
+
+/** A new, unsaved activity owned by this teacher. */
+export function newAgentTask(user: UserContext, name: unknown, agentTaskId = `ea-agent-task-${randomUUID()}`): AgentTask {
+  if (user.role !== "teacher") throw new WorkspaceError("Only teachers can create activities.", 403);
+  const now = new Date().toISOString();
+  return { agentTaskId, title: title(name), ownerGeniusId: user.geniusId, archived: false, createdAt: now, updatedAt: now };
+}
+
+/** The activity ID for an EngageAgent class task (#176). Derived from the class
+ * and task so that two tabs opening an older task at once agree on one record. */
+export function taskActivityId(classId: string, assignmentId: string) {
+  const hex = createHash("sha256").update(`${classId}\n${assignmentId}`).digest("hex");
+  return `ea-agent-task-${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** Saves a new activity with this ID, or returns the one already there. */
+export async function createAgentTaskOnce(task: AgentTask) {
+  const existing = await getAgentTask(task.agentTaskId);
+  if (existing) return existing;
+  try {
+    await save(task, true);
+    return task;
+  } catch (error) {
+    if (!isWorkspaceConflict(error)) throw error;
+    const raced = await getAgentTask(task.agentTaskId);
+    if (raced) return raced;
+    throw error;
+  }
 }
 
 export async function getAgentTask(id: unknown): Promise<AgentTask | null> {
@@ -63,10 +97,7 @@ export async function requireOwnedAgentTask(user: UserContext, id: unknown, opti
 }
 
 export async function createAgentTask(user: UserContext, name: unknown) {
-  if (user.role !== "teacher") throw new WorkspaceError("Only teachers can create activities.", 403);
-  const now = new Date().toISOString();
-  const task: AgentTask = { agentTaskId: `ea-agent-task-${randomUUID()}`, title: title(name),
-    ownerGeniusId: user.geniusId, archived: false, createdAt: now, updatedAt: now };
+  const task = newAgentTask(user, name);
   await save(task, true);
   return task;
 }

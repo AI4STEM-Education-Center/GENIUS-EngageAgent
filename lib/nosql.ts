@@ -1344,6 +1344,7 @@ export const listAllMedia = async (options: {
 export const getQuizStatus = async (
   classId: string,
   assignmentId: string,
+  readOptions?: { consistentRead?: boolean },
 ): Promise<QuizStatusRecord | null> => {
   if (useDynamoDb) {
     const client = getDynamoClient();
@@ -1351,6 +1352,7 @@ export const getQuizStatus = async (
     const result = await client.send(
       new GetCommand({
         TableName: dynamoTableName,
+        ...(readOptions?.consistentRead ? { ConsistentRead: true } : {}),
         Key: {
           [pkField]: `CLASS#${classId}`,
           [skField]: `QUIZ_STATUS#ASSIGN#${assignmentId}`,

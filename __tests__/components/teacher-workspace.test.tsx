@@ -89,7 +89,7 @@ it("shows the v8.3 header and four teacher steps, with the dashboard as its own 
   expect(screen.getByRole("heading", { name: "Pre-knowledge assessment" })).toBeTruthy();
   const steps = within(screen.getByRole("navigation", { name: "Teacher steps" })).getAllByRole("button");
   expect(steps.map(step => step.textContent)).toEqual([
-    "1Pre-knowledge assessmentNot started", "2Strategy recommendationsWaiting for responses", "3Material GenerationNot started", "4Questions & discussionClass results",
+    "1Pre-knowledge assessmentNot started", "2Strategy recommendationsWaiting for responses", "3Material GenerationNot started", "4Questions & discussionAfter materials are sent",
   ]);
   const header = within(screen.getByRole("banner"));
   expect(header.getByText("Physics · Period 3")).toBeTruthy();
