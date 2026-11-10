@@ -1,3 +1,4 @@
+import { loadedLesson } from "./lesson-registry";
 import type { Lesson, QuizItem } from "./types";
 
 import lesson1 from "@/data/lesson1.json";
@@ -40,7 +41,7 @@ function normalizeLesson(rawLesson: RawLesson): Lesson {
   };
 }
 
-const lessons: Lesson[] = [
+const builtInLessons: Lesson[] = [
   normalizeLesson(lesson1),
   normalizeLesson(lesson2),
   normalizeLesson(lesson3),
@@ -51,12 +52,23 @@ const lessons: Lesson[] = [
   normalizeLesson(lesson8),
 ];
 
+/**
+ * The 8 lesson files as first written. Only for copying them into storage:
+ * anything showing or using a lesson goes through getLesson or lessons-store.
+ */
 export function getAllLessons(): Lesson[] {
-  return lessons;
+  return builtInLessons;
 }
 
+/**
+ * The lesson this request or page has loaded (see lib/lesson-registry.ts). The
+ * files are only a last resort when nothing is loaded: they hold lessons 1-8 at
+ * version 1, and a request's own lessons always win over them.
+ */
 export function getLesson(lessonNumber: number): Lesson | null {
-  return lessons.find((l) => l.lesson_number === lessonNumber) ?? null;
+  const loaded = loadedLesson(lessonNumber);
+  if (loaded !== undefined) return loaded;
+  return builtInLessons.find((l) => l.lesson_number === lessonNumber) ?? null;
 }
 
 export function getLessonQuizItems(lessonNumber: number) {

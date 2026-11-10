@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { workspaceGet, workspacePut, workspaceQuery } from "./workspace-store";
 import { authorizeSlides, requestDraft, slideContext, SlideRequestError, type AuthorizedSlideContext } from "./slides/server";
 import { getLesson } from "./quiz-data";
+import { enterLessonScope, loadTaskLessons } from "./lesson-scope";
 import { resolveStrategyFocus } from "./strategy-focus";
 import { getMedia } from "./nosql";
 import { parseMaterialActivity } from "./material-activities";
@@ -143,6 +144,7 @@ function imageDimensions(bytes: Buffer, mime: string): { width: number; height: 
 }
 
 async function startShare(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+  enterLessonScope(await loadTaskLessons(context, body.lessonNumber));
   const { strategy } = slideContext(body);
   const draft = requestDraft(body.draft, strategy, true);
   const assets = parseAssetDescriptions(body.assets, draft);
@@ -242,6 +244,7 @@ async function savedVideoMedia(context: AuthorizedSlideContext, item: ContentIte
   return storeGalleryBlob(key, bytes, mime);
 }
 async function shareVideo(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+  enterLessonScope(await loadTaskLessons(context, body.lessonNumber));
   if (!Number.isInteger(body.lessonNumber) || !getLesson(Number(body.lessonNumber))) throw new SlideRequestError("Choose a valid lesson.", 422);
   const item = videoItem(body.item, Number(body.lessonNumber));
   const meta = metadata(body.metadata, Number(body.lessonNumber), item.strategy);
@@ -282,6 +285,7 @@ function sameFocus(a: unknown, b: unknown) {
 }
 async function startCopySave(body: Record<string, unknown>, context: AuthorizedSlideContext) {
   const { copy, source } = await copiedSource(context, body.copyId);
+  enterLessonScope(await loadTaskLessons(context, source.lessonNumber));
   if (!Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 0) throw new SlideRequestError("Provide the last saved revision.", 422);
   if ((copy.saved?.revision ?? 0) !== body.expectedRevision) throw saveConflict();
   const value = source.format === "slides" ? body.deck : body.item;
@@ -513,7 +517,7 @@ export async function galleryGet(request: Request) {
   }
   const filters: GalleryFilters = {};
   if (params.has("lessonNumber")) {
-    const n = Number(params.get("lessonNumber")); if (!Number.isInteger(n) || !getLesson(n)) throw new SlideRequestError("Choose a valid lesson."); filters.lessonNumber = n;
+    const n = Number(params.get("lessonNumber")); enterLessonScope(await loadTaskLessons(context, n)); if (!Number.isInteger(n) || !getLesson(n)) throw new SlideRequestError("Choose a valid lesson."); filters.lessonNumber = n;
   }
   if (params.has("strategy")) filters.strategy = text(params.get("strategy"), "Strategy", 80, false);
   if (params.has("format")) { if (!["slides", "video"].includes(params.get("format")!)) throw new SlideRequestError("Choose slides or video."); filters.format = params.get("format") as "slides" | "video"; }

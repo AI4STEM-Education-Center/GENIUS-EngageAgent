@@ -94,11 +94,12 @@ describe("POST /api/strategy-job", () => {
       classId: "class-1",
       assignmentId: "assignment-1",
       lessonNumber: 2,
+      lessonContext: { lessonNumber: 2, lessonTitle: "Lesson 2", learningObjective: expect.any(String) },
       totalStudents: 2,
       forceRefresh: false,
       students: [
-        { id: "student-1", name: "Ava", assignment: "Lesson 1", answers: { q1: "A" } },
-        { id: "student-2", name: "Jon", assignment: "Lesson 1", answers: { q1: "B" } },
+        { id: "student-1", name: "Ava", assignment: "Lesson 1", answers: { q1: "A" }, quizEvidence: expect.any(Array) },
+        { id: "student-2", name: "Jon", assignment: "Lesson 1", answers: { q1: "B" }, quizEvidence: expect.any(Array) },
       ],
     });
   });
@@ -130,10 +131,11 @@ describe("POST /api/strategy-job", () => {
       classId: "class-1",
       assignmentId: "assignment-1",
       lessonNumber: 2,
+      lessonContext: { lessonNumber: 2, lessonTitle: "Lesson 2", learningObjective: expect.any(String) },
       totalStudents: 1,
       forceRefresh: true,
       students: [
-        { id: "student-1", name: "Ava", assignment: "Lesson 1", answers: { q1: "A" } },
+        { id: "student-1", name: "Ava", assignment: "Lesson 1", answers: { q1: "A" }, quizEvidence: expect.any(Array) },
       ],
     });
   });

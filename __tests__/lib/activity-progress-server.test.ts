@@ -35,6 +35,27 @@ it("counts a published survey and released reports", async () => {
   expect((await progress()).assessment).toBe("not-started");
   db.surveys = [{ status: "published" }];
   expect((await progress()).assessment).toBe("done");
-  db.docs.set("report_release", { reason: "early" });
+  db.quiz = { lesson_number: 3, status: "published" };
+  db.docs.set("report_release", { reason: "early", lessonNumber: 3 });
+  expect((await progress()).discussion).toBe("done");
+});
+
+it("keeps discussion in progress when a release belongs to a different lesson", async () => {
+  db.quiz = { lesson_number: 4, status: "published" };
+  db.published = [{ content_item_id: "m1" }];
+  db.docs.set("report_release", { reason: "taught", lessonNumber: 3 });
+  expect((await progress()).discussion).toBe("in-progress");
+  db.docs.set("report_release", { reason: "taught", lessonNumber: 4 });
+  expect((await progress()).discussion).toBe("done");
+});
+
+it("does not mark discussion done from a saved release while the quiz is a draft", async () => {
+  db.quiz = { lesson_number: 3, status: "draft" };
+  db.docs.set("question_board", { questions: [] });
+  db.docs.set("report_release", { reason: "early", lessonNumber: 3 });
+  expect((await progress()).discussion).toBe("in-progress");
+  db.quiz.status = "published";
+  expect((await progress()).discussion).toBe("done");
+  db.quiz.status = "closed";
   expect((await progress()).discussion).toBe("done");
 });

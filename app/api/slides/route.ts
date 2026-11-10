@@ -1,5 +1,6 @@
 import { slideRevisionOutputFormat, slideRevisionPrompt, validSlideRevisionIndex } from "@/lib/slides/slide-revision";
-import { getAllLessons } from "@/lib/quiz-data";
+import { listTaskLessons } from "@/lib/lessons-store";
+import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import { slideOutputFormat, slidePrompt } from "@/lib/slides/prompts";
 import { authorizeSlides, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, requestFocus, slideContext, slideDiagnosticContext, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
 import { existingGenerationKey, resolveSlideModel, slideModelCatalog, slideTextRequestLimits, slideTextSettings } from "@/lib/slides/model-config";
@@ -13,8 +14,8 @@ export const maxDuration = 30;
 
 export async function GET(request: Request) {
   try {
-    await authorizeSlides(request, Object.fromEntries(new URL(request.url).searchParams));
-    return slideJson({ lessons: getAllLessons().map(lesson => ({ lessonNumber: lesson.lesson_number, lessonTitle: lesson.lesson_title, learningObjective: lesson.learning_objective })), models: slideModelCatalog() });
+    const { classId, assignmentId } = await authorizeSlides(request, Object.fromEntries(new URL(request.url).searchParams));
+    return slideJson({ lessons: (await listTaskLessons(classId, assignmentId)).map(lesson => ({ lessonNumber: lesson.lessonNumber, lessonTitle: lesson.title, learningObjective: lesson.learningObjective })), models: slideModelCatalog() });
   } catch (error) { return slideFailure(error); }
 }
 
@@ -22,6 +23,7 @@ export async function POST(request: Request) {
   try {
     const body = await readSlideBody(request);
     const authorized = await authorizeSlides(request, body);
+    enterLessonScope(await loadTaskLessons(authorized, body.lessonNumber));
     const { lesson, strategy } = slideContext(body);
     const classroomContext = requestClassroomContext(body.classroomContext);
     const promptVersion = body.promptVersion === undefined ? "optimized" : body.promptVersion;

@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({ session: vi.fn(), context: vi.fn(), answers: v
   get: vi.fn(), put: vi.fn(), published: vi.fn(), upsert: vi.fn(), send: vi.fn(), sign: vi.fn() }));
 vi.mock("@/lib/session", () => ({ sessionUser: mocks.session, sameOriginRequest: (r: Request) => r.headers.get("origin") === "https://engage.test" }));
 vi.mock("@/lib/workspace", async original => ({ ...await original<object>(), workspaceContext: mocks.context }));
+// Not about lessons: getLesson reads the lesson files here. See lesson-wiring.test.ts for the stored ones.
+vi.mock("@/lib/lesson-scope", () => ({ enterLessonScope: () => {}, loadTaskLessons: async () => new Map() }));
+vi.mock("@/lib/lessons-store", () => ({ listTaskLessons: async () => [] }));
 vi.mock("@/lib/workspace-store", () => ({ workspaceGet: mocks.get, workspacePut: mocks.put }));
 vi.mock("@/lib/nosql", () => ({ listStudentAnswers: mocks.answers, listPublishedContent: mocks.published, upsertContentPublish: mocks.upsert }));
 vi.mock("openai", () => ({ default: class { responses = { create: mocks.create, retrieve: mocks.retrieve, cancel: mocks.cancel }; } }));

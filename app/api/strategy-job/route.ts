@@ -7,6 +7,8 @@ import {
   getCohortAnalysisQueueConfigIssues,
   isCohortAnalysisQueueConfigured,
 } from "@/lib/cohort-analysis-queue";
+import { getLessonGenerationContext, resolveQuizEvidence } from "@/lib/lesson-context";
+import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import { createCohortJob, setCohortJobStatus } from "@/lib/nosql";
 
 type Student = {
@@ -75,6 +77,16 @@ export async function POST(request: Request) {
       );
     }
 
+    // The worker runs elsewhere with only the lesson files, so it's sent this task's lesson details.
+    enterLessonScope(await loadTaskLessons({ classId: classKey, assignmentId: assignmentKey }, normalizedLessonNumber));
+    const lessonContext = getLessonGenerationContext(normalizedLessonNumber);
+    if (!lessonContext) {
+      return NextResponse.json(
+        { error: `Lesson ${normalizedLessonNumber} not found.` },
+        { status: 400 },
+      );
+    }
+
     const jobId = crypto.randomUUID();
     await createCohortJob(
       jobId,
@@ -89,9 +101,13 @@ export async function POST(request: Request) {
         classId: classKey,
         assignmentId: assignmentKey,
         lessonNumber: normalizedLessonNumber,
+        lessonContext,
         totalStudents: normalizedStudents.length,
         forceRefresh: shouldForceRefresh,
-        students: normalizedStudents,
+        students: normalizedStudents.map((student) => ({
+          ...student,
+          quizEvidence: resolveQuizEvidence(normalizedLessonNumber, student.answers),
+        })),
       });
     } catch (error) {
       await setCohortJobStatus(
