@@ -260,11 +260,11 @@ describe("what goes to OpenAI", () => {
   });
 
   it.each([
-    ["assessment", "Step 1"], ["strategy", "Step 2"], ["materials", "Step 3"], ["discussion", "Step 4"], ["dashboard", "Dashboard"], ["gallery", "Gallery"],
+    ["assessment", "Step 1"], ["strategy", "Step 2"], ["materials", "Step 3"], ["discussion", "Step 4"], ["dashboard", "Task Dashboard"], ["gallery", "Gallery"],
   ])("tells the model the teacher is on %s, and describes every tab", async (page, name) => {
     await post({ ...valid, page });
     expect(systemPrompt()).toMatch(new RegExp(`on this page now: ${name}\\b`));
-    for (const other of ["Step 1", "Step 2", "Step 3", "Step 4", "Dashboard", "Gallery"]) expect(systemPrompt()).toMatch(new RegExp(`^${other} \\(`, "m"));
+    for (const other of ["Step 1", "Step 2", "Step 3", "Step 4", "Task Dashboard", "Gallery"]) expect(systemPrompt()).toMatch(new RegExp(`^${other} \\(`, "m"));
   });
 
   it("holds the bot to its rules", async () => {

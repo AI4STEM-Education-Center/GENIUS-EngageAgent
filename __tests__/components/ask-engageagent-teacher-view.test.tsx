@@ -26,7 +26,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-it("follows the teacher across every step, the Dashboard and the Gallery and keeps the thread", async () => {
+it("follows the teacher across every step and the task Gallery and keeps the thread", async () => {
   render(<TeacherView user={teacher} shell={{ taskTitle: "Collisions" }} />);
   await waitFor(() => expect(stepButtons().length).toBe(4));
   fireEvent.click(screen.getByRole("button", { name: "Ask EngageAgent" }));
@@ -49,8 +49,6 @@ it("follows the teacher across every step, the Dashboard and the Gallery and kee
   }
 
   const header = within(screen.getByRole("banner"));
-  fireEvent.click(header.getByRole("button", { name: "Dashboard" }));
-  await waitFor(() => expect(panel().textContent).toContain("Helping with: Dashboard"));
   fireEvent.click(header.getByRole("button", { name: "Gallery" }));
   await waitFor(() => expect(panel().textContent).toContain("Helping with: Gallery"));
   expect(within(panel()).getByText("A question to keep")).toBeTruthy();
@@ -79,7 +77,9 @@ it("shows the icon on the Gallery and Dashboard when they are opened directly", 
   expect(await screen.findByRole("button", { name: "Ask EngageAgent" })).toBeTruthy();
   view.unmount();
   render(<TeacherView user={teacher} initialView="dashboard" />);
-  expect(await screen.findByRole("button", { name: "Ask EngageAgent" })).toBeTruthy();
+  const ask = await screen.findByRole("button", { name: "Ask EngageAgent" });
+  fireEvent.click(ask);
+  expect(panel().textContent).toContain("Helping with: Dashboard");
 });
 
 it("isn't offered without a class and assignment", async () => {
