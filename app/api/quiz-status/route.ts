@@ -70,6 +70,12 @@ export async function POST(request: Request) {
       );
     }
 
+    // A task published through /api/task-quiz (#177) can't go back to draft or move to another lesson.
+    const locked = await getPublishedTaskQuiz(classId, assignmentId);
+    if (locked && (status === "draft" || lessonNumber !== locked.lesson?.number)) {
+      return NextResponse.json({ error: PUBLISHED_MESSAGE }, { status: 409 });
+    }
+
     // A quiz can't go out on a lesson students can't read. If this can't be checked, the quiz still saves.
     if (status === "published" && Number.isInteger(lessonNumber)
       && await getTaskLesson(classId, assignmentId, lessonNumber).then((found) => !found, () => false)) {
@@ -100,4 +106,6 @@ export async function POST(request: Request) {
   }
 }
 import { getTaskLesson, pinTaskToLesson } from "@/lib/lessons-store";
+import { PUBLISHED_MESSAGE } from "@/lib/task-quiz";
+import { getPublishedTaskQuiz } from "@/lib/task-quiz-store";
 import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";
