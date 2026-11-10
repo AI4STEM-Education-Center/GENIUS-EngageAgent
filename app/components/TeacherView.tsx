@@ -3,7 +3,7 @@
 import { scopedTaskFetch } from "@/lib/client-auth";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BarChart3, LayoutGrid, Users } from "lucide-react";
+import { BarChart3, BookOpen, LayoutGrid, Users } from "lucide-react";
 import SurveyBuilderView from "./SurveyBuilderView";
 import TeacherDashboardView from "./TeacherDashboardView";
 import DiscussionStep, { discussionStatus } from "./discussion/DiscussionStep";
@@ -1889,6 +1889,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
       header={<AppHeader userName={user.name} homeHref={shell?.homeHref} context={taskContext(user, shell)} canSignOut={shell?.canSignOut}
         beforeNavigate={showGallery ? leaveGallery : undefined}
         actions={[
+          { label: "Lessons", icon: <BookOpen size={15} />, href: "/teacher/lessons" },
           { label: "Class profile", icon: <Users size={15} />, onClick: classProfile.openEditor, comingSoon: !hasAssignmentContext },
           { label: "Dashboard", icon: <BarChart3 size={15} />, onClick: () => leaveGallery(() => { setShowGallery(false); setShowDashboard(true); }), active: showDashboard },
           { label: "Gallery", icon: <LayoutGrid size={15} />, onClick: openGallery, active: showGallery },

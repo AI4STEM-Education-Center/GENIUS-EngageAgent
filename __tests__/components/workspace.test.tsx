@@ -228,3 +228,12 @@ it("does not show Gallery selection or teacher controls on a student's class lis
   expect(screen.queryByRole("link", { name: "Gallery" })).toBeNull();
   expect(screen.queryByRole("heading", { name: /Choose a/ })).toBeNull();
 });
+it("links teachers to Lessons from their class pages, but not students", async () => {
+  mocks.fetch.mockResolvedValue(reply({ classes: [] }));
+  render(<Workspace />); await screen.findByText("No classes yet.");
+  expect(screen.getByRole("link", { name: "Lessons" }).getAttribute("href")).toBe("/teacher/lessons");
+  cleanup();
+  mocks.role = "student";
+  render(<Workspace />); await screen.findByText("No classes yet.");
+  expect(screen.queryByRole("link", { name: "Lessons" })).toBeNull();
+});

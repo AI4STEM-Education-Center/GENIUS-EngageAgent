@@ -72,3 +72,10 @@ it("opens the editor for a stored profile with missing answers (#173)", async ()
   const dialog = await screen.findByRole("dialog", { name: "Tell EngageAgent about this class" });
   expect(within(dialog).getByRole("button", { name: /^Rural/ }).getAttribute("aria-pressed")).toBe("false");
 });
+
+it("links to Lessons from a task's header (#175)", async () => {
+  classProfile = savedProfile;
+  render(<TeacherView user={teacher} shell={{ homeHref: "/teacher/classes" }} />);
+  await screen.findByRole("button", { name: "Class profile" });
+  expect(screen.getByRole("link", { name: "Lessons" }).getAttribute("href")).toBe("/teacher/lessons");
+});
