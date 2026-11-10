@@ -31,7 +31,7 @@ it("preserves request headers while authenticating matching task API requests", 
   expect(init.headers).not.toHaveProperty("Authorization");
 });
 
-it.each(["question-analysis", "question-board", "quiz-report", "quiz-report-release"])("authenticates the %s task API only for the verified class and assignment", async path => {
+it.each(["ask-engageagent", "question-analysis", "question-board", "quiz-report", "quiz-report-release"])("authenticates the %s task API only for the verified class and assignment", async path => {
   const transport = vi.fn(async () => new Response("{}"));
   vi.stubGlobal("fetch", transport);
   setVerifiedClientAuth("host-token", user);

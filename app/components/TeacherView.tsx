@@ -3,12 +3,14 @@
 import { scopedTaskFetch } from "@/lib/client-auth";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BarChart3, LayoutGrid, MessageCircle, Users } from "lucide-react";
+import { BarChart3, LayoutGrid, Users } from "lucide-react";
 import SurveyBuilderView from "./SurveyBuilderView";
 import TeacherDashboardView from "./TeacherDashboardView";
 import DiscussionStep from "./discussion/DiscussionStep";
 import AppFrame from "./layout/AppFrame";
 import AppHeader, { taskContext, type TaskShell } from "./layout/AppHeader";
+import AskEngageAgent from "./AskEngageAgent";
+import { ASK_STEP_PAGES } from "@/lib/ask-engageagent";
 import StepTabs, { type StepTab } from "./layout/StepTabs";
 import ActivityContextSuggestion from "./ActivityContextSuggestion";
 import MaterialActivityView from "./MaterialActivityView";
@@ -334,9 +336,9 @@ const savedItemLessons = (items: PublishedContentPayloadItem[] | undefined) => [
 }))];
 
 const stepLabels = [
-  "Assessment",
-  "Strategy",
-  "Engagement materials",
+  "Pre-knowledge assessment",
+  "Strategy recommendations",
+  "Material Generation",
   "Questions & discussion",
 ];
 
@@ -363,7 +365,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   // Assessment step sub-tabs (quiz vs survey), mirrors the tab pattern in StudentView.
   const [assessmentTab, setAssessmentTab] = useState<"quiz" | "survey">("quiz");
 
-  // Class profile (#173): set up on the class page; here it's only shown and edited.
+  // Class profile (#173): answered when the class is added; here it's only shown and edited.
   const classProfile = useClassProfile({ classId, assignmentId, enabled: hasAssignmentContext });
 
   // Student answers
@@ -1825,7 +1827,6 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           { label: "Class profile", icon: <Users size={15} />, onClick: classProfile.openEditor, comingSoon: !hasAssignmentContext },
           { label: "Dashboard", icon: <BarChart3 size={15} />, onClick: () => leaveGallery(() => { setShowGallery(false); setShowDashboard(true); }), active: showDashboard },
           { label: "Gallery", icon: <LayoutGrid size={15} />, onClick: openGallery, active: showGallery },
-          { label: "Ask EngageAgent", icon: <MessageCircle size={15} />, comingSoon: true },
         ]} />}
       tabs={!showGallery && <>
         {(inGenius || isGeniusEmbed) && <nav aria-label="Material library" className="flex justify-end border-b border-line bg-white px-5 py-2"><button type="button" onClick={openGallery} disabled={generationBusy || !hasAssignmentContext} className="inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-ink hover:bg-canvas disabled:opacity-50"><LayoutGrid size={16} />Gallery</button></nav>}
@@ -1840,7 +1841,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 1</p>
-                <h2 className="text-2xl font-semibold text-slate-900">Assessment</h2>
+                <h2 className="text-2xl font-semibold text-slate-900">Pre-knowledge assessment</h2>
                 <p className="mt-1 text-sm text-slate-500">Give students a quiz, a survey, or both for this learning task.</p>
               </div>
 
@@ -1989,7 +1990,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div className="flex flex-col gap-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 3</p>
-                <h2 className="text-2xl font-semibold text-slate-900">Engagement materials</h2>
+                <h2 className="text-2xl font-semibold text-slate-900">Material Generation</h2>
                 <p className="text-sm text-slate-600">Create teaching materials, then review and edit them before sending to your class.</p>
               </div>
 
@@ -2428,6 +2429,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           </div>
         )}
       <a ref={downloadRef} className="hidden" />
+      <AskEngageAgent key={materialWorkspace} role={user.role} classId={classId} assignmentId={assignmentId} lessonNumber={selectedLesson}
+        page={showGallery ? "gallery" : showDashboard ? "dashboard" : ASK_STEP_PAGES[currentStep - 1]}
+        pageLabel={showGallery ? "Gallery" : showDashboard ? "Dashboard" : `Step ${currentStep} · ${stepLabels[currentStep - 1]}`} />
     </AppFrame>
   );
 }

@@ -27,7 +27,7 @@ it.each([
   [null],
   [{ class_id: "ea-class-profile", status: "saved" }],
   [{ class_id: "ea-class-profile", status: "skipped" }],
-])("never asks for the class profile inside a task; that happens on the class page (#173, saved profile: %j)", async (saved) => {
+])("never asks for the class profile inside a task; that happens when the class is added (#173, saved profile: %j)", async (saved) => {
   classProfile = saved;
   render(<TeacherView user={teacher} />);
   await screen.findByRole("button", { name: /Lesson 1 0 questions/ });

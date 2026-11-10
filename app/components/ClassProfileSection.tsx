@@ -5,12 +5,12 @@ import { describeClassProfile } from "@/lib/class-profile";
 import { useClassProfile } from "./ClassProfileModal";
 
 /**
- * The class page's "Class profile" step (#173): set up once for the class,
- * before its tasks. Opens the form the first time; every task then shows it
- * in Step 3, where it can also be edited.
+ * The class page's "Class profile" (#173): it is answered when the class is
+ * added, and shown and edited here. Classes without one can add it here too.
+ * Every task then shows it in Step 3, where it can also be edited.
  */
-export default function ClassProfileSection({ classId }: { classId: string }) {
-  const classProfile = useClassProfile({ classId, enabled: true, askFirst: true });
+export default function ClassProfileSection({ classId, saveFailed = false }: { classId: string; saveFailed?: boolean }) {
+  const classProfile = useClassProfile({ classId, enabled: true });
   const saved = classProfile.profile?.status === "saved";
   const summary = describeClassProfile(classProfile.profile);
 
@@ -19,7 +19,7 @@ export default function ClassProfileSection({ classId }: { classId: string }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 id="class-profile-heading" className="flex items-center gap-2 text-lg font-semibold"><Users size={18} />Class profile</h2>
-          <p className="mt-1 text-sm text-gray-600">Set this up once for the class. Every task uses it to tailor materials.</p>
+          <p className="mt-1 text-sm text-gray-600">Every task in this class uses it to tailor materials.</p>
         </div>
         {classProfile.loaded && (
           <button type="button" onClick={classProfile.openEditor} aria-label={saved ? "Edit class profile" : undefined}
@@ -35,7 +35,9 @@ export default function ClassProfileSection({ classId }: { classId: string }) {
           ))}
         </dl>
       )}
-      {classProfile.loaded && !saved && <p className="mt-3 text-sm text-gray-500">Not set yet.</p>}
+      {saveFailed && !saved
+        ? <p role="alert" className="mt-3 text-sm text-red-800">Your class was added, but its profile didn&apos;t save. Please add it again.</p>
+        : classProfile.loaded && !saved && <p className="mt-3 text-sm text-gray-500">Not set yet.</p>}
       {classProfile.element}
     </section>
   );
