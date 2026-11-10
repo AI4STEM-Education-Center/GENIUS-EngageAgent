@@ -138,10 +138,10 @@ describe("counts and labels", () => {
     expect(publishedMessage(null)).toBe("Task published");
   });
   it("words the bar after publishing", () => {
-    expect(publishedBarLines({ className: "Period 3", classSize: 25, submitted: 0 })).toEqual({ published: "Task published to Period 3.", progress: "Waiting for students — 0 of 25 submitted.", canGoToStep2: false });
-    expect(publishedBarLines({ className: "Period 3", classSize: 25, submitted: 4 })).toEqual({ published: "Task published to Period 3.", progress: "4 of 25 students submitted.", canGoToStep2: true });
+    expect(publishedBarLines({ className: "Period 3", classSize: 25, submitted: 0 })).toEqual({ published: "Quiz published to Period 3.", progress: "Waiting for students — 0 of 25 submitted.", canGoToStep2: false });
+    expect(publishedBarLines({ className: "Period 3", classSize: 25, submitted: 4 })).toEqual({ published: "Quiz published to Period 3.", progress: "4 of 25 students submitted.", canGoToStep2: true });
     expect(publishedBarLines({ className: null, classSize: null, submitted: 0 }).progress).toBe("Waiting for students — 0 submitted.");
-    expect(publishedBarLines({ className: null, classSize: null, submitted: 1 })).toEqual({ published: "Task published.", progress: "1 student submitted.", canGoToStep2: true });
+    expect(publishedBarLines({ className: null, classSize: null, submitted: 1 })).toEqual({ published: "Quiz published.", progress: "1 student submitted.", canGoToStep2: true });
   });
 });
 

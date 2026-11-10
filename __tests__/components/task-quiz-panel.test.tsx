@@ -178,23 +178,35 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 const hold = (path: string) => { let release = () => {}; held[path] = new Promise<void>((resolve) => { release = () => { held[path] = undefined; resolve(); }; }); return () => act(async () => { release(); }); };
 
 describe("UC 4.1: the lesson and the provided quiz", () => {
-  it("shows the first lesson's card before anything is picked, and pins nothing just by looking", async () => {
+  it("starts on 'Choose a lesson' with no button, and pins nothing until one is chosen (#177)", async () => {
     await start();
+    const select = screen.getByLabelText("Lesson") as HTMLSelectElement;
+    expect(select.value).toBe("");
+    expect(within(select).getByRole("option", { name: "Choose a lesson" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use this lesson" })).toBeNull();
     const lesson = screen.getByRole("region", { name: "Lesson details" });
-    expect(within(lesson).getByText("Learning objective")).toBeInTheDocument();
-    expect(within(lesson).getByText("Explain collisions")).toBeInTheDocument();
-    expect(within(lesson).getAllByRole("listitem").map((row) => row.textContent)).toEqual(expect.arrayContaining(["Forces come in pairs", "Energy moves", `${MC1}${MISCONCEPTION_TEXT[MC1]}`]));
-    expect(lesson.querySelectorAll("ol > li")).toHaveLength(2);
+    expect(within(lesson).getByText("Choose a lesson to see its objective, core ideas and misconceptions.")).toBeInTheDocument();
+    expect(within(lesson).queryByText("Explain collisions")).toBeNull();
     expect(screen.getByLabelText(/Anchoring phenomenon/)).toBeInTheDocument();
-    expect(screen.getByText("(optional)")).toBeInTheDocument();
     expect(calls.filter((call) => call.method === "POST")).toEqual([]);
-    expect(source(/Provided \(Lesson 1\)/)).toBeDisabled();
+    expect(source(/Provided/)).toBeDisabled();
+    expect(source(/Provided/).textContent).toBe("Provided");
     expect(screen.getByTestId("status").textContent).toBe("Not started|");
+  });
+
+  it("shows the lesson's details once it's chosen, and the list no longer offers 'Choose a lesson'", async () => {
+    await start();
+    fireEvent.change(screen.getByLabelText("Lesson"), { target: { value: "1" } });
+    const lesson = screen.getByRole("region", { name: "Lesson details" });
+    await within(lesson).findByText("Explain collisions");
+    expect(within(lesson).getByText("Learning objective")).toBeInTheDocument();
+    expect(lesson.querySelectorAll("ol > li")).toHaveLength(2);
+    expect(within(screen.getByLabelText("Lesson")).queryByRole("option", { name: "Choose a lesson" })).toBeNull();
   });
 
   it("picks the shown lesson, then lists the provided items, confirmed and ready", async () => {
     await start();
-    fireEvent.click(button("Use this lesson"));
+    fireEvent.change(screen.getByLabelText("Lesson"), { target: { value: "1" } });
     const first = await findItem(1);
     expect(events.picked).toEqual([1]);
     expect(callsTo("/api/task-quiz/lesson").at(-1)?.body).toMatchObject({ ...task, lessonNumber: 1 });
@@ -259,7 +271,7 @@ describe("UC 4.1: the lesson and the provided quiz", () => {
     expect(screen.getByTestId("status").textContent).toBe("In progress|Needs review");
     expect(screen.getByText("Quiz · 1 of 2 confirmed")).toBeInTheDocument();
     expect(screen.getByText("1 of 2 items need confirmation")).toBeInTheDocument();
-    expect(button("Publish task")).toBeDisabled();
+    expect(button("Publish quiz")).toBeDisabled();
   });
 
   it("offers a retry when the quiz can't load", async () => {
@@ -578,19 +590,19 @@ describe("UC 4.4: matching and confirming", () => {
     await start(withLesson({ source: "ai", items: aiItems(2) }));
     expect(screen.getByTestId("status").textContent).toBe("In progress|Needs review");
     expect(screen.getByText("2 of 2 items need confirmation")).toBeInTheDocument();
-    expect(button("Publish task")).toBeDisabled();
+    expect(button("Publish quiz")).toBeDisabled();
     expect(screen.getByText("Quiz · 0 of 2 confirmed")).toBeInTheDocument();
     fireEvent.click(within(await findItem(1)).getByRole("button", { name: "Confirm item" }));
     await within(item(1)).findByText("Confirmed");
     expect(screen.getByText("1 of 2 items need confirmation")).toBeInTheDocument();
     expect(within(item(1)).queryByLabelText("AI suggestion")).toBeNull();
     expect(within(item(1)).queryByText(/^AI · /)).toBeNull();
-    expect(button("Publish task")).toBeDisabled();
+    expect(button("Publish quiz")).toBeDisabled();
     fireEvent.click(within(item(2)).getByRole("button", { name: "Confirm item" }));
     await within(item(2)).findByText("Confirmed");
     expect(screen.queryByText(/items need confirmation/)).toBeNull();
     expect(screen.getByTestId("status").textContent).toBe("Ready to publish|Ready");
-    expect(button("Publish task")).toBeEnabled();
+    expect(button("Publish quiz")).toBeEnabled();
     expect(screen.getByText("Quiz · 2 items confirmed")).toBeInTheDocument();
   });
 });
@@ -692,7 +704,7 @@ describe("UC 4.5: preview and publish", () => {
   it("doesn't offer a preview with no items", async () => {
     await start();
     expect(button("Preview as student")).toBeDisabled();
-    expect(button("Publish task")).toBeDisabled();
+    expect(button("Publish quiz")).toBeDisabled();
     expect(screen.getByText("Pick a lesson first.")).toBeInTheDocument();
   });
 
@@ -706,7 +718,7 @@ describe("UC 4.5: preview and publish", () => {
   it("publishes, then locks everything and says so", async () => {
     await start(withLesson());
     await findItem(1);
-    fireEvent.click(button("Publish task"));
+    fireEvent.click(button("Publish quiz"));
     expect((await toast()).textContent).toContain("Task published to 24 students");
     expect(events.published).toEqual([1]);
     expect(callsTo("/api/task-quiz/publish")[0].body).toMatchObject({ ...task, revision: quiz.revision - 1 });
@@ -716,8 +728,8 @@ describe("UC 4.5: preview and publish", () => {
     for (const name of [/Provided/, /Upload or link/, /Create with AI/]) expect(source(name)).toBeDisabled();
     expect(within(item(1)).queryByRole("button")).toBeNull();
     expect(within(item(1)).getByText(MC1)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Publish task" })).toBeNull();
-    expect(screen.getByText("Task published to Period 3.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Publish quiz" })).toBeNull();
+    expect(screen.getByText("Quiz published to Period 3.")).toBeInTheDocument();
     expect(screen.getByText("Waiting for students — 0 of 24 submitted.")).toBeInTheDocument();
     expect(button("Preview as student")).toBeEnabled();
     expect(screen.queryByRole("button", { name: /Go to Step 2/ })).toBeNull();
@@ -728,13 +740,13 @@ describe("UC 4.5: preview and publish", () => {
     await start(withLesson());
     await findItem(1);
     override["/api/task-quiz/publish"] = () => reply({ error: "Couldn't publish — try again" }, 503);
-    fireEvent.click(button("Publish task"));
+    fireEvent.click(button("Publish quiz"));
     expect((await alert()).textContent).toContain("Couldn't publish — try again");
     expect(events.published).toEqual([]);
     expect(screen.getByLabelText("Lesson")).toBeEnabled();
-    expect(button("Publish task")).toBeEnabled();
+    expect(button("Publish quiz")).toBeEnabled();
     override = {};
-    fireEvent.click(button("Publish task"));
+    fireEvent.click(button("Publish quiz"));
     expect((await toast()).textContent).toContain("Task published to 24 students");
   });
 
@@ -743,7 +755,7 @@ describe("UC 4.5: preview and publish", () => {
     await findItem(1);
     override["/api/task-quiz/publish"] = () => reply({ error: "Someone else just changed this quiz. Reload to see the latest." }, 409);
     const before = callsTo("/api/task-quiz").length;
-    fireEvent.click(button("Publish task"));
+    fireEvent.click(button("Publish quiz"));
     expect((await alert()).textContent).toContain("Someone else just changed this quiz");
     await waitFor(() => expect(callsTo("/api/task-quiz").length).toBe(before + 1));
   });
@@ -752,7 +764,7 @@ describe("UC 4.5: preview and publish", () => {
     await start(withLesson());
     await findItem(1);
     override["/api/task-quiz/publish"] = () => { quiz = { ...quiz, status: "published", revision: quiz.revision + 1 }; return reply({ message: publishedMessage(24), alreadyPublished: true, publishedBar: bar, quiz: taskQuizView(quiz) }); };
-    fireEvent.click(button("Publish task"));
+    fireEvent.click(button("Publish quiz"));
     await screen.findByText("Locked after publishing");
     expect(events.published).toEqual([1]);
   });
@@ -790,8 +802,52 @@ describe("UC 4.5: preview and publish", () => {
     await start(withLesson());
     await findItem(1);
     vi.mocked(fetch).mockRejectedValueOnce(new TypeError("Failed to fetch"));
-    fireEvent.click(button("Publish task"));
+    fireEvent.click(button("Publish quiz"));
     expect((await alert()).textContent).toContain("Couldn't reach the server — try again");
-    expect(button("Publish task")).toBeEnabled();
+    expect(button("Publish quiz")).toBeEnabled();
+  });
+});
+
+describe("the v8.4 layout (#177 review)", () => {
+  it("puts the quiz in its own section after the lesson, with its own status", async () => {
+    await start(withLesson());
+    const section = screen.getByRole("region", { name: "Quiz" });
+    expect(screen.getByRole("region", { name: "Lesson details" }).compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(section).getByText("Ready")).toBeInTheDocument();
+    expect(within(section).getByRole("group", { name: "Quiz source" })).toBeInTheDocument();
+  });
+
+  it("follows the source on screen: switching to Upload or AI shows nothing confirmed and can't publish", async () => {
+    await start(withLesson());
+    expect(screen.getByRole("region", { name: "Publish" })).toHaveTextContent("Quiz · 2 items confirmed");
+    expect(button("Publish quiz")).toBeEnabled();
+    for (const name of [/Upload or link/, /Create with AI/]) {
+      fireEvent.click(source(name));
+      const bar = screen.getByRole("region", { name: "Publish" });
+      expect(bar).toHaveTextContent("Quiz · no items yet");
+      expect(bar).not.toHaveTextContent("confirmed");
+      expect(button("Publish quiz")).toBeDisabled();
+      expect(button("Preview as student")).toBeDisabled();
+      expect(within(screen.getByRole("region", { name: "Quiz" })).getByText("Needs review")).toBeInTheDocument();
+    }
+    fireEvent.click(source(/Provided/));
+    expect(screen.getByRole("region", { name: "Publish" })).toHaveTextContent("Quiz · 2 items confirmed");
+    expect(button("Publish quiz")).toBeEnabled();
+  });
+
+  it("keeps the bar in view while scrolling, titled 'Quiz for students'", async () => {
+    await start(withLesson());
+    const bar = screen.getByRole("region", { name: "Publish" });
+    expect(bar.className).toMatch(/\bsticky\b/);
+    expect(bar).toHaveTextContent("Quiz for students");
+  });
+
+  it("lays out Upload or link as one box: upload, 'or', then a link", async () => {
+    await start(withLesson());
+    fireEvent.click(source(/Upload or link/));
+    const upload = screen.getByRole("heading", { name: "Upload a file" }), or = screen.getByText("or"), link = screen.getByRole("heading", { name: "Add a link" });
+    expect(upload.compareDocumentPosition(or) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(or.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(upload.closest("div.border-dashed")).toBe(link.closest("div.border-dashed"));
   });
 });

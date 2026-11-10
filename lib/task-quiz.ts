@@ -217,7 +217,7 @@ export function publishProblems(quiz: TaskQuiz): string[] {
 export function publishedBarLines(input: { className: string | null; classSize: number | null; submitted: number }) {
   const { className, classSize, submitted } = input;
   return {
-    published: className ? `Task published to ${className}.` : "Task published.",
+    published: className ? `Quiz published to ${className}.` : "Quiz published.",
     progress: submitted === 0
       ? `Waiting for students — 0${classSize === null ? "" : ` of ${classSize}`} submitted.`
       : classSize === null ? `${plural(submitted, "student")} submitted.` : `${submitted} of ${classSize} students submitted.`,

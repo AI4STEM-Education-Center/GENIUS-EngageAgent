@@ -731,7 +731,7 @@ describe("UC 4.5: previewing and publishing", () => {
     const { status, body } = await publish();
     expect(status).toBe(201);
     expect(body).toMatchObject({ message: "Task published to 2 students", alreadyPublished: false });
-    expect(body.publishedBar).toMatchObject({ published: "Task published to Period 3.", progress: "Waiting for students — 0 of 2 submitted.", canGoToStep2: false });
+    expect(body.publishedBar).toMatchObject({ published: "Quiz published to Period 3.", progress: "Waiting for students — 0 of 2 submitted.", canGoToStep2: false });
     expect(body.quiz).toMatchObject({ status: "published", locked: true, lockedLabel: "Locked after publishing", stepStatus: "Published", canPublish: false });
     expect(body.quiz.publishedBy).toEqual({ id: teacher.geniusId, name: teacher.name });
     expect(await nosql.getQuizStatus(scope.classId, scope.assignmentId)).toMatchObject({ status: "published", lesson_number: 1, published_by: teacher.geniusId });
@@ -1040,7 +1040,7 @@ describe("who can use every route", () => {
       const published = await json(await routes.publish(post("/publish", {}, auth)));
       expect(published.status).toBe(201);
       expect(published.body.message).toBe("Task published");
-      expect(published.body.publishedBar.published).toBe("Task published.");
+      expect(published.body.publishedBar.published).toBe("Quiz published.");
     });
     it("a host student or guest can't", async () => {
       for (const role of ["student", "guest"]) {

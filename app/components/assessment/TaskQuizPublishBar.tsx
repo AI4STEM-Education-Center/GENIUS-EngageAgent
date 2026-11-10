@@ -97,17 +97,23 @@ function ReplaceDialog({ text, onYes, onNo }: { text: string; onYes: () => void;
 export default function TaskQuizPublishBar({ quiz, onGoToStep2 }: { quiz: TaskQuizController; onGoToStep2: () => void }) {
   const { view, toast, prompt, preview, publishedBar } = quiz;
   if (!view) return null;
+  // The bar follows the quiz source on screen. After switching to Upload or AI,
+  // nothing there is confirmed yet, so the earlier source's count doesn't show (#177).
+  const onScreen = view.locked || !view.lesson || quiz.tab === view.source;
+  const count = onScreen ? view.publishBarCount : "Quiz · no items yet";
+  const canPublish = onScreen && view.canPublish;
   const previewButton = (
-    <button type="button" disabled={!view.items.length || Boolean(quiz.busy)} onClick={() => void quiz.openPreview()} className={secondary}>Preview as student</button>
+    <button type="button" disabled={!onScreen || !view.items.length || Boolean(quiz.busy)} onClick={() => void quiz.openPreview()} className={secondary}>Preview as student</button>
   );
   return (
     <>
-      <div role="region" aria-label="Publish" className="flex flex-col gap-3 rounded-2xl border border-line bg-white p-4 sm:flex-row sm:items-center">
+      {/* Stays in view while the teacher scrolls Step 1, as in the v8.4 design. It sits above the chat button on phones. */}
+      <div role="region" aria-label="Publish" className="sticky bottom-20 z-30 flex flex-col gap-3 rounded-2xl border border-line bg-white p-4 shadow-[0_8px_28px_rgba(15,23,42,0.12)] sm:bottom-4 sm:flex-row sm:items-center sm:pr-20">
         {view.locked ? (
           <>
             <Check size={18} className="hidden shrink-0 text-ok sm:block" />
             <p className="min-w-0 flex-1 text-sm text-ink">
-              <b className="font-semibold">{publishedBar?.published ?? "Task published."}</b>{" "}
+              <b className="font-semibold">{publishedBar?.published ?? "Quiz published."}</b>{" "}
               {publishedBar && <span className="text-mute">{publishedBar.progress}</span>}
             </p>
             {previewButton}
@@ -116,14 +122,15 @@ export default function TaskQuizPublishBar({ quiz, onGoToStep2 }: { quiz: TaskQu
         ) : (
           <>
             <div className="min-w-0 flex-1 text-sm">
-              <p className="flex items-center gap-1.5 font-semibold text-ink">
-                {view.canPublish ? <Check size={15} className="text-ok" /> : <AlertTriangle size={15} className="text-warn" />}
-                {view.publishBarCount}
+              <p className="font-semibold text-ink">Quiz for students</p>
+              <p className="mt-1 flex items-center gap-1.5 text-ink-2">
+                {canPublish ? <Check size={15} className="shrink-0 text-ok" /> : <AlertTriangle size={15} className="shrink-0 text-warn" />}
+                {count}
               </p>
-              {!view.items.length && view.publishProblems[0] && <p className="mt-0.5 text-xs text-mute">{view.publishProblems[0]}</p>}
+              {onScreen && !view.items.length && view.publishProblems[0] && <p className="mt-0.5 text-xs text-mute">{view.publishProblems[0]}</p>}
             </div>
             {previewButton}
-            <button type="button" disabled={!view.canPublish || Boolean(quiz.busy)} onClick={quiz.publish} className={primary}>{quiz.busy === "publish" ? "Publishing…" : "Publish task"}</button>
+            <button type="button" disabled={!canPublish || Boolean(quiz.busy)} onClick={quiz.publish} className={primary}>{quiz.busy === "publish" ? "Publishing…" : "Publish quiz"}</button>
           </>
         )}
       </div>

@@ -19,7 +19,7 @@ type Props = {
 type Entry = { id: number; kind: "question" | "answer" | "error"; text: string };
 
 const SUGGESTIONS: Record<AskPage, string[]> = {
-  assessment: ["How do the quiz answers help choose a strategy?", "Do I need both a quiz and a survey?", "What makes a good survey question?"],
+  assessment: ["How do the quiz answers help choose a strategy?", "What does Match all items do?", "How do I upload my own quiz?"],
   strategy: ["How is the strategy recommended?", "What would Experience Bridging look like here?", "Can I choose a different strategy?"],
   materials: ["What does Check slides look for?", "Share to Gallery or Send to students: what's the difference?", "Should I choose slides or video?"],
   discussion: ["Which questions are best for discussion?", "What does the Class Question Board do?", "When do students get their reports?"],
