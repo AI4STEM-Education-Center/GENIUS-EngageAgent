@@ -3,12 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  hasClassProfileAnswers,
+  savedClassProfile,
   EMPTY_CLASS_PROFILE,
   describeClassProfile,
   parseClassProfileAnswers,
   toggleGroupAlternative,
   toggleStudentGroup,
   type ClassProfile,
+  type ClassProfileAnswers,
 } from "@/lib/class-profile";
 
 const full = {
@@ -128,4 +131,27 @@ describe("describeClassProfile", () => {
 it("describes a stored profile with missing answers without crashing", () => {
   const partial = { status: "saved" } as unknown as Parameters<typeof describeClassProfile>[0];
   expect(describeClassProfile(partial)).toEqual({ location: "Not set", groups: "Not set", classType: "Not set", supports: "No supports noted" });
+});
+
+describe("hasClassProfileAnswers", () => {
+  it("is false for a blank form", () => {
+    expect(hasClassProfileAnswers(EMPTY_CLASS_PROFILE)).toBe(false);
+  });
+
+  it.each([
+    [{ locale: "rural" }],
+    [{ groups: ["white"] }],
+    [{ groupAlternative: "not_sure" }],
+    [{ classType: "honors" }],
+    [{ englishLearners: true }],
+    [{ iepOr504: true }],
+  ])("is true with any one answer: %j", (answer) => {
+    expect(hasClassProfileAnswers({ ...EMPTY_CLASS_PROFILE, ...answer } as ClassProfileAnswers)).toBe(true);
+  });
+});
+
+it("savedClassProfile builds the record for a class", () => {
+  expect(savedClassProfile(EMPTY_CLASS_PROFILE, "c1", "t1")).toEqual({
+    ...EMPTY_CLASS_PROFILE, class_id: "c1", status: "saved", updated_by: "t1", updated_at: expect.any(String),
+  });
 });
