@@ -26,7 +26,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 it("hides both synthetic-answer controls and their description for independent classes", async () => {
   render(<TeacherView user={{ ...teacher, classId: "ea-class-native" }} />);
   await screen.findByRole("button", { name: /Lesson 1 0 questions/ });
-  fireEvent.click(stepTab(/Strategy/));
+  fireEvent.click(stepTab(/Strategy recommendations/));
   expect(screen.queryByRole("button", { name: "Auto-answer 5 test students" })).toBeNull();
   expect(screen.queryByText(/Generates stable random answers/)).toBeNull();
 });
@@ -34,7 +34,7 @@ it("hides both synthetic-answer controls and their description for independent c
 it("hides synthetic-answer controls and their description for GENIUS assignments", async () => {
   render(<TeacherView user={{ ...teacher, classId: "genius-class" }} />);
   await screen.findByRole("button", { name: /Lesson 1 0 questions/ });
-  fireEvent.click(stepTab(/Strategy/));
+  fireEvent.click(stepTab(/Strategy recommendations/));
   expect(screen.queryByRole("button", { name: "Auto-answer 5 test students" })).toBeNull();
   expect(screen.queryByText(/Generates stable random answers/)).toBeNull();
 });
@@ -62,11 +62,11 @@ it.each([true, false])("shows response loading failures without claiming zero su
   const analyze = () => screen.getByRole("button", { name: "Analyze 1 response and recommend" }) as HTMLButtonElement;
   if (!initiallyFails) {
     await waitFor(() => expect(analyze().disabled).toBe(false));
-    expect(stepTab(/Strategy/).textContent).toContain("1 response in");
+    expect(stepTab(/Strategy recommendations/).textContent).toContain("1 response in");
     fail = true;
     // Polling refetches the answers; the Strategy tab click forces a reload here.
-    fireEvent.click(stepTab(/Assessment/));
-    fireEvent.click(stepTab(/Strategy/));
+    fireEvent.click(stepTab(/Pre-knowledge assessment/));
+    fireEvent.click(stepTab(/Strategy recommendations/));
   }
   const alert = await screen.findByRole("alert");
   expect(alert.textContent).toContain("Responses temporarily unavailable.");
@@ -86,16 +86,18 @@ it.each([true, false])("shows response loading failures without claiming zero su
 it("shows the v8.3 header and four teacher steps, with the dashboard as its own view (#172, #182)", async () => {
   render(<TeacherView user={{ ...teacher, classId: "ea-class-native", className: "Physics · Period 3" }} shell={{ taskTitle: "Collisions" }} />);
   await screen.findByRole("button", { name: /Lesson 1 0 questions/ });
+  expect(screen.getByRole("heading", { name: "Pre-knowledge assessment" })).toBeTruthy();
   const steps = within(screen.getByRole("navigation", { name: "Teacher steps" })).getAllByRole("button");
   expect(steps.map(step => step.textContent)).toEqual([
-    "1AssessmentNot started", "2StrategyWaiting for responses", "3Engagement materialsNot started", "4Questions & discussionClass results",
+    "1Pre-knowledge assessmentNot started", "2Strategy recommendationsWaiting for responses", "3Material GenerationNot started", "4Questions & discussionClass results",
   ]);
   const header = within(screen.getByRole("banner"));
   expect(header.getByText("Physics · Period 3")).toBeTruthy();
   expect(header.getByText("Collisions")).toBeTruthy();
   expect(header.getByRole("button", { name: "Gallery" })).toBeTruthy();
   expect((header.getByRole("button", { name: "Class profile" }) as HTMLButtonElement).disabled).toBe(false);
-  expect((header.getByRole("button", { name: "Ask EngageAgent" }) as HTMLButtonElement).disabled).toBe(true);
+  // Ask EngageAgent is the floating icon, not a header action (#198).
+  expect(header.queryByRole("button", { name: "Ask EngageAgent" })).toBeNull();
   // Inside GENIUS there is no shell to link back to or sign out of.
   expect(header.queryByRole("link", { name: "EngageAgent" })).toBeNull();
   expect(header.queryByRole("button", { name: "Sign out of EngageAgent" })).toBeNull();
@@ -108,7 +110,7 @@ it("shows the v8.3 header and four teacher steps, with the dashboard as its own 
   expect(await screen.findByRole("heading", { name: /^Gallery$/ })).toBeTruthy();
   expect(screen.queryByText("Assignment summary")).toBeNull();
   expect(screen.queryByRole("navigation", { name: "Teacher steps" })).toBeNull();
-  expect(screen.queryByRole("heading", { name: "Engagement materials" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Material Generation" })).toBeNull();
   expect(await screen.findByRole("textbox", { name: "Search shared materials" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Back to task" }));
   // Step 4 is the questions page; choosing a step leaves the dashboard.
@@ -119,7 +121,7 @@ it("shows the v8.3 header and four teacher steps, with the dashboard as its own 
 
 it("keeps Gallery out of Step 3 and opens a separate editor from a direct Gallery entry", async () => {
   const view = render(<TeacherView user={{ ...teacher, classId: "ea-class-native" }} initialStep={3} />);
-  expect(await screen.findByRole("heading", { name: "Engagement materials" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "Material Generation" })).toBeTruthy();
   expect(screen.queryByRole("region", { name: "Materials Gallery" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Open Gallery" })).toBeNull();
   view.unmount();
@@ -181,8 +183,8 @@ it.each([false, true])("does not restore an independent Gallery video into Step 
     ? { ok: true, json: async () => ({ items: [{ content_item_id: publication.id, content_json: JSON.stringify(publication) }] }) } as Response
     : defaultFetch(input, init));
   const assertWorkflowUnchanged = async () => {
-    await waitFor(() => expect(stepTab(/Engagement materials/).textContent).toContain("Sent to students"));
-    expect(stepTab(existingWorkflow ? /Strategy/ : /Assessment/).getAttribute("aria-current")).toBe("step");
+    await waitFor(() => expect(stepTab(/Material Generation/).textContent).toContain("Sent to students"));
+    expect(stepTab(existingWorkflow ? /Strategy recommendations/ : /Pre-knowledge assessment/).getAttribute("aria-current")).toBe("step");
     expect(screen.queryByRole("heading", { name: publication.title })).toBeNull();
     await waitFor(() => {
       const draft = JSON.parse(localStorage.getItem(draftKey)!);
@@ -210,7 +212,7 @@ it("still restores legacy Step 3 publications while excluding an independent Gal
     ? { ok: true, json: async () => ({ items: [legacy, gallery].map(item => ({ content_item_id: item.id, content_json: JSON.stringify(item) })) }) } as Response
     : defaultFetch(input, init));
   render(<TeacherView user={scopedTeacher} />);
-  await waitFor(() => expect(stepTab(/Engagement materials/).getAttribute("aria-current")).toBe("step"));
+  await waitFor(() => expect(stepTab(/Material Generation/).getAttribute("aria-current")).toBe("step"));
   await waitFor(() => {
     const draft = JSON.parse(localStorage.getItem(draftKey)!);
     expect(draft.currentStep).toBe(3); expect(draft.selectedStrategies).toEqual(["analogy"]);
@@ -236,7 +238,7 @@ it("unlocks discussion questions after slides are published without a video", as
   });
   render(<TeacherView user={{ ...teacher, classId: "ea-class-slides" }} />);
   await screen.findByRole("button", { name: /Lesson 1 0 questions/ });
-  fireEvent.click(stepTab(/Engagement materials/));
+  fireEvent.click(stepTab(/Material Generation/));
   expect(await screen.findByRole("button", { name: "Read slides" })).toBeTruthy();
   fireEvent.click(stepTab(/Questions & discussion/));
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/question-analysis"))).toBe(true));

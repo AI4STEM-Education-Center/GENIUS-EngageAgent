@@ -16,6 +16,7 @@ All prompts used across the application when calling external LLM / generative-A
 | 4 | [Engagement Content](#4-engagement-content) | `app/api/engagement-content/route.ts` |
 | 5 | [Engagement Image](#5-engagement-image) | `app/api/engagement-image/route.ts` |
 | 6 | [Engagement Video](#6-engagement-video) | `app/api/engagement-video/route.ts` |
+| 7 | [Ask EngageAgent](#7-ask-engageagent) | `lib/ask-engageagent-server.ts` |
 
 ---
 
@@ -274,11 +275,21 @@ Do not add narration or lesson explanation.
 
 ---
 
+## 7. Ask EngageAgent
+
+**Source:** `app/api/ask-engageagent/route.ts`, with the prompt in `lib/ask-engageagent-server.ts`
+**Model:** `OPENAI_CHAT_MODEL` env var (default: `gpt-4o-mini`)
+**Input:** The page the teacher is on, the selected lesson's title, objective, core ideas and misconceptions, the teacher's question, and the earlier messages in the chat. No class or student data is sent.
+**Output:** A short plain-text answer, capped at 500 tokens.
+
+---
+
 ## Environment Variables Summary
 
 | Variable | Used By | Default |
 |----------|---------|---------|
-| `OPENAI_API_KEY` | Sections 1–5 | *(required)* |
+| `OPENAI_API_KEY` | Sections 1–5, 7 | *(required)* |
 | `OPENAI_MODEL` | Sections 1–4 | `gpt-5-nano` |
 | `OPENAI_IMAGE_MODEL` | Section 5 | `gpt-image-1` |
 | `GROK_API_KEY` | Section 6 | *(required)* |
+| `OPENAI_CHAT_MODEL` | Section 7 | `gpt-4o-mini` |
