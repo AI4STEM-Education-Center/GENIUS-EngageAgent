@@ -56,7 +56,7 @@ describe("the teacher page", () => {
     render(<TeacherView user={teacher} />);
     expect(await screen.findByLabelText("Lesson")).toBeInTheDocument();
     await waitFor(() => expect(stepTab(/Pre-knowledge assessment/)).toHaveTextContent("In progress"));
-    expect(screen.getByRole("button", { name: /^Quiz\s*Needs review$/ })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Quiz" })).getByText("Needs review")).toBeInTheDocument();
     expect(screen.queryByText("Choose a lesson")).toBeNull();
     expect(screen.queryByRole("button", { name: "Publish quiz to students" })).toBeNull();
   });
@@ -65,12 +65,12 @@ describe("the teacher page", () => {
     render(<TeacherView user={teacher} />);
     await screen.findByRole("article", { name: "Item 1" });
     await waitFor(() => expect(stepTab(/Pre-knowledge assessment/)).toHaveTextContent("Ready to publish"));
-    expect(screen.getByRole("button", { name: /^Quiz\s*Ready$/ })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Quiz" })).getByText("Ready")).toBeInTheDocument();
     const lessonReads = () => log.filter((line) => line.startsWith("GET /api/lessons/1?")).length;
     await waitFor(() => expect(lessonReads()).toBeGreaterThan(0));
     const before = lessonReads();
-    fireEvent.click(screen.getByRole("button", { name: "Publish task" }));
-    await screen.findByText("Task published to Period 3.");
+    fireEvent.click(screen.getByRole("button", { name: "Publish quiz" }));
+    await screen.findByText("Quiz published to Period 3.");
     await waitFor(() => expect(stepTab(/Pre-knowledge assessment/)).toHaveTextContent("Published"));
     await waitFor(() => expect(lessonReads()).toBe(before + 1));
     fireEvent.click(screen.getByRole("button", { name: /Go to Step 2/ }));
@@ -110,7 +110,7 @@ describe("the teacher page", () => {
     });
     fireEvent.click(stepTab(/Pre-knowledge assessment/));
     await screen.findByRole("article", { name: "Item 1" });
-    fireEvent.click(screen.getByRole("button", { name: "Publish task" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish quiz" }));
     await waitFor(() => {
       expect(progressReads).toBeGreaterThan(1);
       expect(discussion()).toHaveTextContent("After materials are sent");
@@ -140,7 +140,7 @@ describe("the teacher page", () => {
     expect(await screen.findByText("Choose a lesson")).toBeInTheDocument();
     await waitFor(() => expect(stepTab(/Pre-knowledge assessment/)).toHaveTextContent(status === "closed" ? "Closed" : "Published"));
     expect(screen.queryByLabelText("Lesson")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Publish task" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Publish quiz" })).toBeNull();
     if (status === "published") expect(await screen.findByText("Quiz is live. Students can now answer.")).toBeInTheDocument();
   });
 
@@ -148,16 +148,17 @@ describe("the teacher page", () => {
     render(<TeacherView user={{ ...teacher, classId: undefined, assignmentId: undefined }} />);
     expect(await screen.findByText("Choose a lesson")).toBeInTheDocument();
     expect(log.some((line) => line.includes("/api/task-quiz"))).toBe(false);
-    expect(screen.queryByRole("button", { name: "Publish task" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Publish quiz" })).toBeNull();
   });
 
-  it("leaves the Survey tab working, with the bar still at the bottom of the step", async () => {
+  it("has no Quiz or Survey tabs and no survey builder, since surveys are set up in GENIUS (#177 review)", async () => {
     render(<TeacherView user={teacher} />);
     await screen.findByLabelText("Lesson");
-    fireEvent.click(screen.getByRole("button", { name: /^Survey/ }));
-    expect(screen.queryByLabelText("Lesson")).toBeNull();
-    await waitFor(() => expect(log.some((line) => line.startsWith("GET /api/surveys"))).toBe(true));
-    expect(screen.getByRole("button", { name: "Publish task" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Survey/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Quiz/ })).toBeNull();
+    expect(screen.queryByText("Give students a quiz, a survey, or both for this learning task.")).toBeNull();
+    expect(log.some((line) => line.startsWith("GET /api/surveys"))).toBe(false);
+    expect(screen.getByRole("button", { name: "Publish quiz" })).toBeInTheDocument();
   });
 });
 

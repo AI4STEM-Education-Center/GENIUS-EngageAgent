@@ -4,7 +4,6 @@ import { scopedTaskFetch } from "@/lib/client-auth";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LayoutGrid, Users } from "lucide-react";
-import SurveyBuilderView from "./SurveyBuilderView";
 import TeacherDashboardView from "./TeacherDashboardView";
 import DiscussionStep, { discussionStatus } from "./discussion/DiscussionStep";
 import AppFrame from "./layout/AppFrame";
@@ -368,7 +367,6 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const [quizStatus, setQuizStatus] = useState<"draft" | "published" | "closed">("draft");
   const [publishingQuiz, setPublishingQuiz] = useState(false);
   // Assessment step sub-tabs (quiz vs survey), mirrors the tab pattern in StudentView.
-  const [assessmentTab, setAssessmentTab] = useState<"quiz" | "survey">("quiz");
 
   // Class profile (#173): answered when the class is added; here it's only shown and edited.
   const classProfile = useClassProfile({ classId, assignmentId, enabled: hasAssignmentContext });
@@ -1925,34 +1923,11 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 1</p>
                 <h2 className="text-2xl font-semibold text-slate-900">Pre-knowledge assessment</h2>
-                <p className="mt-1 text-sm text-slate-500">Give students a quiz, a survey, or both for this learning task.</p>
               </div>
 
-              {/* Quiz / Survey tabs sit at the top of the Assessment step. Lessons are ready-made quizzes, so the lesson picker lives in the Quiz tab. */}
-              <div className="flex gap-2">
-                {([
-                  { id: "quiz", label: "Quiz" },
-                  { id: "survey", label: "Survey" },
-                ] as const).map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setAssessmentTab(tab.id)}
-                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                      assessmentTab === tab.id
-                        ? "bg-[#BA0C2F] text-white"
-                        : "border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                    }`}
-                  >
-                    {tab.label}
-                    {tab.id === "quiz" && !useOlderQuizStep && taskQuiz.view?.tabStatus && <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${taskQuiz.view.tabStatus === "Ready" ? "bg-ok-light text-ok" : "bg-warn-light text-warn"}`}>{taskQuiz.view.tabStatus}</span>}
-                  </button>
-                ))}
-              </div>
+              {!useOlderQuizStep && <TaskQuizPanel quiz={taskQuiz} disabled={generationBusy || savingLesson} />}
 
-              {assessmentTab === "quiz" && !useOlderQuizStep && <TaskQuizPanel quiz={taskQuiz} disabled={generationBusy || savingLesson} />}
-
-              {assessmentTab === "quiz" && useOlderQuizStep && (
+              {useOlderQuizStep && (
                 <>
                 {selectedLessonData && (
                   <div className="rounded-2xl border border-[#BA0C2F]/15 bg-[#BA0C2F]/5 p-5">
@@ -1983,7 +1958,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
 
 
               {/* Quiz preview */}
-              {useOlderQuizStep && selectedLesson && quizItems.length > 0 && assessmentTab === "quiz" && (
+              {useOlderQuizStep && selectedLesson && quizItems.length > 0 && (
                 <div className="grid gap-4">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-semibold uppercase text-slate-400">Quiz preview ({quizItems.filter((q) => q.type === "multiple_choice").length} questions + confidence checks)</p>
@@ -2043,13 +2018,6 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                   {quizStatus === "published" && (
                     <p className="text-sm font-semibold text-emerald-600">Quiz is live. Students can now answer.</p>
                   )}
-                </div>
-              )}
-
-              {/* Teacher-authored surveys (UC-SV-01_V1, #95) — belong to the learning task, so no lesson is needed */}
-              {assessmentTab === "survey" && (
-                <div>
-                  <SurveyBuilderView classId={classId} assignmentId={assignmentId} />
                 </div>
               )}
 

@@ -8,13 +8,13 @@ import type { LessonCardData, TaskQuizController } from "./useTaskQuiz";
 
 const fieldLabel = "text-xs font-semibold uppercase tracking-wide text-mute";
 const field = "w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink focus:border-brand focus:outline-none disabled:bg-canvas disabled:text-ink-2";
-const primary = "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-line disabled:text-mute";
 const secondary = "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50";
 const aiPrimary = "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-ai px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60";
 
 function LessonCard({ quiz, disabled }: { quiz: TaskQuizController; disabled?: boolean }) {
   const view = quiz.view!;
-  const card: LessonCardData | null = view.lesson ?? quiz.firstCard;
+  // Nothing shows until a lesson is chosen; choosing one in the list picks it (#177).
+  const card: LessonCardData | null = view.lesson;
   const locked = view.locked;
   const busy = Boolean(quiz.busy) || Boolean(disabled);
   const [anchoring, setAnchoring] = useState<string | null>(null);
@@ -23,13 +23,11 @@ function LessonCard({ quiz, disabled }: { quiz: TaskQuizController; disabled?: b
     <section aria-label="Lesson details" className="flex flex-col gap-6 rounded-2xl border border-line bg-white p-5 md:flex-row">
       <div className="md:w-64 md:shrink-0">
         <label htmlFor="task-quiz-lesson" className={fieldLabel}>Lesson</label>
-        <select id="task-quiz-lesson" value={card?.number ?? ""} disabled={locked || busy || !quiz.lessons.length} onChange={(event) => quiz.pickLesson(Number(event.target.value))} className={`${field} mt-1.5`}>
+        <select id="task-quiz-lesson" value={view.lesson?.number ?? ""} disabled={locked || busy || !quiz.lessons.length} onChange={(event) => { if (event.target.value) quiz.pickLesson(Number(event.target.value)); }} className={`${field} mt-1.5`}>
+          {!view.lesson && <option value="">Choose a lesson</option>}
           {quiz.lessons.map((lesson) => <option key={lesson.lessonNumber} value={lesson.lessonNumber}>{lesson.title}</option>)}
         </select>
         {view.lockedLabel && <p className="mt-1.5 flex items-center gap-1 text-xs text-mute"><Lock size={12} />{view.lockedLabel}</p>}
-        {!view.lesson && card && (
-          <button type="button" disabled={busy} onClick={() => quiz.pickLesson(card.number)} className={`${primary} mt-3 w-full`}>Use this lesson</button>
-        )}
       </div>
       <div className="min-w-0 flex-1">
         {card ? (
@@ -54,7 +52,7 @@ function LessonCard({ quiz, disabled }: { quiz: TaskQuizController; disabled?: b
               </div>
             </div>
           </>
-        ) : <p className="text-sm text-mute">No lesson has a published version yet.</p>}
+        ) : <p className="text-sm text-mute">{quiz.lessons.length ? "Choose a lesson to see its objective, core ideas and misconceptions." : "No lesson has a published version yet."}</p>}
         <div className="mt-4">
           <label htmlFor="task-quiz-anchoring" className={fieldLabel}>Anchoring phenomenon <span className="font-medium normal-case tracking-normal">(optional)</span></label>
           <input id="task-quiz-anchoring" type="text" value={anchoringValue} maxLength={2000} disabled={locked} onChange={(event) => setAnchoring(event.target.value)}
@@ -67,9 +65,8 @@ function LessonCard({ quiz, disabled }: { quiz: TaskQuizController; disabled?: b
 
 function SourceButtons({ quiz }: { quiz: TaskQuizController }) {
   const view = quiz.view!;
-  const lessonName = `Lesson ${view.lesson?.number ?? quiz.firstCard?.number ?? ""}`.trim();
   const sources: { id: QuizSource; label: string; icon: ReactNode }[] = [
-    { id: "provided", label: `Provided (${lessonName})`, icon: <BookOpen size={15} /> },
+    { id: "provided", label: view.lesson ? `Provided (Lesson ${view.lesson.number})` : "Provided", icon: <BookOpen size={15} /> },
     { id: "uploaded", label: "Upload or link", icon: <Upload size={15} /> },
     { id: "ai", label: "Create with AI", icon: <Sparkles size={15} /> },
   ];
@@ -90,26 +87,27 @@ function UploadOrLink({ quiz }: { quiz: TaskQuizController }) {
   const [link, setLink] = useState("");
   const uploading = quiz.busy === "upload", linking = quiz.busy === "link";
   return (
-    <div className="grid gap-4 rounded-2xl border border-dashed border-line bg-white p-5 md:grid-cols-2 md:gap-8">
-      <div>
-        <Upload size={20} className="text-mute" />
-        <h3 className="mt-2 text-sm font-semibold text-ink">Upload a file</h3>
-        <p className="mt-0.5 text-xs text-mute">Word, PDF, or PowerPoint</p>
+    <div className="grid items-center gap-5 rounded-2xl border-[1.5px] border-dashed border-slate-300 bg-[#FBFCFD] p-6 text-center md:grid-cols-[1fr_auto_1fr]">
+      <div className="flex flex-col items-center">
+        <Upload size={24} className="text-mute" />
+        <h3 className="mt-2 text-base font-semibold text-ink">Upload a file</h3>
+        <p className="mt-1 text-sm text-mute">Word, PDF, or PowerPoint</p>
         <input ref={input} type="file" aria-label="Upload a file" accept=".docx,.pdf,.pptx" className="sr-only" disabled={Boolean(quiz.busy)}
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
             if (file) quiz.uploadFile(file);
           }} />
-        <button type="button" disabled={Boolean(quiz.busy)} onClick={() => input.current?.click()} className={`${secondary} mt-3`}>
+        <button type="button" disabled={Boolean(quiz.busy)} onClick={() => input.current?.click()} className={`${secondary} mt-4`}>
           <FileText size={15} />{uploading ? "Reading…" : "Choose file"}
         </button>
       </div>
-      <div className="border-t border-line pt-4 md:border-l md:border-t-0 md:pl-8 md:pt-0">
-        <Link2 size={20} className="text-mute" />
-        <h3 className="mt-2 text-sm font-semibold text-ink">Add a link</h3>
-        <p className="mt-0.5 text-xs text-mute">Google Forms, Google Docs, Microsoft Forms, or a web page</p>
-        <form className="mt-3 flex flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); quiz.importLink(link.trim()); }}>
+      <p aria-hidden="true" className="text-xs font-bold uppercase text-faint">or</p>
+      <div className="flex flex-col items-center">
+        <Link2 size={24} className="text-mute" />
+        <h3 className="mt-2 text-base font-semibold text-ink">Add a link</h3>
+        <p className="mt-1 text-sm text-mute">Google Forms, Google Docs, Microsoft Forms, or a web page</p>
+        <form className="mt-4 flex w-full max-w-sm flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); quiz.importLink(link.trim()); }}>
           <input type="text" inputMode="url" aria-label="Quiz link" placeholder="https://" value={link} disabled={Boolean(quiz.busy)} onChange={(event) => setLink(event.target.value)} className={`${field} min-w-0 flex-1`} />
           <button type="submit" disabled={Boolean(quiz.busy)} className={secondary}>{linking ? "Reading…" : "Import"}</button>
         </form>
@@ -216,7 +214,15 @@ function QuizBody({ quiz }: { quiz: TaskQuizController }) {
   );
 }
 
-/** Step 1's Quiz tab: the lesson card, then the quiz and where it comes from (UC 4.1 to 4.4). */
+/** "Ready" only for the quiz on screen: a source the teacher has switched to has nothing confirmed yet. */
+function QuizStatusPill({ quiz }: { quiz: TaskQuizController }) {
+  const view = quiz.view!;
+  if (!view.lesson) return null;
+  const ready = quiz.tab === view.source && view.tabStatus === "Ready";
+  return <span className={`${pill} ${ready ? pillClass.ok : pillClass.warn}`}>{ready ? "Ready" : "Needs review"}</span>;
+}
+
+/** Step 1: the lesson card, then the Quiz section with where the quiz comes from (UC 4.1 to 4.4). */
 export default function TaskQuizPanel({ quiz, disabled }: { quiz: TaskQuizController; disabled?: boolean }) {
   if (quiz.loadError && !quiz.view) {
     return (
@@ -228,10 +234,16 @@ export default function TaskQuizPanel({ quiz, disabled }: { quiz: TaskQuizContro
   }
   if (!quiz.view) return <p className="text-sm text-mute">Loading the quiz…</p>;
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-8">
       <LessonCard quiz={quiz} disabled={disabled} />
-      <SourceButtons quiz={quiz} />
-      <QuizBody quiz={quiz} />
+      <section aria-labelledby="task-quiz-heading" className="flex flex-col gap-4">
+        <div className="flex items-end gap-3">
+          <h3 id="task-quiz-heading" className="text-xl font-bold tracking-tight text-ink">Quiz</h3>
+          <QuizStatusPill quiz={quiz} />
+        </div>
+        <SourceButtons quiz={quiz} />
+        <QuizBody quiz={quiz} />
+      </section>
     </div>
   );
 }
