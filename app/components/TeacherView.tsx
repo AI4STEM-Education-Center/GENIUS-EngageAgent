@@ -1891,7 +1891,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
         beforeNavigate={showGallery ? leaveGallery : undefined}
         actions={[
           // The top menu (#208), with this task's gallery opening in place; then the task's own tools.
-          ...teacherNavActions({ classId, gallery: { onClick: openGallery, active: showGallery }, dashboardComingSoon: true }),
+          ...teacherNavActions({ classId, gallery: { onClick: openGallery, active: showGallery } }),
           { label: "Class profile", icon: <Users size={15} />, onClick: classProfile.openEditor, comingSoon: !hasAssignmentContext },
         ]} />}
       tabs={!showGallery && <>
