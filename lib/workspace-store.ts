@@ -57,7 +57,7 @@ export async function workspaceQuery<T>(partition: string, prefix: string): Prom
   return values;
 }
 
-type WriteRecord =
+export type WriteRecord =
   | { partition: string; key: string; value: RecordValue; createOnly?: boolean; expiresAt?: number; remove?: undefined }
   | { partition: string; key: string; remove: true };
 
