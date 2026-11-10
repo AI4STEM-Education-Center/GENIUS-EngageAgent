@@ -57,8 +57,14 @@ export const LESSON_ANALOGY_CORE_IDEAS: Record<
  * toward the value. Lesson 5's 2-a (peak force) is the same belief as 1-a.
  */
 export const MERGED_MISCONCEPTIONS: Record<number, Record<string, string>> = {
-  5: { "2-a": "1-a" },
+  5: { "2-a": "1-a", MC18: "MC14" }, // The second pair is the same two, once lesson 5 is edited in the app (#175).
 };
+
+/** The merges that apply to this version of the lesson: both misconceptions must still be in it. */
+export function lessonMerges(lesson: Lesson): Record<string, string> {
+  return Object.fromEntries(Object.entries(MERGED_MISCONCEPTIONS[lesson.lesson_number] ?? {})
+    .filter(([from, to]) => from in lesson.misconceptions && to in lesson.misconceptions));
+}
 
 export type QuizSubmission = Record<string, string | undefined>;
 
@@ -96,10 +102,11 @@ export type StrategyRecommendation = {
   target: MisconceptionCount | null;
 };
 
+/** A lesson added in the app (#175) hasn't been rated, so it doesn't get an analogy by default. */
 export function getLessonAnalogyLabel(lessonNumber: number): AnalogyLabel {
   const coreIdeas = LESSON_ANALOGY_CORE_IDEAS[lessonNumber];
   if (!coreIdeas) {
-    throw new Error(`No analogy label is defined for lesson ${lessonNumber}.`);
+    return "not recommend";
   }
   const total = coreIdeas.recommend.length + coreIdeas.notRecommend.length;
   // Strict majority: exactly half is "not recommend".
@@ -111,24 +118,25 @@ export function getMultipleChoiceItems(lesson: Lesson): QuizItem[] {
 }
 
 function getCountedMisconceptionIds(lesson: Lesson): string[] {
-  const merged = MERGED_MISCONCEPTIONS[lesson.lesson_number] ?? {};
+  const merged = lessonMerges(lesson);
   return Object.keys(lesson.misconceptions).filter((id) => !(id in merged));
 }
 
 /**
- * The single misconception an option counts toward, or null if the option is
- * unlabeled. Throws if the lesson data breaks the one-label-per-option rule.
+ * The misconceptions an option counts toward: none if it's unlabeled, and
+ * possibly several for a lesson added in the app ("MC01, MC02"). Throws if a
+ * label isn't one of the lesson's misconceptions.
  */
-export function resolveOptionMisconception(
+export function resolveOptionMisconceptions(
   lesson: Lesson,
   item: QuizItem,
   option: string,
-): string | null {
+): string[] {
   const rawLabel = item.distractor_misconception_map?.[option];
   if (!rawLabel) {
-    return null;
+    return [];
   }
-  const merged = MERGED_MISCONCEPTIONS[lesson.lesson_number] ?? {};
+  const merged = lessonMerges(lesson);
   const ids = Array.from(
     new Set(
       rawLabel
@@ -138,16 +146,12 @@ export function resolveOptionMisconception(
         .map((id) => merged[id] ?? id),
     ),
   );
-  if (ids.length !== 1) {
-    throw new Error(
-      `${item.item_id} option ${option} maps to ${ids.length} misconceptions; the rule allows exactly one.`,
-    );
+  for (const id of ids) {
+    if (!(id in lesson.misconceptions)) {
+      throw new Error(`${item.item_id} option ${option} maps to unknown misconception "${id}".`);
+    }
   }
-  const [id] = ids;
-  if (!(id in lesson.misconceptions)) {
-    throw new Error(`${item.item_id} option ${option} maps to unknown misconception "${id}".`);
-  }
-  return id;
+  return ids;
 }
 
 export function countClassResponses(lesson: Lesson, submissions: QuizSubmission[]): ClassQuizCounts {
@@ -162,6 +166,7 @@ export function countClassResponses(lesson: Lesson, submissions: QuizSubmission[
   const countedIds = getCountedMisconceptionIds(lesson);
   const countById = new Map<string, number>(countedIds.map((id) => [id, 0]));
   let correct = 0;
+  let linked = 0;
 
   for (const submission of submissions) {
     for (const item of items) {
@@ -174,8 +179,12 @@ export function countClassResponses(lesson: Lesson, submissions: QuizSubmission[
         correct += 1;
         continue;
       }
-      const id = resolveOptionMisconception(lesson, item, answer);
-      if (id !== null) {
+      // An answer tied to two misconceptions counts toward each, but is still one answer.
+      const ids = resolveOptionMisconceptions(lesson, item, answer);
+      if (ids.length > 0) {
+        linked += 1;
+      }
+      for (const id of ids) {
         countById.set(id, (countById.get(id) ?? 0) + 1);
       }
     }
@@ -188,7 +197,6 @@ export function countClassResponses(lesson: Lesson, submissions: QuizSubmission[
     statement: lesson.misconceptions[id],
     count: countById.get(id) ?? 0,
   }));
-  const linked = misconceptions.reduce((sum, misconception) => sum + misconception.count, 0);
 
   return {
     lessonNumber: lesson.lesson_number,
@@ -430,7 +438,8 @@ export function buildRecommendationReason(recommendation: StrategyRecommendation
       const errors = maxCount > 0
         ? `no single misconception stands out (the most common one is behind only ${maxCount} of the ${counts.incorrect} incorrect answers)`
         : "the incorrect answers don't point to a specific misconception";
-      const lessonReason = LESSON_ANALOGY_REASONS[recommendation.lessonNumber];
+      const lessonReason = LESSON_ANALOGY_REASONS[recommendation.lessonNumber]
+        ?? "this lesson's core ideas haven't been rated yet for how hard they are to see";
       return recommendation.strategy === "analogy"
         ? `We recommend an analogy because your students are still building this idea (${accuracy} of answers correct), ${errors}, and ${lessonReason}. Comparing the idea to something familiar gives students a picture to reason with.`
         : `We recommend experience bridging because your students are still building this idea (${accuracy} of answers correct), ${errors}, and ${lessonReason}. Starting from experiences students already have helps them notice the science in them.`;
@@ -510,11 +519,11 @@ function formatQuizItems(lesson: Lesson): string {
           lines.push(`${option}. ${text} (correct)`);
           continue;
         }
-        const id = resolveOptionMisconception(lesson, item, option);
+        const ids = resolveOptionMisconceptions(lesson, item, option);
         lines.push(
-          id === null
+          ids.length === 0
             ? `${option}. ${text}`
-            : `${option}. ${text} [misconception ${id}: ${lesson.misconceptions[id]}]`,
+            : `${option}. ${text} [misconception ${ids.map((id) => `${id}: ${lesson.misconceptions[id]}`).join("; ")}]`,
         );
       }
       return lines.join("\n");

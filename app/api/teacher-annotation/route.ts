@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import { recordTeacherAnnotation } from "@/lib/nosql";
 import { FocusError, resolveStrategyFocus } from "@/lib/strategy-focus";
 
@@ -7,6 +8,7 @@ export const runtime = "nodejs";
 
 type AnnotationRequest = {
   classId?: string;
+  assignmentId?: string;
   studentName?: string | null;
   assignment?: string | null;
   overallRecommendation?: string;
@@ -46,6 +48,7 @@ export async function POST(request: Request) {
       if (typeof payload.lessonNumber !== "number" || typeof strategy !== "string") {
         return NextResponse.json({ error: "lessonNumber and selectedStrategies are required with focus." }, { status: 400 });
       }
+      enterLessonScope(await loadTaskLessons({ classId: payload.classId!, assignmentId: payload.assignmentId! }, payload.lessonNumber));
       try {
         strategyFocus = resolveStrategyFocus(payload.lessonNumber, strategy, payload.focus);
       } catch (error) {

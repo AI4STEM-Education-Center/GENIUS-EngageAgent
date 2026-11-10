@@ -209,7 +209,7 @@ function HowWeChose({ recommendation }: { recommendation: StrategyRecommendation
     {
       question: "Are most of the lesson’s core ideas hard to see?",
       answer: <>{ideas && <span className="text-mute">({ideas.recommend.length} of {ideas.recommend.length + ideas.notRecommend.length}) </span>}
-        <b>{recommendation.strategy === "analogy" ? `Yes → ${label("analogy")}` : `No → ${label("experience bridging")}`}</b></>,
+        <b>{recommendation.strategy === "analogy" ? `Yes → ${label("analogy")}` : `${ideas ? "No" : "Not rated yet"} → ${label("experience bridging")}`}</b></>,
     },
   ];
   return (

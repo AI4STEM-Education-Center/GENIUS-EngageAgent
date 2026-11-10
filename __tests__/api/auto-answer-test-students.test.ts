@@ -12,8 +12,8 @@ vi.mock("@/lib/auth", () => ({
   verifySSOToken: vi.fn(),
 }));
 
-vi.mock("@/lib/quiz-data", () => ({
-  getLesson: vi.fn(),
+vi.mock("@/lib/lessons-store", () => ({
+  getTaskLesson: vi.fn(),
 }));
 
 vi.mock("@/lib/nosql", () => {
@@ -38,7 +38,7 @@ vi.mock("@/lib/nosql", () => {
 });
 
 const { extractSSOToken, verifySSOToken } = await import("@/lib/auth");
-const { getLesson } = await import("@/lib/quiz-data");
+const { getTaskLesson } = await import("@/lib/lessons-store");
 const { getQuizStatus, __getAnswers, __resetStore } = await import(
   "@/lib/nosql"
 ) as unknown as {
@@ -103,7 +103,7 @@ beforeEach(() => {
       updated_at: new Date().toISOString(),
     }),
   );
-  vi.mocked(getLesson).mockReturnValue(lesson);
+  vi.mocked(getTaskLesson).mockResolvedValue({ lesson } as Awaited<ReturnType<typeof getTaskLesson>>);
 });
 
 describe("POST /api/auto-answer-test-students", () => {

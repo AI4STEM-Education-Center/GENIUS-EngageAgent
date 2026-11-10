@@ -1,3 +1,5 @@
+import { loadedLesson } from "../lesson-registry";
+
 // Student-facing topic orientation, shared by prompts, preview and PowerPoint.
 // These labels name the investigation without supplying its predicted result.
 const LEARNING_TARGETS: Readonly<Record<number, string>> = {
@@ -11,8 +13,9 @@ const LEARNING_TARGETS: Readonly<Record<number, string>> = {
   8: "Energy stores and transfers",
 };
 
+/** Lessons added in the app (#175) name their topic instead, so that lesson must be loaded. */
 export function getSlideLearningTarget(lessonNumber: number): string {
-  const target = LEARNING_TARGETS[lessonNumber];
+  const target = LEARNING_TARGETS[lessonNumber] ?? loadedLesson(lessonNumber)?.topic?.trim();
   if (!target) throw new Error("This lesson needs a slide learning target before generation.");
   return target;
 }

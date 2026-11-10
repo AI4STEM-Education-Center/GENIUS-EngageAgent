@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({ list: vi.fn(), load: vi.fn(), save: vi.fn(), r
 vi.mock("@/lib/material-gallery-client", () => ({ listSavedGalleryCopies: mocks.list, loadSavedGalleryCopy: mocks.load,
   saveGalleryCopy: mocks.save, refreshGalleryCopyMedia: mocks.renew }));
 vi.mock("@/lib/client-auth", () => ({ scopedTaskFetch: mocks.publish }));
+vi.mock("@/lib/lesson-client", () => ({ useTaskLesson: () => ({ lesson: { lesson_number: 3 }, error: "" }) }));
 vi.mock("@/app/components/MaterialGalleryPanel", () => ({ default: ({ onUse, disabled }: { onUse: (copy: GalleryCopy) => void; disabled?: boolean }) =>
   <button disabled={disabled} onClick={() => onUse(structuredClone(mocks.shared!))}>Adapt shared material</button> }));
 vi.mock("@/app/components/SlidesWorkspace", async () => {

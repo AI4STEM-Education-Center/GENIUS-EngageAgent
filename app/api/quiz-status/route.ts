@@ -70,6 +70,12 @@ export async function POST(request: Request) {
       );
     }
 
+    // A quiz can't go out on a lesson students can't read. If this can't be checked, the quiz still saves.
+    if (status === "published" && Number.isInteger(lessonNumber)
+      && await getTaskLesson(classId, assignmentId, lessonNumber).then((found) => !found, () => false)) {
+      return NextResponse.json({ error: `Lesson ${lessonNumber} has no published version yet.` }, { status: 422 });
+    }
+
     const record = await upsertQuizStatus(
       classId,
       assignmentId,
@@ -93,5 +99,5 @@ export async function POST(request: Request) {
     );
   }
 }
-import { pinTaskToLesson } from "@/lib/lessons-store";
+import { getTaskLesson, pinTaskToLesson } from "@/lib/lessons-store";
 import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";

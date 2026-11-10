@@ -23,6 +23,7 @@ import { useAuth } from "./AuthContext";
 import ShareVideoMaterial from "./ShareVideoMaterial";
 import VideoMaterialEditor from "./VideoMaterialEditor";
 import { focusKind, lessonCoreIdeas, lessonFocusMisconceptions, resolveStrategyFocus } from "@/lib/strategy-focus";
+import { listLessonOptions, loadTaskLesson, useTaskLesson, type LessonOption } from "@/lib/lesson-client";
 import { refreshGalleryCopyMedia } from "@/lib/material-gallery-client";
 import { sameMediaResource } from "@/lib/stable-media-urls";
 import { STRATEGIES as SLIDE_STRATEGIES, type SlideStrategy } from "@/lib/slides/model";
@@ -42,8 +43,6 @@ import type {
   ImageState,
   ImageVersion,
   VideoState,
-  Lesson,
-  QuizItem,
   StudentAnswer,
   TextMode,
 } from "@/lib/types";
@@ -329,6 +328,13 @@ const parsePersistedContentItem = (
   };
 };
 
+const savedItemLessons = (items: PublishedContentPayloadItem[] | undefined) => [...new Set((items ?? []).flatMap((item) => {
+  try {
+    const lesson = typeof item.content_json === "string" ? JSON.parse(item.content_json)?.lessonNumber : null;
+    return Number.isInteger(lesson) && lesson > 0 ? [lesson as number] : [];
+  } catch { return []; }
+}))];
+
 const stepLabels = [
   "Pre-knowledge assessment",
   "Strategy recommendations",
@@ -346,9 +352,14 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const draftStorageKey = getDraftStorageKey(classId, assignmentId);
 
   // Lesson picker
-  const [lessons, setLessons] = useState<Lesson[]>([]);
-  const [selectedLesson, setSelectedLesson] = useState<number | null>(null);
-  const [quizItems, setQuizItems] = useState<QuizItem[]>([]);
+  const [lessons, setLessons] = useState<LessonOption[]>([]);
+  const [chosenLesson, setSelectedLesson] = useState<number | null>(null);
+  const [savingLesson, setSavingLesson] = useState(false);
+  // A chosen lesson only counts as selected once this task's version of it has
+  // loaded and registered (#175), so nothing computes with another version.
+  const { lesson: selectedLessonData, error: lessonError } = useTaskLesson({ classId, assignmentId }, chosenLesson);
+  const selectedLesson = selectedLessonData ? chosenLesson : null;
+  const quizItems = selectedLessonData?.quiz_items ?? [];
   const [quizStatus, setQuizStatus] = useState<"draft" | "published" | "closed">("draft");
   const [publishingQuiz, setPublishingQuiz] = useState(false);
   // Assessment step sub-tabs (quiz vs survey), mirrors the tab pattern in StudentView.
@@ -450,7 +461,18 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   );
   // Drafts from before #178, or a strategy restored from published materials, have no
   // focus for this lesson: Step 2 suggests the default, saved once the teacher uses it.
-  const selectedFocus: StrategyFocus = focusByLesson[selectedLesson ?? 0]
+  const savedFocus = focusByLesson[selectedLesson ?? 0];
+  // A focus restored from a draft is checked here, now that the lesson it belongs to has loaded.
+  const knownSavedFocus = useMemo(() => {
+    if (!savedFocus || !selectedLesson) return undefined;
+    const known = new Set(lessonFocusMisconceptions(selectedLesson).map(item => item.code));
+    const coreCount = lessonCoreIdeas(selectedLesson).length;
+    return {
+      misconceptions: [...new Set(savedFocus.misconceptions.filter(id => typeof id === "string" && known.has(id)))].slice(0, 2),
+      coreIdeas: [...new Set(savedFocus.coreIdeas.filter(id => Number.isInteger(id) && id >= 0 && id < coreCount))].slice(0, 2),
+    };
+  }, [savedFocus, selectedLesson]);
+  const selectedFocus: StrategyFocus = knownSavedFocus
     ?? (selectedLesson ? defaultStrategyFocus(selectedLesson, quizCounts) : EMPTY_FOCUS);
   const strategyFocus = selectedFocus;
   const setStrategyFocus = (focus: StrategyFocus) => {
@@ -561,7 +583,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
         version: DRAFT_VERSION,
         classId,
         assignmentId,
-        lessonNumber: selectedLesson,
+        lessonNumber: chosenLesson,
         currentStep: clampStep(currentStep),
         materialFormat,
         classroomContext,
@@ -569,8 +591,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
         plan,
         recommendation: classRecommendation,
         selectedStrategies,
-        strategyFocus: selectedLesson && focusByLesson[selectedLesson]
-          ? { lessonNumber: selectedLesson, ...focusByLesson[selectedLesson] }
+        strategyFocus: chosenLesson && focusByLesson[chosenLesson]
+          ? { lessonNumber: chosenLesson, ...focusByLesson[chosenLesson] }
           : { lessonNumber: null, ...EMPTY_FOCUS },
         annotationDecision,
         annotationReason,
@@ -585,7 +607,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     [
       classId,
       assignmentId,
-      selectedLesson,
+      chosenLesson,
       currentStep,
       materialFormat,
       classroomContext,
@@ -649,19 +671,13 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
 
   // Load lessons list
   useEffect(() => {
-    fetch("/api/lessons/1")
-      .then(() => {
-        // Load all 8 lessons metadata
-        const lessonList: Lesson[] = [];
-        const promises = Array.from({ length: 8 }, (_, i) =>
-          fetch(`/api/lessons/${i + 1}`)
-            .then((r) => r.json())
-            .then((data) => { lessonList[i] = data as Lesson; }),
-        );
-        Promise.all(promises).then(() => setLessons(lessonList.filter(Boolean)));
-      })
-      .catch(() => {});
-  }, []);
+    let cancelled = false;
+    listLessonOptions({ classId, assignmentId }).then(
+      (options) => { if (!cancelled) setLessons(options); },
+      (reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : "The lessons could not be loaded."); },
+    );
+    return () => { cancelled = true; };
+  }, [classId, assignmentId]);
 
   // Load quiz status on mount
   useEffect(() => {
@@ -672,10 +688,6 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
         if (data.quizStatus) {
           setSelectedLesson(data.quizStatus.lesson_number);
           setQuizStatus(data.quizStatus.status);
-          // Load quiz items for this lesson
-          scopedTaskFetch({ classId, assignmentId }, `/api/lessons/${data.quizStatus.lesson_number}`)
-            .then((r) => r.json())
-            .then((lesson) => setQuizItems(lesson.quiz_items ?? []));
         }
       })
       .catch(() => {});
@@ -765,13 +777,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             for (const [key, value] of Object.entries(storedFocus)) {
               if (!value || !Array.isArray(value.misconceptions) || !Array.isArray(value.coreIdeas)) continue;
               const lesson = Number(key);
-              if (!Number.isInteger(lesson) || lesson < 1 || lesson > 8) continue;
-              const known = new Set(lessonFocusMisconceptions(lesson).map(item => item.code));
-              const coreCount = lessonCoreIdeas(lesson).length;
-              restored[lesson] = {
-                misconceptions: [...new Set(value.misconceptions.filter(id => typeof id === "string" && known.has(id)))].slice(0, 2),
-                coreIdeas: [...new Set(value.coreIdeas.filter(id => Number.isInteger(id) && id >= 0 && id < coreCount))].slice(0, 2),
-              };
+              if (!Number.isInteger(lesson) || lesson < 1) continue;
+              restored[lesson] = value;
             }
             setFocusByLesson(restored);
           }
@@ -959,6 +966,10 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           items?: PublishedContentPayloadItem[];
         };
 
+        if (cancelled) return;
+
+        // A saved item's focus is checked against its lesson, so those lessons load first.
+        await Promise.all(savedItemLessons(publishData.items).map((lesson) => loadTaskLesson({ classId, assignmentId }, lesson).catch(() => null)));
         if (cancelled) return;
 
         let galleryOnly = false;
@@ -1158,7 +1169,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
 
   const selectLesson = async (lessonNumber: number) => {
     setQueuedVideoIds(new Set());
-    setSelectedLesson(lessonNumber);
+    setSelectedLesson(null);
     setPlan(null);
     setClassRecommendation(null);
     setSelectedStrategies([]);
@@ -1171,18 +1182,25 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     setSelectedForPublish(new Set());
     setPublishedContentIds(new Set());
     setClassRecommendation(null);
-    const res = await scopedTaskFetch({ classId, assignmentId }, `/api/lessons/${lessonNumber}`);
-    const data = await res.json();
-    setQuizItems(data.quiz_items ?? []);
-    // Save as draft
+    // Save as draft first: saving ties the task to a version, and the lesson then loads at that version.
     if (classId && assignmentId) {
-      await scopedTaskFetch({ classId, assignmentId }, "/api/quiz-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classId, assignmentId, lessonNumber, status: "draft", publishedBy: user.userId }),
-      });
-      setQuizStatus("draft");
+      setSavingLesson(true);
+      try {
+        const saved = await scopedTaskFetch({ classId, assignmentId }, "/api/quiz-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ classId, assignmentId, lessonNumber, status: "draft", publishedBy: user.userId }),
+        });
+        if (!saved.ok) throw new Error("This lesson couldn't be chosen. Please try again.");
+        setQuizStatus("draft");
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "This lesson couldn't be chosen. Please try again.");
+        return;
+      } finally {
+        setSavingLesson(false);
+      }
     }
+    setSelectedLesson(lessonNumber);
   };
 
   const publishQuiz = async () => {
@@ -1756,8 +1774,6 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   };
 
 
-  const selectedLessonData =
-    lessons.find((lesson) => lesson.lesson_number === selectedLesson) ?? null;
 
   const slidesAvailable = Boolean(classId && assignmentId);
   const slideStrategies = selectedStrategies.filter((strategy): strategy is SlideStrategy => SLIDE_STRATEGIES.includes(strategy as SlideStrategy));
@@ -1866,11 +1882,11 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                   <p className="text-xs font-semibold uppercase text-slate-400">Choose a lesson</p>
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                     {lessons.map((lesson) => (
-                      <button key={lesson.lesson_number} type="button" onClick={() => selectLesson(lesson.lesson_number)} disabled={generationBusy}
-                        className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${selectedLesson === lesson.lesson_number ? "border-[#BA0C2F] bg-[#BA0C2F]/5 ring-2 ring-[#BA0C2F]" : "border-slate-200 hover:border-slate-300"}`}>
-                        <p className="font-semibold text-slate-800">{lesson.lesson_title}</p>
+                      <button key={lesson.lessonNumber} type="button" onClick={() => selectLesson(lesson.lessonNumber)} disabled={generationBusy || savingLesson}
+                        className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${chosenLesson === lesson.lessonNumber ? "border-[#BA0C2F] bg-[#BA0C2F]/5 ring-2 ring-[#BA0C2F]" : "border-slate-200 hover:border-slate-300"}`}>
+                        <p className="font-semibold text-slate-800">{lesson.title}</p>
                         <p className="mt-1 text-xs text-slate-500">
-                          {lesson.quiz_items.filter((q) => q.type === "multiple_choice").length} questions
+                          {lesson.questionCount} questions
                         </p>
                       </button>
                     ))}
@@ -2249,8 +2265,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           )}
           {showDashboard && <TeacherDashboardView user={user} embedded />}
 
-          {error && (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>
+          {(error || lessonError) && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error || lessonError}</div>
           )}
         </section>
 

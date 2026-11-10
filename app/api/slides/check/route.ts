@@ -1,4 +1,5 @@
 import { beginSlideJob } from "@/lib/slides/jobs";
+import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import { draftErrors, isSlideAsset } from "@/lib/slides/model";
 import { resolveAnalogyMethod } from "@/lib/slides/analogy-methods";
 import { imageReferenceId, teachingErrors } from "@/lib/slides/quality";
@@ -18,6 +19,7 @@ export async function POST(request: Request) {
     // Keep all images inline and bounded; never fetch external image URLs.
     const body = await readSlideBody(request, 8_000_000);
     const authorized = await authorizeSlides(request, body);
+    enterLessonScope(await loadTaskLessons(authorized, body.lessonNumber));
     const { lesson, strategy } = slideContext(body);
     const classroomContext = requestClassroomContext(body.classroomContext);
     const focus = requestFocus(lesson.lessonNumber, strategy, body.focus);

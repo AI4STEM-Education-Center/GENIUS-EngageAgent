@@ -58,6 +58,17 @@ it("authenticates class profile reads and saves inside GENIUS (#173)", async () 
   }
 });
 
+it("sends the launch credential for a task's lesson list, but not for the open lesson pages", async () => {
+  const transport = vi.fn(async () => new Response("{}"));
+  vi.stubGlobal("fetch", transport);
+  setVerifiedClientAuth("host-token", user);
+  await scopedTaskFetch(user, "/api/lessons?classId=c&assignmentId=a");
+  await scopedTaskFetch(user, "/api/lessons/9?classId=c&assignmentId=a");
+  const sent = transport.mock.calls as unknown as [string, RequestInit | undefined][];
+  expect(new Headers(sent[0][1]?.headers).get("Authorization")).toBe("Bearer host-token");
+  expect(new Headers(sent[1][1]?.headers).has("Authorization")).toBe(false);
+});
+
 it("never leaks the launch credential to external, media, download, or different-task requests", async () => {
   const transport = vi.fn(async () => new Response("{}"));
   vi.stubGlobal("fetch", transport);

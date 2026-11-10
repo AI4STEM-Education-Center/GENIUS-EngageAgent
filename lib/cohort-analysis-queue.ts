@@ -1,4 +1,5 @@
 import { SendMessageBatchCommand, SQSClient } from "@aws-sdk/client-sqs";
+import type { LessonGenerationContext, ResolvedQuizEvidence } from "./lesson-context";
 
 const DEFAULT_ENGAGE_AWS_REGION = "us-east-2";
 
@@ -60,6 +61,7 @@ export const enqueueCohortJobStudents = async ({
   classId,
   assignmentId,
   lessonNumber,
+  lessonContext,
   totalStudents,
   forceRefresh = false,
   students,
@@ -68,6 +70,7 @@ export const enqueueCohortJobStudents = async ({
   classId: string;
   assignmentId: string;
   lessonNumber: number;
+  lessonContext?: LessonGenerationContext;
   totalStudents: number;
   forceRefresh?: boolean;
   students: Array<{
@@ -75,6 +78,7 @@ export const enqueueCohortJobStudents = async ({
     name: string;
     assignment?: string;
     answers: Record<string, string | undefined>;
+    quizEvidence?: ResolvedQuizEvidence[];
   }>;
 }) => {
   const { queueUrl } = getQueueConfig();
@@ -100,6 +104,7 @@ export const enqueueCohortJobStudents = async ({
             classId,
             assignmentId,
             lessonNumber,
+            lessonContext,
             totalStudents,
             forceRefresh,
             student,
