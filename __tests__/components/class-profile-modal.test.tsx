@@ -22,7 +22,7 @@ const open = (props: Partial<Parameters<typeof ClassProfileModal>[0]> = {}) => {
   const onClose = vi.fn();
   const onSaved = vi.fn();
   render(
-    <ClassProfileModal classId="c1" assignmentId="a1" firstVisit profile={null} onClose={onClose} onSaved={onSaved} {...props} />,
+    <ClassProfileModal classId="c1" assignmentId="a1" profile={null} onClose={onClose} onSaved={onSaved} {...props} />,
   );
   return { onClose, onSaved };
 };
@@ -33,12 +33,13 @@ const sentBody = () => JSON.parse(fetchMock.mock.calls.at(-1)![1].body as string
 it("asks the three questions with the wording from the design", () => {
   open();
   expect(screen.getByRole("dialog", { name: "Tell EngageAgent about this class" })).toBeTruthy();
-  expect(screen.getByText("Before you start · asked once")).toBeTruthy();
+  expect(screen.getByText("Class profile")).toBeTruthy();
   expect(screen.getByText("Used only to tailor materials. Never used to describe or label students.")).toBeTruthy();
   expect(screen.getByText("Which best describes where your school is located?")).toBeTruthy();
   expect(screen.getByText("Which groups are most represented in this class?")).toBeTruthy();
   expect(screen.getByText("What type of class is this?")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Skip for now" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
 });
 
 it("saves the answers, with groups in the order they were picked", async () => {
@@ -86,13 +87,6 @@ it("clears the groups when Not sure is chosen", () => {
   expect(screen.getByRole("button", { name: "Not sure" }).getAttribute("aria-pressed")).toBe("true");
 });
 
-it("Skip for now records the skip on the first visit", async () => {
-  const { onSaved } = open();
-  press("Skip for now");
-  await waitFor(() => expect(onSaved).toHaveBeenCalled());
-  expect(sentBody()).toEqual({ classId: "c1", assignmentId: "a1", skip: true });
-});
-
 it("opens later with the saved answers, and Cancel closes without saving", () => {
   const saved: ClassProfile = {
     ...EMPTY_CLASS_PROFILE,
@@ -102,7 +96,7 @@ it("opens later with the saved answers, and Cancel closes without saving", () =>
     groups: ["white"],
     updated_at: "",
   };
-  const { onClose } = open({ firstVisit: false, profile: saved });
+  const { onClose } = open({ profile: saved });
   expect(screen.getByText("Class profile")).toBeTruthy();
   expect(screen.getByRole("button", { name: /^Rural/ }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByRole("button", { name: "White" }).getAttribute("aria-pressed")).toBe("true");
@@ -121,9 +115,9 @@ it("shows the error and stays open when saving fails", async () => {
   expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
 });
 
-// The class page by default: no task, and it asks the first time.
-function Page({ enabled = true, assignmentId, askFirst = true }: { enabled?: boolean; assignmentId?: string; askFirst?: boolean }) {
-  const classProfile = useClassProfile({ classId: "c1", assignmentId, enabled, askFirst });
+// The class page by default (no task).
+function Page({ enabled = true, assignmentId }: { enabled?: boolean; assignmentId?: string }) {
+  const classProfile = useClassProfile({ classId: "c1", assignmentId, enabled });
   return (
     <>
       <button type="button" onClick={classProfile.openEditor}>Open class profile</button>
@@ -139,43 +133,39 @@ const respond = (...bodies: { ok: boolean; body: unknown }[]) => {
   });
 };
 
-it("opens by itself on the class page the first time, then confirms the save (no task needed)", async () => {
+it.each([
+  ["no profile", null],
+  ["a saved profile", { ...EMPTY_CLASS_PROFILE, class_id: "c1", status: "saved", updated_at: "" }],
+  ["an older skipped profile", { ...EMPTY_CLASS_PROFILE, class_id: "c1", status: "skipped", updated_at: "" }],
+])("never opens by itself, on the class page or in a task, with %s", async (_label, classProfile) => {
+  respond({ ok: true, body: { classProfile } });
+  render(<Page />);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/class-profile?classId=c1");
+  cleanup();
+
+  fetchMock.mockClear();
+  render(<Page assignmentId="a1" />);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/class-profile?classId=c1&assignmentId=a1");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("opens from a button, saves without a task on the class page, and confirms the save", async () => {
   respond({ ok: true, body: { classProfile: null } }, { ok: true, body: { classProfile: { ...EMPTY_CLASS_PROFILE, class_id: "c1", status: "saved", updated_at: "" } } });
   render(<Page />);
-  expect(await screen.findByText("Before you start · asked once")).toBeTruthy();
-  expect(fetchMock.mock.calls[0][0]).toBe("/api/class-profile?classId=c1");
-  expect(document.activeElement).toBe(screen.getByRole("dialog"));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
+  press("Open class profile");
+  expect(document.activeElement).toBe(screen.getByRole("dialog"));
   press("Save");
   expect(await screen.findByText("Class profile saved")).toBeTruthy();
   expect(JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body))).toEqual({ classId: "c1", profile: EMPTY_CLASS_PROFILE });
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
-it("never opens by itself inside a task, but can be opened to add or edit it there", async () => {
-  respond({ ok: true, body: { classProfile: null } });
-  render(<Page assignmentId="a1" askFirst={false} />);
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-  expect(fetchMock.mock.calls[0][0]).toBe("/api/class-profile?classId=c1&assignmentId=a1");
-  expect(screen.queryByRole("dialog")).toBeNull();
-
-  press("Open class profile");
-  expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
-});
-
-it("does not open by itself once the teacher has saved or skipped", async () => {
-  respond({ ok: true, body: { classProfile: { ...EMPTY_CLASS_PROFILE, class_id: "c1", status: "skipped", updated_at: "" } } });
-  render(<Page />);
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-  expect(screen.queryByRole("dialog")).toBeNull();
-
-  press("Open class profile");
-  expect(screen.getByText("Class profile")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
-});
-
-it("stays closed when the profile can't be loaded or there is no class", async () => {
+it("stays quiet when the profile can't be loaded or there is no class", async () => {
   respond({ ok: false, body: { error: "Sign-in required." } });
   render(<Page />);
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -185,13 +175,4 @@ it("stays closed when the profile can't be loaded or there is no class", async (
   fetchMock.mockClear();
   render(<Page enabled={false} />);
   expect(fetchMock).not.toHaveBeenCalled();
-});
-
-it("Skip for now closes without the saved message", async () => {
-  respond({ ok: true, body: { classProfile: null } }, { ok: true, body: { classProfile: { ...EMPTY_CLASS_PROFILE, class_id: "c1", status: "skipped", updated_at: "" } } });
-  render(<Page />);
-  await screen.findByRole("button", { name: "Skip for now" });
-  press("Skip for now");
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  expect(screen.queryByText("Class profile saved")).toBeNull();
 });

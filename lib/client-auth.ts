@@ -31,7 +31,7 @@ export function scopedClientAuthHeaders(scope: ClientAuthScope): Record<string, 
 /** Only attach the verified launch credential to our task APIs. Never forward
  * it to media URLs, provider endpoints, downloads, or public lesson assets. */
 export function scopedTaskFetch(scope: ClientAuthScope, input: string, init?: RequestInit): Promise<Response> {
-  const protectedPath = /^\/api\/(?:quiz-status|class-profile|student-answers|strategy-cache|strategy-job(?:\/[^/?]+)?|strategy-single|strategy-batch|content-publish|content-rating|review-questions|activity-status|media|surveys(?:\/publish)?|survey-responses|teacher-annotation|question-(?:analysis|board)|quiz-report(?:-release)?|engagement-(?:content|plan|image|video)(?:\/status)?|auto-answer-test-students)(?:\?|$)|^\/api\/lessons\?/u.test(input);
+  const protectedPath = /^\/api\/(?:ask-engageagent|quiz-status|class-profile|student-answers|strategy-cache|strategy-job(?:\/[^/?]+)?|strategy-single|strategy-batch|content-publish|content-rating|review-questions|activity-(?:status|progress)|media|surveys(?:\/publish)?|survey-responses|teacher-annotation|question-(?:analysis|board)|quiz-report(?:-release)?|engagement-(?:content|plan|image|video)(?:\/status)?|auto-answer-test-students)(?:\?|$)|^\/api\/lessons\?/u.test(input);
   if (!protectedPath) return fetch(input, init);
   const headers = new Headers(init?.headers);
   for (const [key, value] of Object.entries(scopedClientAuthHeaders(scope))) headers.set(key, value);

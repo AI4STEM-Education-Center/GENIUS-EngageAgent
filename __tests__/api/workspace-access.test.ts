@@ -88,6 +88,8 @@ describe("native class authorization", () => {
     // Who asked what stays with the teacher.
     expect((await guardWorkspaceRequest(request("question-analysis")))?.status).toBe(403);
     expect((await guardWorkspaceRequest(request("quiz-report-release", "POST", { reason: "early" })))?.status).toBe(403);
+    // Activity progress is the teacher's (#176).
+    expect((await guardWorkspaceRequest(request("activity-progress")))?.status).toBe(403);
   });
   it("lets teachers sort questions, publish the board and release reports (#182)", async () => {
     expect(await guardWorkspaceRequest(request("question-analysis"))).toBeNull();
@@ -96,6 +98,12 @@ describe("native class authorization", () => {
     expect(await guardWorkspaceRequest(request("quiz-report"))).toBeNull();
     expect(await guardWorkspaceRequest(request("quiz-report", "GET", { studentId: "s9" }))).toBeNull();
     expect(await guardWorkspaceRequest(request("quiz-report-release", "POST", { reason: "taught" }))).toBeNull();
+    expect(await guardWorkspaceRequest(request("activity-progress"))).toBeNull();
+  });
+  it("keeps Ask EngageAgent teacher-only (#198)", async () => {
+    expect(await guardWorkspaceRequest(request("ask-engageagent", "POST"))).toBeNull();
+    vi.mocked(sessionUser).mockResolvedValue(student);
+    expect((await guardWorkspaceRequest(request("ask-engageagent", "POST")))?.status).toBe(403);
   });
   it("keeps the class profile teacher-only (#173)", async () => {
     expect(await guardWorkspaceRequest(request("class-profile"))).toBeNull();

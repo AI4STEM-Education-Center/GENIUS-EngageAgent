@@ -30,6 +30,7 @@ frontend:
         - echo "OPENAI_VLM_MODEL=${OPENAI_VLM_MODEL:-gpt-4o}" >> .env.production
         - echo "OPENAI_MATERIAL_IMAGE_QUALITY=${OPENAI_MATERIAL_IMAGE_QUALITY:-medium}" >> .env.production
         - if [ -n "$OPENAI_FALLBACK_MODEL" ]; then echo "OPENAI_FALLBACK_MODEL=$OPENAI_FALLBACK_MODEL" >> .env.production; fi
+        - if [ -n "$OPENAI_CHAT_MODEL" ]; then echo "OPENAI_CHAT_MODEL=$OPENAI_CHAT_MODEL" >> .env.production; fi
         - npm run build
   artifacts:
     baseDirectory: .next
