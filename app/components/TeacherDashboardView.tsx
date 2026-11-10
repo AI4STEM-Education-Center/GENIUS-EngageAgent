@@ -9,6 +9,7 @@ import Link from "next/link";
 import type { UserContext } from "@/lib/auth";
 import { isPublishedSlideReference } from "@/lib/slides/publication";
 import { recommendWorkspaceCohort } from "@/lib/cohort-recommendation";
+import { loadTaskLesson } from "@/lib/lesson-client";
 import { buildTeacherSummary, type StrategyRecommendation } from "@/lib/strategy-recommendation";
 import {
   engagementStrategies,
@@ -236,7 +237,11 @@ export default function TeacherDashboardView({ user, embedded }: Props) {
 
       let recommendation: StrategyRecommendation | null = null;
       try {
-        if (fetchedLesson) recommendation = recommendWorkspaceCohort(fetchedAnswers, { classId, assignmentId, lessonNumber: fetchedLesson });
+        if (fetchedLesson) {
+          await loadTaskLesson({ classId, assignmentId }, fetchedLesson);
+          if (version !== refreshVersion.current) return;
+          recommendation = recommendWorkspaceCohort(fetchedAnswers, { classId, assignmentId, lessonNumber: fetchedLesson });
+        }
       } catch {
         partialFailure = true;
       }

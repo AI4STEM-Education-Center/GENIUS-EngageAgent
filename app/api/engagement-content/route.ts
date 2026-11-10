@@ -7,6 +7,7 @@ import {
   type LessonGenerationContext,
   type StrategyContext,
 } from "@/lib/lesson-context";
+import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import type { ContentItem, TextMode } from "@/lib/types";
 import { MATERIAL_STRATEGIES, parseGeneratedMaterialActivity } from "@/lib/material-activities";
 import { buildMaterialPrompt, materialReviewInstructions, summarizeDiagnosticAnswers } from "@/lib/material-prompts";
@@ -131,6 +132,7 @@ export async function POST(request: Request) {
       );
     }
 
+    enterLessonScope(await loadTaskLessons({ classId: classId!, assignmentId: assignmentId! }, lessonNumber));
     const lessonContext = getLessonGenerationContext(lessonNumber);
     if (!lessonContext) {
       return NextResponse.json(

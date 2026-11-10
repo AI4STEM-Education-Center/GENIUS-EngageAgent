@@ -21,7 +21,7 @@ const keys = (value: Record<string, unknown>, allowed: string[]) => Object.keys(
 const string = (value: unknown, max: number) => typeof value === "string" && value.length > 0 && value.length <= max;
 const dimension = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 4096;
 export const isSlidePublicationId = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
-const lesson = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 8;
+const lesson = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 1;
 const assetId = (value: unknown): value is string => typeof value === "string" && /^(?:phenomenon|target|analogue|variation|evidence|experience|claim)$/u.test(value);
 
 export function isPublishedSlideReference(value: unknown): value is PublishedSlideReference {

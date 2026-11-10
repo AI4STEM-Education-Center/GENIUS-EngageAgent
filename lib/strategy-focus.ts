@@ -1,6 +1,6 @@
-import { LESSON_MISCONCEPTIONS, type MisconceptionId } from "./misconceptions";
+import { toMisconceptionIds, type MisconceptionId } from "./misconceptions";
 import { getLesson } from "./quiz-data";
-import { countClassResponses, MERGED_MISCONCEPTIONS, type ClassQuizCounts, type QuizSubmission } from "./strategy-recommendation";
+import { countClassResponses, lessonMerges, type ClassQuizCounts, type QuizSubmission } from "./strategy-recommendation";
 
 /**
  * The focus a teacher sets for the chosen strategy in Step 2 (#178).
@@ -34,10 +34,10 @@ export type FocusMisconception = { code: string; id?: MisconceptionId; statement
 export function lessonFocusMisconceptions(lessonNumber: number): FocusMisconception[] {
   const lesson = getLesson(lessonNumber);
   if (!lesson) return [];
-  const merged = MERGED_MISCONCEPTIONS[lessonNumber] ?? {};
+  const merged = lessonMerges(lesson);
   return Object.entries(lesson.misconceptions)
     .filter(([code]) => !(code in merged))
-    .map(([code, statement]) => ({ code, id: LESSON_MISCONCEPTIONS[lessonNumber]?.[code], statement }));
+    .map(([code, statement]) => ({ code, id: toMisconceptionIds(lessonNumber, code)[0], statement }));
 }
 
 export function lessonCoreIdeas(lessonNumber: number): string[] {
@@ -95,9 +95,15 @@ export function resolveStrategyFocus(lessonNumber: number, strategy: string, val
     throw new FocusError(`Choose one or two ${kind === "misconceptions" ? "misconceptions" : "core ideas"} for the focus.`);
   }
   if (kind === "misconceptions") {
-    const known = new Map(lessonFocusMisconceptions(lessonNumber).map(m => [m.code, m.statement]));
-    if (picked.some(code => typeof code !== "string" || !known.has(code))) throw new FocusError("Unknown misconception in the strategy focus.");
-    return { kind, items: picked.map(code => known.get(code as string)!) };
+    // A focus saved against another version of the lesson can use that version's code for the same misconception (#175).
+    const options = lessonFocusMisconceptions(lessonNumber);
+    const statementOf = (code: unknown) => {
+      if (typeof code !== "string") return undefined;
+      const shared = toMisconceptionIds(lessonNumber, code)[0];
+      return options.find(m => m.code === code || (shared !== undefined && m.id === shared))?.statement;
+    };
+    if (picked.some(code => statementOf(code) === undefined)) throw new FocusError("Unknown misconception in the strategy focus.");
+    return { kind, items: picked.map(code => statementOf(code)!) };
   }
   const coreIdeas = lessonCoreIdeas(lessonNumber);
   if (picked.some(index => !Number.isInteger(index) || index < 0 || index >= coreIdeas.length)) {

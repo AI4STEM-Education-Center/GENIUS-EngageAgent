@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import type { ChatClient } from "./daily-experience-llm";
 import { getQuizStatus, getTaskDoc, listReviewQuestions, listStudentAnswers, putTaskDoc } from "./nosql";
-import { getLesson } from "./quiz-data";
+import { getTaskLesson } from "./lessons-store";
 import {
   analyzeQuestions,
   collectQuestions,
@@ -37,7 +37,7 @@ export async function getTaskQuestions(classId: string, assignmentId: string, cl
   ]);
   const names = new Map(answers.map(answer => [answer.student_id, answer.student_name]));
   const questions = collectQuestions(records, names);
-  const lesson = quiz?.lesson_number ? getLesson(quiz.lesson_number) : undefined;
+  const lesson = quiz?.lesson_number ? (await getTaskLesson(classId, assignmentId, quiz.lesson_number))?.lesson : undefined;
   const base = { lessonNumber: lesson?.lesson_number ?? null, total: questions.length, students: new Set(questions.map(q => q.studentId)).size };
   if (questions.length === 0) return { ...base, groups: [], analysisError: null };
 

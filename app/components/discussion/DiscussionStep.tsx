@@ -15,6 +15,8 @@ type Props = {
   materialsSent: boolean;
   /** A one-line status for the Step 4 tab. */
   onStatusChange?: (status: string) => void;
+  /** Whether the step is done: reports are released, as in the v8.4 prototype (#176). */
+  onDoneChange?: (done: boolean) => void;
 };
 
 const POLL_MS = 30_000;
@@ -48,7 +50,7 @@ function Empty({ children, locked }: { children: React.ReactNode; locked?: boole
 // the teacher publishes from them; "Feedback reports" holds the release of
 // quiz feedback reports. Both panels stay mounted (hidden when not selected),
 // so loading and polling carry on whichever tab is shown.
-export default function DiscussionStep({ classId, assignmentId, materialsSent, onStatusChange }: Props) {
+export default function DiscussionStep({ classId, assignmentId, materialsSent, onStatusChange, onDoneChange }: Props) {
   const scope = { classId, assignmentId };
   const query = new URLSearchParams(scope).toString();
 
@@ -134,6 +136,10 @@ export default function DiscussionStep({ classId, assignmentId, materialsSent, o
   useEffect(() => {
     onStatusChange?.(discussionStatus({ released, boardPublished: Boolean(board), questions: total, materialsSent }));
   }, [released, board, total, materialsSent, onStatusChange]);
+  useEffect(() => {
+    // Wait for the first load, so a slow answer doesn't undo the saved progress.
+    if (reports) onDoneChange?.(released);
+  }, [reports, released, onDoneChange]);
 
   const all = questions?.groups.flatMap((group) => group.questions.map((q) => ({ ...q, group: group.title }))) ?? [];
   const textOf = (id: string) => edits[id] ?? all.find((q) => q.id === id)?.text ?? board?.questions.find((q) => q.id === id)?.text ?? "";

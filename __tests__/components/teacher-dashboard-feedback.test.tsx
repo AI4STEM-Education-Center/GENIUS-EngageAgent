@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import TeacherDashboardView from "@/app/components/TeacherDashboardView";
 import type { UserContext } from "@/lib/auth";
+import { lessonResponse } from "../fixtures/lesson-responses";
 
 vi.mock("@/app/components/SurveyResultsSection", () => ({ default: () => null }));
 const teacher: UserContext = { geniusId: "teacher", userId: "teacher", name: "Teacher", email: null, role: "teacher", classId: "ea-class-1", assignmentId: "ea-task-1" };
@@ -31,6 +32,8 @@ beforeEach(() => {
       return { ok: false, json: async () => ({ error: "Service unavailable" }) };
     }
     return { ok: true, json: async () => {
+    const lesson = lessonResponse(input);
+    if (lesson) return lesson;
     if (input.startsWith("/api/content-publish")) return { items: published };
     if (input.startsWith("/api/quiz-status")) return { quizStatus: { lesson_number: quizLesson, status: "published" } };
     if (input.startsWith("/api/student-answers")) return { answers };

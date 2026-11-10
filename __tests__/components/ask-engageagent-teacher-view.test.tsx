@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import TeacherView from "@/app/components/TeacherView";
 import type { UserContext } from "@/lib/auth";
+import { lessonResponse } from "../fixtures/lesson-responses";
 
 const teacher: UserContext = {
   geniusId: "teacher", userId: "teacher", name: "Test teacher", email: null, role: "teacher",
@@ -19,9 +20,8 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (input: string) => ({
     ok: true,
     json: async () => input === "/api/ask-engageagent" ? { answer: "An answer." }
-      : input.startsWith("/api/lessons/") ? { lesson_number: Number(input.split("/").pop()), lesson_title: `Lesson ${input.split("/").pop()}`, quiz_items: [], learning_objective: "Test objective" }
-        : input.startsWith("/api/material-gallery") ? { items: [] }
-          : input.startsWith("/api/slides?") ? { lessons: [] } : {},
+      : lessonResponse(input) ?? (input.startsWith("/api/material-gallery") ? { items: [] }
+          : input.startsWith("/api/slides?") ? { lessons: [] } : {}),
   })));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -58,7 +58,7 @@ it("follows the teacher across every step, the Dashboard and the Gallery and kee
 
 it("sends the lesson the teacher picked, and no lesson before that", async () => {
   render(<TeacherView user={teacher} />);
-  const lessonThree = await screen.findByRole("button", { name: /Lesson 3 0 questions/ });
+  const lessonThree = await screen.findByRole("button", { name: /Lesson 3 \d+ questions/ });
   fireEvent.click(screen.getByRole("button", { name: "Ask EngageAgent" }));
   const box = screen.getByRole("textbox", { name: "Your question" });
   fireEvent.change(box, { target: { value: "Before choosing" } });

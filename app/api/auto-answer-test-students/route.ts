@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { extractSSOToken, verifySSOToken } from "@/lib/auth";
-import { getLesson } from "@/lib/quiz-data";
+import { getTaskLesson } from "@/lib/lessons-store";
 import { getQuizStatus, upsertStudentAnswer } from "@/lib/nosql";
 import { TEST_STUDENTS } from "@/lib/test-students";
 import type { QuizItem } from "@/lib/types";
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const lesson = getLesson(quizStatus.lesson_number);
+    const lesson = (await getTaskLesson(classId, assignmentId, quizStatus.lesson_number))?.lesson;
     if (!lesson) {
       return NextResponse.json(
         { error: `Lesson ${quizStatus.lesson_number} could not be loaded.` },

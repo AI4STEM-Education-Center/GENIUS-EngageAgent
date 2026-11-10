@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 const mocks = vi.hoisted(() => ({ session: vi.fn(), context: vi.fn(), get: vi.fn(), put: vi.fn(), published: vi.fn(), upsert: vi.fn(), send: vi.fn(), sign: vi.fn(), destroy: vi.fn() }));
 vi.mock("@/lib/session", () => ({ sessionUser: mocks.session, sameOriginRequest: (request: Request) => request.headers.get("origin") === "https://engage.test" }));
 vi.mock("@/lib/workspace", async original => ({ ...await original<object>(), workspaceContext: mocks.context }));
+// Not about lessons: getLesson reads the lesson files here. See lesson-wiring.test.ts for the stored ones.
+vi.mock("@/lib/lesson-scope", () => ({ enterLessonScope: () => {}, loadTaskLessons: async () => new Map() }));
 vi.mock("@/lib/workspace-store", () => ({ workspaceGet: mocks.get, workspacePut: mocks.put }));
 vi.mock("@/lib/nosql", () => ({ listPublishedContent: mocks.published, upsertContentPublish: mocks.upsert }));
 vi.mock("@aws-sdk/client-s3", async original => ({ ...await original<object>(), S3Client: class { send = mocks.send; destroy = mocks.destroy; } }));

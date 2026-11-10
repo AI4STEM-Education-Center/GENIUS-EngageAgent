@@ -58,6 +58,40 @@ it("authenticates class profile reads and saves inside GENIUS (#173)", async () 
   }
 });
 
+it("loads activity progress for a verified GENIUS task without authorizing another task or a signed-out request", async () => {
+  const progress = { assessment: "done", strategy: "in-progress", materials: "not-started", discussion: "not-started" };
+  const transport = vi.fn(async (_input: string, init?: RequestInit) => {
+    const authorized = new Headers(init?.headers).get("Authorization") === "Bearer host-token";
+    return new Response(JSON.stringify(authorized ? { progress } : { error: "Sign-in required." }), { status: authorized ? 200 : 401 });
+  });
+  vi.stubGlobal("fetch", transport);
+  setVerifiedClientAuth("host-token", user);
+  const path = "/api/activity-progress?classId=host-class&assignmentId=host-task";
+  const response = await scopedTaskFetch(user, path, { cache: "no-store" });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ progress });
+
+  const wrongTask = await scopedTaskFetch({ ...user, assignmentId: "other-task" }, "/api/activity-progress?classId=host-class&assignmentId=other-task");
+  expect(wrongTask.status).toBe(401);
+  expect(new Headers(transport.mock.calls[1][1]?.headers).has("Authorization")).toBe(false);
+
+  clearVerifiedClientAuth();
+  const signedOut = await scopedTaskFetch(user, path);
+  expect(signedOut.status).toBe(401);
+  expect(new Headers(transport.mock.calls[2][1]?.headers).has("Authorization")).toBe(false);
+});
+
+it("sends the launch credential for a task's lesson list, but not for the open lesson pages", async () => {
+  const transport = vi.fn(async () => new Response("{}"));
+  vi.stubGlobal("fetch", transport);
+  setVerifiedClientAuth("host-token", user);
+  await scopedTaskFetch(user, "/api/lessons?classId=c&assignmentId=a");
+  await scopedTaskFetch(user, "/api/lessons/9?classId=c&assignmentId=a");
+  const sent = transport.mock.calls as unknown as [string, RequestInit | undefined][];
+  expect(new Headers(sent[0][1]?.headers).get("Authorization")).toBe("Bearer host-token");
+  expect(new Headers(sent[1][1]?.headers).has("Authorization")).toBe(false);
+});
+
 it("never leaks the launch credential to external, media, download, or different-task requests", async () => {
   const transport = vi.fn(async () => new Response("{}"));
   vi.stubGlobal("fetch", transport);

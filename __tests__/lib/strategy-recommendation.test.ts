@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { engagementStrategies } from "@/lib/engagement-strategies";
 import { getAllLessons, getLesson } from "@/lib/quiz-data";
+import { runInLessonScope } from "@/lib/lesson-scope";
+import { draftFromLesson, emptyDraftQuizItem, lessonFromDraft } from "@/lib/lessons";
+import { MISCONCEPTION_TEXT, MisconceptionId } from "@/lib/misconceptions";
+import { classQuizCounts } from "@/lib/strategy-focus";
 import {
   buildClassPlan,
   buildLearnerSummary,
@@ -13,8 +17,9 @@ import {
   getLessonAnalogyLabel,
   getMultipleChoiceItems,
   LESSON_ANALOGY_REASONS,
+  lessonMerges,
   recommendStrategy,
-  resolveOptionMisconception,
+  resolveOptionMisconceptions,
   type RecommendedStrategy,
 } from "@/lib/strategy-recommendation";
 import type { Lesson } from "@/lib/types";
@@ -110,7 +115,7 @@ describe("lesson data used by the rule", () => {
         for (const option of Object.keys(item.distractor_misconception_map ?? {})) {
           expect(option).not.toBe(item.correct_answer);
           expect(Object.keys(item.options)).toContain(option);
-          expect(() => resolveOptionMisconception(lesson, item, option)).not.toThrow();
+          expect(resolveOptionMisconceptions(lesson, item, option)).toHaveLength(1);
         }
       }
     }
@@ -130,6 +135,65 @@ describe("lesson data used by the rule", () => {
   });
 });
 
+describe("a lesson made in the app", () => {
+  const [MC1, MC2, MC3] = [MisconceptionId.NoVisibleDamageMeansWeakForce, MisconceptionId.HeavierAlwaysCausesMoreDamage, MisconceptionId.ForceNeededForConstantSpeed];
+  const nine = lessonFromDraft({
+    title: "Waves", objective: "o", topic: "t", targetConcept: "c", coreIdeas: ["idea"], misconceptions: [MC1, MC2, MC3],
+    quizItems: ["n1", "n2"].map((id) => ({
+      ...emptyDraftQuizItem(id), stem: id, options: { A: "right", B: "two", C: "one", D: "none" }, correct: "A" as const,
+      matchedMisconception: MC1, explanation: "e", wrongOptionMisconceptions: { B: [MC1, MC2], C: [MC2] },
+    })),
+  }, 9);
+  const count = (submissions: Record<string, string>[]) => countClassResponses(nine, submissions);
+  const by = (counts: ReturnType<typeof count>) => Object.fromEntries(counts.misconceptions.map((m) => [m.id, m.count]));
+
+  it("counts a wrong answer toward each of its misconceptions, as one wrong answer", () => {
+    const counts = count([{ n1: "B", n2: "C" }, { n1: "A", n2: "D" }]);
+    expect(by(counts)).toEqual({ [MC1]: 1, [MC2]: 2, [MC3]: 0 });
+    expect(counts).toMatchObject({ responses: 4, correct: 1, incorrect: 3, unlinked: 1 });
+  });
+
+  it("never reports a negative number of unlinked answers", () => {
+    const counts = count([{ n1: "B", n2: "B" }]);
+    expect(counts).toMatchObject({ incorrect: 2, unlinked: 0 });
+    expect(by(counts)).toEqual({ [MC1]: 2, [MC2]: 2, [MC3]: 0 });
+  });
+
+  it("shows up in the class's counts rather than silently giving none", () => {
+    expect(runInLessonScope([nine], () => classQuizCounts(9, [{ n1: "B", n2: "A" }]))).toMatchObject({ incorrect: 1 });
+  });
+
+  it("recommends, explains and builds prompts with no gaps, using the default for an unrated lesson", () => {
+    runInLessonScope([nine], () => {
+      const mixed = recommendStrategy(9, [{ n1: "D", n2: "D" }]);
+      expect(mixed).toMatchObject({ strategy: "experience bridging", decidedAtStep: 3, analogyLabel: "not recommend" });
+      expect(buildRecommendationReason(mixed)).toContain("haven't been rated");
+      expect(buildRecommendationReason(mixed)).not.toContain("undefined");
+      const conflict = recommendStrategy(9, [{ n1: "B", n2: "B" }]);
+      expect(conflict.strategy).toBe("cognitive conflict");
+      expect(conflict.targetCandidates.map((m) => m.id)).toEqual([MC1, MC2]);
+      expect(buildTeacherSummary(conflict)).toContain("2 of 2");
+      const critique = recommendStrategy(9, [{ n1: "A", n2: "A" }]);
+      expect(buildPromptVariables(critique).QUIZ_ITEMS).toContain(`[misconception ${MC1}: ${MISCONCEPTION_TEXT[MC1]}; ${MC2}: ${MISCONCEPTION_TEXT[MC2]}]`);
+    });
+  });
+
+  it("still refuses a label that isn't one of the lesson's misconceptions", () => {
+    const broken = { ...nine, misconceptions: { [MC1]: "x" } };
+    expect(() => countClassResponses(broken, [{ n1: "C", n2: "A" }])).toThrow("unknown misconception");
+  });
+
+  it("keeps lesson 5's two peak-force codes as one misconception after it's edited, unless one is removed", () => {
+    const edited = lessonFromDraft({ ...draftFromLesson(requireLesson(5)), topic: "t", targetConcept: "c" }, 5);
+    const answers = [{ L5_Q1: "B" }];
+    const before = countClassResponses(requireLesson(5), answers), after = countClassResponses(edited, answers);
+    expect(after.misconceptions.map((m) => m.count)).toEqual(before.misconceptions.map((m) => m.count));
+    expect(after.misconceptions.map((m) => m.id)).not.toContain("MC18");
+    const withoutFirst = { ...edited, misconceptions: Object.fromEntries(Object.entries(edited.misconceptions).filter(([id]) => id !== "MC14")) };
+    expect(Object.keys(lessonMerges(withoutFirst))).toEqual([]);
+  });
+});
+
 describe("getLessonAnalogyLabel", () => {
   it("recommends analogy for L2, L3, L5, L6 and L7 only", () => {
     const labels = [1, 2, 3, 4, 5, 6, 7, 8].map((lessonNumber) => getLessonAnalogyLabel(lessonNumber));
@@ -145,8 +209,8 @@ describe("getLessonAnalogyLabel", () => {
     ]);
   });
 
-  it("throws for a lesson without a label", () => {
-    expect(() => getLessonAnalogyLabel(9)).toThrow("No analogy label");
+  it("doesn't recommend an analogy for a lesson that hasn't been rated", () => {
+    expect(getLessonAnalogyLabel(9)).toBe("not recommend");
   });
 });
 

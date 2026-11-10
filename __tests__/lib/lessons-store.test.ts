@@ -102,7 +102,7 @@ describe("adding a lesson (UC 2.1)", () => {
   it("isn't offered to tasks and can't be read until it's published", async () => {
     const { row } = await store.createLesson(teacher);
     await store.saveLessonDraft(teacher, row.lessonNumber, content());
-    expect((await store.listPublishedLessons()).map((r) => r.lessonNumber)).not.toContain(row.lessonNumber);
+    expect((await store.listTaskLessons("c1", "t1")).map((r) => r.lessonNumber)).not.toContain(row.lessonNumber);
     expect((await store.listLessons()).map((r) => r.lessonNumber)).toContain(row.lessonNumber);
     expect(await store.getCurrentLesson(row.lessonNumber)).toBeNull();
     expect(await store.getLessonVersion(row.lessonNumber, 1)).toBeNull();
@@ -132,7 +132,7 @@ describe("adding a lesson (UC 2.1)", () => {
     expect(version).toMatchObject({ version: 1, status: "published", changeNote: "First version", publishedBy: { id: "teacher-2", name: "Ben Teacher" } });
     expect(version.publishedAt).toBeTruthy();
     expect(await store.getLessonDraft(row.lessonNumber)).toBeNull();
-    const listed = (await store.listPublishedLessons()).find((r) => r.lessonNumber === row.lessonNumber);
+    const listed = (await store.listTaskLessons("c1", "t1")).find((r) => r.lessonNumber === row.lessonNumber);
     expect(listed).toMatchObject({ currentVersion: 1, draftVersion: null, title: "Forces" });
     expect(await store.getCurrentLesson(row.lessonNumber)).toMatchObject({ lesson_number: 9, lesson_title: "Forces" });
     await expect(store.saveLessonDraft(teacher, row.lessonNumber, content("Changed"))).rejects.toMatchObject({ status: 404 });

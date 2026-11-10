@@ -5,6 +5,7 @@ import { localMaterialStorageEnabled, localMaterialUrl, storeLocalMaterial } fro
 import { workspaceGet, workspacePut } from "../workspace-store";
 import { listPublishedContent, upsertContentPublish } from "../nosql";
 import { authorizeSlideAccess, authorizeSlides, requestDraft, slideContext, SlideRequestError } from "./server";
+import { enterLessonScope, loadTaskLessons } from "../lesson-scope";
 import { isPublishedSlideManifest, isPublishedSlideReference, isSlidePublicationId, projectPublishedSlides, publishedSlideManifestKey,
   type PublishedSlideManifest, type PublishedSlideResponse, type SlideAssetDimensions } from "./publication";
 
@@ -202,7 +203,10 @@ async function commitPublication(context: Context, body: Record<string, unknown>
 
 export async function writeSlidePublication(request: Request, body: Record<string, unknown>) {
   const context = await authorizeSlides(request, body);
-  if (body.operation === "start") return startPublication(context, body, context.userId);
+  if (body.operation === "start") {
+    enterLessonScope(await loadTaskLessons(context, body.lessonNumber));
+    return startPublication(context, body, context.userId);
+  }
   if (body.operation === "asset") return storeAsset(request, context, body, context.userId);
   if (body.operation === "commit") return commitPublication(context, body, context.userId);
   throw new SlideRequestError("Choose a slide publication operation.");

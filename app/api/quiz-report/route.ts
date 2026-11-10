@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";
 import { getQuizStatus, getStudentAnswer, getTaskDoc, listStudentAnswers } from "@/lib/nosql";
-import { getLesson } from "@/lib/quiz-data";
+import { getTaskLesson } from "@/lib/lessons-store";
 import { buildQuizReport, type ReportRelease } from "@/lib/quiz-report";
 
 /**
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     getTaskDoc<ReportRelease>(classId, assignmentId, "report_release"),
     getQuizStatus(classId, assignmentId),
   ]);
-  const lesson = quiz?.lesson_number ? getLesson(quiz.lesson_number) : undefined;
+  const lesson = quiz?.lesson_number ? (await getTaskLesson(classId, assignmentId, quiz.lesson_number))?.lesson : undefined;
   // A task can move to another lesson. Its earlier release must not unlock
   // that lesson's answer key or appear as released on the teacher's card.
   const release = lesson && quiz?.status !== "draft" && storedRelease?.lessonNumber === lesson.lesson_number

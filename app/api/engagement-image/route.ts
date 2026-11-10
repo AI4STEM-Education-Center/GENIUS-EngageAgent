@@ -8,6 +8,7 @@ import {
   getLessonGenerationContext,
   getStrategyContext,
 } from "@/lib/lesson-context";
+import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import { getMedia, upsertMedia } from "@/lib/nosql";
 
 type ContentItem = {
@@ -157,6 +158,7 @@ export async function POST(request: Request) {
       annotatedImageUrl?: string;
     };
 
+    enterLessonScope(await loadTaskLessons({ classId: classId!, assignmentId: assignmentId! }, lessonNumber));
     const model = process.env.OPENAI_IMAGE_MODEL?.trim() || DEFAULT_IMAGE_MODEL;
     if (model === "gpt-image-1") return NextResponse.json({ error: RETIRED_IMAGE_MODEL_MESSAGE }, { status: 503 });
     const trimmedRefine = refinementPrompt?.trim().slice(0, MAX_REFINEMENT_PROMPT_LENGTH);

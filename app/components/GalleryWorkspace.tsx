@@ -6,6 +6,7 @@ import type { UserContext } from "@/lib/auth";
 import type { GalleryCopy, SavedGalleryCopySummary } from "@/lib/material-gallery";
 import { listSavedGalleryCopies, loadSavedGalleryCopy, refreshGalleryCopyMedia, saveGalleryCopy } from "@/lib/material-gallery-client";
 import { scopedTaskFetch } from "@/lib/client-auth";
+import { useTaskLesson } from "@/lib/lesson-client";
 import type { SlideDeck } from "@/lib/slides/model";
 import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
 import MaterialGalleryPanel from "./MaterialGalleryPanel";
@@ -48,6 +49,7 @@ export default function GalleryWorkspace({ user, taskTitle, onBack, onPublished,
   const saving = useRef(false);
   const approvedLeave = useRef(false);
   const activeId = editor ? copyId(editor.copy) : "";
+  const slideLesson = useTaskLesson({ classId, assignmentId }, editor?.copy.format === "slides" ? editor.copy.deck.lessonNumber : null);
   const keepEditing = useCallback(() => { pendingLeaveRef.current = null; setPendingLeave(null); }, []);
 
   useEffect(() => {
@@ -243,7 +245,7 @@ export default function GalleryWorkspace({ user, taskTitle, onBack, onPublished,
         <span className="text-sm text-mute">{dirty ? "Unsaved changes" : editor.savedAt ? "Saved to your materials" : "Your editable copy"}</span>
       </div>
       <p className="text-sm text-mute">Your copy of “{editor.copy.source.title}”. Saving keeps it private to this task.</p>
-      {editor.copy.format === "slides" ? <fieldset disabled={busy} className="min-w-0"><SlidesWorkspace key={activeId} user={user}
+      {editor.copy.format === "slides" ? !slideLesson.lesson ? <p role={slideLesson.error ? "alert" : "status"} className="text-sm text-mute">{slideLesson.error || "Loading the lesson…"}</p> : <fieldset disabled={busy} className="min-w-0"><SlidesWorkspace key={activeId} user={user}
         embeddedContext={{ lessonNumber: editor.copy.deck.lessonNumber, strategy: editor.copy.deck.strategy, classroomContext: editor.copy.deck.classroomContext, focus: editor.copy.deck.focus }}
         incomingDeck={editor.copy.deck} incomingDeckSaved={editor.revision > 0} draftNamespace={`gallery:${activeId}`} compactEditor
         onSaveDraft={saveSlides} onDraftChange={changedSlides} onBusyChange={onSlideBusy} onPublished={onPublished} /></fieldset>

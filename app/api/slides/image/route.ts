@@ -4,6 +4,7 @@ import { slideImagePrompt } from "@/lib/slides/prompts";
 import { authorizeSlides, readSlideBody, requestAnalogyMethod, requestDraft, slideContext, slideFailure, SlideRequestError } from "@/lib/slides/server";
 import { resolveSlideModel } from "@/lib/slides/model-config";
 import { beginSlideJob } from "@/lib/slides/jobs";
+import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import { imageReferenceId } from "@/lib/slides/quality";
 
 export const runtime = "nodejs";
@@ -14,6 +15,7 @@ export async function POST(request: Request) {
   try {
     const body = await readSlideBody(request, 4_600_000);
     const authorized = await authorizeSlides(request, body);
+    enterLessonScope(await loadTaskLessons(authorized, body.lessonNumber));
     const { strategy } = slideContext(body);
     const draft = requestDraft(body.draft, strategy);
     requestAnalogyMethod(body.analogyMethod, strategy, draft);
