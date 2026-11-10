@@ -15,6 +15,8 @@ type Props = {
   materialsSent: boolean;
   /** A one-line status for the Step 4 tab. */
   onStatusChange?: (status: string) => void;
+  /** Whether the step is done: reports are released, as in the v8.4 prototype (#176). */
+  onDoneChange?: (done: boolean) => void;
 };
 
 const POLL_MS = 30_000;
@@ -31,6 +33,11 @@ const TABS = [
   { id: "reports", label: "Feedback reports", Icon: FileText },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
+/** Step 4's status line, as in the v8.4 prototype. TeacherView uses it before Step 4 has loaded. */
+export function discussionStatus({ released = false, boardPublished = false, questions = 0, materialsSent }: { released?: boolean; boardPublished?: boolean; questions?: number; materialsSent: boolean }) {
+  return released ? "Reports released" : boardPublished ? "Board published" : questions ? `${plural(questions, "question")} in`
+    : materialsSent ? "Waiting for questions" : "After materials are sent";
+}
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const errorText = async (res: Response, fallback: string) => ((await res.json().catch(() => ({}))) as { error?: string }).error ?? fallback;
 
@@ -43,7 +50,7 @@ function Empty({ children, locked }: { children: React.ReactNode; locked?: boole
 // the teacher publishes from them; "Feedback reports" holds the release of
 // quiz feedback reports. Both panels stay mounted (hidden when not selected),
 // so loading and polling carry on whichever tab is shown.
-export default function DiscussionStep({ classId, assignmentId, materialsSent, onStatusChange }: Props) {
+export default function DiscussionStep({ classId, assignmentId, materialsSent, onStatusChange, onDoneChange }: Props) {
   const scope = { classId, assignmentId };
   const query = new URLSearchParams(scope).toString();
 
@@ -124,9 +131,15 @@ export default function DiscussionStep({ classId, assignmentId, materialsSent, o
   }, [board, boardLoaded, questions]);
 
   const total = questions?.total ?? 0;
+  // The Step 4 status in the step bar, worded as in the v8.4 prototype.
+  const released = Boolean(reports?.release);
   useEffect(() => {
-    onStatusChange?.(board ? "Board live" : total ? plural(total, "question") : "Class results");
-  }, [board, total, onStatusChange]);
+    onStatusChange?.(discussionStatus({ released, boardPublished: Boolean(board), questions: total, materialsSent }));
+  }, [released, board, total, materialsSent, onStatusChange]);
+  useEffect(() => {
+    // Wait for the first load, so a slow answer doesn't undo the saved progress.
+    if (reports) onDoneChange?.(released);
+  }, [reports, released, onDoneChange]);
 
   const all = questions?.groups.flatMap((group) => group.questions.map((q) => ({ ...q, group: group.title }))) ?? [];
   const textOf = (id: string) => edits[id] ?? all.find((q) => q.id === id)?.text ?? board?.questions.find((q) => q.id === id)?.text ?? "";

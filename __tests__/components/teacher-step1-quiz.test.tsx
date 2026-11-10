@@ -79,6 +79,45 @@ describe("the teacher page", () => {
     await waitFor(() => expect(log.some((line) => line.startsWith("GET /api/student-answers"))).toBe(true));
   });
 
+  it("refreshes saved progress and clears the loaded discussion completion after publishing the task quiz", async () => {
+    let progressReads = 0;
+    let reportReads = 0;
+    const base = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.startsWith("/api/activity-progress")) {
+        progressReads++;
+        return reply({ progress: {
+          assessment: quiz.status === "published" ? "done" : "in-progress",
+          strategy: "not-started", materials: "not-started",
+          discussion: quiz.status === "published" ? "not-started" : "done",
+        } });
+      }
+      if (url.startsWith("/api/quiz-report")) {
+        reportReads++;
+        return reply({ release: { lessonNumber: 1, reason: "taught", releasedAt: "before-publish" }, lessonNumber: 1, students: [] });
+      }
+      if (url.startsWith("/api/question-board")) return reply({ board: null });
+      return base(input, init);
+    });
+    render(<TeacherView user={teacher} />);
+    const discussion = () => stepTab(/Questions & discussion/);
+    await waitFor(() => expect(discussion()).toHaveTextContent("Reports released"));
+    fireEvent.click(discussion());
+    await waitFor(() => {
+      expect(reportReads).toBeGreaterThan(0);
+      expect(discussion()).toHaveTextContent("Reports released");
+    });
+    fireEvent.click(stepTab(/Pre-knowledge assessment/));
+    await screen.findByRole("article", { name: "Item 1" });
+    fireEvent.click(screen.getByRole("button", { name: "Publish task" }));
+    await waitFor(() => {
+      expect(progressReads).toBeGreaterThan(1);
+      expect(discussion()).toHaveTextContent("After materials are sent");
+      expect(discussion().querySelector("svg.lucide-check")).toBeNull();
+    });
+  });
+
   it("shows an old draft's lesson first, once it knows no lesson is picked here", async () => {
     quiz = emptyTaskQuiz("ea-class-1", "ea-task-1");
     quizStatus = { lesson_number: 2, status: "draft" };
