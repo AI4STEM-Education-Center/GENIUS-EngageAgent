@@ -3,7 +3,8 @@ import type { UserContext } from "@/lib/auth";
 import { parseClassProfileAnswers, savedClassProfile } from "@/lib/class-profile";
 import { upsertClassProfile } from "@/lib/nosql";
 import { sessionUser, sameOriginRequest } from "@/lib/session";
-import { createWorkspaceAssignment, createWorkspaceClass, joinWorkspaceClass, listWorkspaceClasses, workspaceClassDetail, workspaceClassSize, workspaceContext, WorkspaceError } from "@/lib/workspace";
+import { createActivityTask, ensureTaskActivity } from "@/lib/task-activity";
+import { createWorkspaceClass, joinWorkspaceClass, listWorkspaceClasses, workspaceClassDetail, workspaceClassSize, workspaceContext, WorkspaceError } from "@/lib/workspace";
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 function failure(error: unknown) {
@@ -37,7 +38,10 @@ export async function GET(request: Request) {
   try {
     if (classId && assignmentId) {
       const context = await workspaceContext(user, classId, assignmentId);
-      return json({ user: context, ...(user.role === "teacher" ? { classSize: await workspaceClassSize(classId) } : {}) });
+      if (user.role !== "teacher") return json({ user: context });
+      // Opening a task gives it an activity record if it predates #176.
+      const [classSize, activity] = await Promise.all([workspaceClassSize(classId), ensureTaskActivity(user, classId, assignmentId)]);
+      return json({ user: context, classSize, activityId: activity.agentTaskId });
     }
     if (classId) return json(await workspaceClassDetail(user, classId));
     return json({ classes: await listWorkspaceClasses(user) });
@@ -52,7 +56,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     if (body.action === "createClass") return await createClass(user, body);
     if (body.action === "joinClass") return json({ classroom: await joinWorkspaceClass(user, body.code) });
-    if (body.action === "createTask" && typeof body.classId === "string") return json({ assignment: await createWorkspaceAssignment(user, body.classId, body.title) }, 201);
+    if (body.action === "createTask" && typeof body.classId === "string") return json({ assignment: (await createActivityTask(user, body.classId, body.title)).assignment }, 201);
     return json({ error: "Invalid workspace action." }, 400);
   } catch (error) {
     if (error instanceof SyntaxError) return json({ error: "Invalid request body." }, 400);
