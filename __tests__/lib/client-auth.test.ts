@@ -81,15 +81,17 @@ it("loads activity progress for a verified GENIUS task without authorizing anoth
   expect(new Headers(transport.mock.calls[2][1]?.headers).has("Authorization")).toBe(false);
 });
 
-it("sends the launch credential for a task's lesson list, but not for the open lesson pages", async () => {
+it("sends the launch credential for a task's lessons, but not for the open lesson pages", async () => {
   const transport = vi.fn(async () => new Response("{}"));
   vi.stubGlobal("fetch", transport);
   setVerifiedClientAuth("host-token", user);
   await scopedTaskFetch(user, "/api/lessons?classId=c&assignmentId=a");
   await scopedTaskFetch(user, "/api/lessons/9?classId=c&assignmentId=a");
+  await scopedTaskFetch(user, "/api/lessons/9");
   const sent = transport.mock.calls as unknown as [string, RequestInit | undefined][];
   expect(new Headers(sent[0][1]?.headers).get("Authorization")).toBe("Bearer host-token");
-  expect(new Headers(sent[1][1]?.headers).has("Authorization")).toBe(false);
+  expect(new Headers(sent[1][1]?.headers).get("Authorization")).toBe("Bearer host-token");
+  expect(new Headers(sent[2][1]?.headers).has("Authorization")).toBe(false);
 });
 
 it("never leaks the launch credential to external, media, download, or different-task requests", async () => {

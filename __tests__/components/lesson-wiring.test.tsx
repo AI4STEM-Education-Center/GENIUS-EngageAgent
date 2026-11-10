@@ -11,6 +11,7 @@ import TeacherDashboardView from "@/app/components/TeacherDashboardView";
 import TeacherView from "@/app/components/TeacherView";
 import StudentQuizView from "@/app/components/StudentQuizView";
 import type { Lesson } from "@/lib/types";
+import { olderTaskQuizState } from "../fixtures/lesson-responses";
 
 // The browser side of stored lessons (#175): the real components and lesson
 // loading, with the server answering through a fake fetch.
@@ -40,6 +41,7 @@ beforeEach(() => {
   quizStatus = null; answers = []; saveFails = false; log = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     log.push(`${init?.method ?? "GET"} ${input}`);
+    if (input.startsWith("/api/task-quiz")) return reply(olderTaskQuizState);
     if (input.startsWith("/api/lessons?")) return reply({ lessons: [
       { lessonNumber: 1, title: "Lesson 1 as pinned", version: 1, questionCount: 4 },
       { lessonNumber: 9, title: "Waves", version: 1, questionCount: 4 },

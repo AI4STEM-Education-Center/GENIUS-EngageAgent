@@ -2,8 +2,8 @@
  * Stored task quizzes (#177).
  *
  * "Activity" (#176) doesn't exist yet, so the class task (classId + assignmentId)
- * stands in for it. `QuizActivity` and `quizPartition` are the only places that
- * know this, so moving to activities later means changing them.
+ * stands in for it. `QuizActivity` and `quizPartition` (lib/task-quiz-published.ts)
+ * are the only places that know this, so moving to activities later means changing them.
  *
  * Rows in each task's partition:
  * - QUIZ: the working copy.
@@ -16,6 +16,7 @@ import type { UserContext } from "./auth";
 import { draftFromLesson } from "./lessons";
 import { getLessonVersion, getTaskLessonPin, pinTaskToLesson, type LessonVersion } from "./lessons-store";
 import { getQuizStatus, listStudentAnswers, upsertQuizStatus } from "./nosql";
+import { getPublishedTaskQuiz, PUBLISHED_KEY, quizPartition, type QuizActivity } from "./task-quiz-published";
 import {
   applyItemChange, applyMatchResults, assertReplaceAllowed, emptyTaskQuiz, itemsFromLesson, lessonFromTaskQuiz, MAX_ANCHORING_LENGTH,
   PICK_LESSON_MESSAGE, publishProblems, PUBLISHED_MESSAGE, publishedBarLines, quizItemsFromTaskQuiz, reviewedCount, ReplaceConfirmationError,
@@ -26,12 +27,9 @@ import type { Lesson, QuizItem } from "./types";
 import { isWorkspaceClass, workspaceClassSize } from "./workspace";
 import { isWorkspaceConflict, workspaceGet, workspacePut } from "./workspace-store";
 
-export type QuizActivity = { classId: string; assignmentId: string };
+export { getPublishedTaskQuiz, type QuizActivity };
 
-const quizPartition = ({ classId, assignmentId }: QuizActivity) =>
-  `WORKSPACE_TASK_QUIZ#${encodeURIComponent(classId)}#${encodeURIComponent(assignmentId)}`;
 const QUIZ_KEY = "QUIZ";
-const PUBLISHED_KEY = "PUBLISHED";
 const revisionKey = (revision: number) => `REV#${String(revision).padStart(6, "0")}`;
 const REVISION_ROW_SECONDS = 24 * 60 * 60;
 /** DynamoDB holds 400 KB per row. A quiz this large is well past any real one. */
@@ -293,11 +291,6 @@ export async function getTaskQuizSourceFile(activity: QuizActivity) {
 /* ------------------------------------------------------------------ */
 /*  For the rest of the app (students, strategy, reports)              */
 /* ------------------------------------------------------------------ */
-
-/** The published copy, or null when this task has no quiz published this way. It can't change after publishing. */
-export async function getPublishedTaskQuiz(classId: string, assignmentId: string): Promise<TaskQuiz | null> {
-  return workspaceGet<TaskQuiz>(quizPartition({ classId, assignmentId }), PUBLISHED_KEY);
-}
 
 /** The published quiz with answer keys and confirmed misconception matches, each item followed by its confidence question. Teachers and server code only. */
 export async function getTaskQuizItems(classId: string, assignmentId: string): Promise<QuizItem[] | null> {

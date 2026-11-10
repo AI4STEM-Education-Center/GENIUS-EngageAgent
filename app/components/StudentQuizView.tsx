@@ -77,11 +77,19 @@ export default function StudentQuizView({ user, onProgress }: Props) {
       // Load quiz questions only when the quiz is published. The survey below is
       // loaded either way: a teacher can publish a survey without a quiz (#111).
       if (qs?.status === "published") {
-        // Fetch quiz questions from lesson data
-        const lessonRes = await fetch(`/api/lessons/${qs.lesson_number}?classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`, { cache: "no-store" });
-        const lessonData = await lessonRes.json();
-        if (!lessonRes.ok) throw new Error(lessonData.error ?? "Failed to load quiz questions.");
-        setQuestions(lessonData.quiz_items ?? []);
+        // The quiz published for this task (#177). A task published the old way reads its lesson's quiz.
+        const taskQuery = `classId=${encodeURIComponent(classId)}&assignmentId=${encodeURIComponent(assignmentId)}`;
+        const quizRes = await fetch(`/api/task-quiz/student?${taskQuery}`, { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" });
+        const quizData = await quizRes.json().catch(() => ({}));
+        if (!quizRes.ok) throw new Error(quizData.error ?? "Failed to load quiz questions.");
+        if (quizData.items) {
+          setQuestions(quizData.items);
+        } else {
+          const lessonRes = await fetch(`/api/lessons/${qs.lesson_number}?${taskQuery}`, { cache: "no-store" });
+          const lessonData = await lessonRes.json();
+          if (!lessonRes.ok) throw new Error(lessonData.error ?? "Failed to load quiz questions.");
+          setQuestions(lessonData.quiz_items ?? []);
+        }
 
         const existingAnswer = await findExistingStudentAnswer({
           classId,
