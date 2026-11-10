@@ -55,7 +55,7 @@ describe("the teacher page", () => {
     quiz = { ...quiz, items: [{ ...confirmed(), confirmed: false }] };
     render(<TeacherView user={teacher} />);
     expect(await screen.findByLabelText("Lesson")).toBeInTheDocument();
-    await waitFor(() => expect(stepTab(/Assessment/)).toHaveTextContent("In progress"));
+    await waitFor(() => expect(stepTab(/Pre-knowledge assessment/)).toHaveTextContent("In progress"));
     expect(screen.getByRole("button", { name: /^Quiz\s*Needs review$/ })).toBeInTheDocument();
     expect(screen.queryByText("Choose a lesson")).toBeNull();
     expect(screen.queryByRole("button", { name: "Publish quiz to students" })).toBeNull();
@@ -64,17 +64,17 @@ describe("the teacher page", () => {
   it("moves to Ready to publish, then Published, then opens Step 2, reading the published copy", async () => {
     render(<TeacherView user={teacher} />);
     await screen.findByRole("article", { name: "Item 1" });
-    await waitFor(() => expect(stepTab(/Assessment/)).toHaveTextContent("Ready to publish"));
+    await waitFor(() => expect(stepTab(/Pre-knowledge assessment/)).toHaveTextContent("Ready to publish"));
     expect(screen.getByRole("button", { name: /^Quiz\s*Ready$/ })).toBeInTheDocument();
     const lessonReads = () => log.filter((line) => line.startsWith("GET /api/lessons/1?")).length;
     await waitFor(() => expect(lessonReads()).toBeGreaterThan(0));
     const before = lessonReads();
     fireEvent.click(screen.getByRole("button", { name: "Publish task" }));
     await screen.findByText("Task published to Period 3.");
-    await waitFor(() => expect(stepTab(/Assessment/)).toHaveTextContent("Published"));
+    await waitFor(() => expect(stepTab(/Pre-knowledge assessment/)).toHaveTextContent("Published"));
     await waitFor(() => expect(lessonReads()).toBe(before + 1));
     fireEvent.click(screen.getByRole("button", { name: /Go to Step 2/ }));
-    await waitFor(() => expect(stepTab(/Strategy/)).toHaveAttribute("aria-current", "step"));
+    await waitFor(() => expect(stepTab(/Strategy recommendations/)).toHaveAttribute("aria-current", "step"));
     // Step 2 counts this as a live quiz straight away, without a reload.
     await waitFor(() => expect(log.some((line) => line.startsWith("GET /api/student-answers"))).toBe(true));
   });
@@ -99,7 +99,7 @@ describe("the teacher page", () => {
     quiz = emptyTaskQuiz("ea-class-1", "ea-task-1");
     render(<TeacherView user={teacher} />);
     expect(await screen.findByText("Choose a lesson")).toBeInTheDocument();
-    await waitFor(() => expect(stepTab(/Assessment/)).toHaveTextContent(status === "closed" ? "Closed" : "Published"));
+    await waitFor(() => expect(stepTab(/Pre-knowledge assessment/)).toHaveTextContent(status === "closed" ? "Closed" : "Published"));
     expect(screen.queryByLabelText("Lesson")).toBeNull();
     expect(screen.queryByRole("button", { name: "Publish task" })).toBeNull();
     if (status === "published") expect(await screen.findByText("Quiz is live. Students can now answer.")).toBeInTheDocument();
