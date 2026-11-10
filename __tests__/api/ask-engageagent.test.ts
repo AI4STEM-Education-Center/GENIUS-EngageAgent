@@ -1,7 +1,9 @@
 import { SignJWT } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_ASK_ANSWER, MAX_ASK_HISTORY, MAX_ASK_MESSAGE } from "@/lib/ask-engageagent";
-import { getLesson } from "@/lib/quiz-data";
+import { getAllLessons } from "@/lib/quiz-data";
+// The lesson files, read directly: inside a request the route reads the task's stored lesson.
+const getLesson = (n: number) => getAllLessons().find((lesson) => lesson.lesson_number === n) ?? null;
 
 // The real guard runs here; only the session cookie, class membership lookup and OpenAI are stand-ins.
 const mocks = vi.hoisted(() => ({ session: vi.fn(), context: vi.fn(), create: vi.fn(), client: vi.fn(), studentData: vi.fn(), skipGuard: false }));
@@ -369,5 +371,37 @@ describe("rate limit", () => {
     expect(takeAskSlot("window-user", start + 60_000)).toBe(true);
     for (let count = 0; count < 19; count += 1) expect(takeAskSlot("window-user", start + 60_001)).toBe(true);
     expect(takeAskSlot("window-user", start + 60_001)).toBe(false);
+  });
+});
+
+describe("lessons made in the app (#175)", () => {
+  beforeEach(() => {
+    mocks.session.mockResolvedValue({ ...signedIn("teacher"), geniusId: "lesson-teacher" });
+    mocks.context.mockResolvedValue({});
+    mocks.create.mockResolvedValue(answered());
+  });
+
+  it("tells the bot about a published lesson made in the app, and only that version", async () => {
+    const store = await import("@/lib/lessons-store");
+    const { emptyDraftQuizItem } = await import("@/lib/lessons");
+    const teacher = { geniusId: "t", userId: "t", name: "T", email: null, role: "teacher" as const };
+    const { row } = await store.createLesson(teacher);
+    await store.saveLessonDraft(teacher, row.lessonNumber, {
+      title: "Bridges and loads", objective: "Explain loads.", topic: "t", targetConcept: "c", coreIdeas: ["Loads push down."], misconceptions: ["MC01" as never],
+      quizItems: ["q1", "q2", "q3", "q4"].map((id) => ({ ...emptyDraftQuizItem(id), stem: id, options: { A: id + "a", B: id + "b", C: id + "c", D: id + "d" }, correct: "A" as const, matchedMisconception: "MC01" as never, explanation: "e" })),
+    });
+    await store.publishLessonDraft(teacher, row.lessonNumber, "First version");
+    expect((await post({ ...valid, lessonNumber: row.lessonNumber })).status).toBe(200);
+    expect(systemPrompt()).toContain("Selected lesson: Bridges and loads");
+    expect(systemPrompt()).toContain("Loads push down.");
+  });
+
+  it("refuses to answer, rather than guess, when lessons can't be read", async () => {
+    const scope = await import("@/lib/lesson-scope");
+    const spy = vi.spyOn(scope, "loadTaskLessons").mockRejectedValueOnce(new Error("storage down"));
+    const response = await post(valid);
+    expect(response.status).toBe(503);
+    expect(mocks.create).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

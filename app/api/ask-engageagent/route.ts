@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { canUseAskEngageAgent, MAX_ASK_ANSWER } from "@/lib/ask-engageagent";
 import { askMessages, askModel, parseAskRequest, takeAskSlot } from "@/lib/ask-engageagent-server";
+import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";
 
 /**
@@ -25,7 +26,15 @@ export async function POST(request: Request) {
   const user = await workspaceRequestUser(request).catch(() => null);
   if (!user || !canUseAskEngageAgent(user.role)) return reply({ error: "Teacher access required." }, 403);
 
-  const ask = parseAskRequest(await request.json());
+  const body = await request.json();
+  // The lesson this task reads (#175), so a lesson made in the app, or a task's
+  // pinned version, is the one the bot is told about.
+  try {
+    enterLessonScope(await loadTaskLessons({ classId: String(body.classId), assignmentId: String(body.assignmentId) }, body.lessonNumber));
+  } catch {
+    return reply({ error: "EngageAgent couldn't answer right now. Please try again." }, 503);
+  }
+  const ask = parseAskRequest(body);
   if (typeof ask === "string") return reply({ error: ask }, 400);
 
   const apiKey = process.env.OPENAI_API_KEY;
