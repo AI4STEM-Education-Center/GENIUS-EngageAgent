@@ -1,4 +1,5 @@
 import { beginSlideJob } from "@/lib/slides/jobs";
+import { materialClassroomContext } from "@/lib/material-classroom-context";
 import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import { draftErrors, isSlideAsset } from "@/lib/slides/model";
 import { resolveAnalogyMethod } from "@/lib/slides/analogy-methods";
@@ -21,7 +22,7 @@ export async function POST(request: Request) {
     const authorized = await authorizeSlides(request, body);
     enterLessonScope(await loadTaskLessons(authorized, body.lessonNumber));
     const { lesson, strategy } = slideContext(body);
-    const classroomContext = requestClassroomContext(body.classroomContext);
+    const taskContext = requestClassroomContext(body.classroomContext);
     const focus = requestFocus(lesson.lessonNumber, strategy, body.focus);
     const draft = requestDraft(body.draft, strategy, true);
     const analogyMethod = requestAnalogyMethod(body.analogyMethod, strategy, draft);
@@ -43,6 +44,7 @@ export async function POST(request: Request) {
     const hardErrors = [...draftErrors(draft, strategy), ...teachingErrors(draft, lesson.lessonNumber)];
     if (visualId === undefined && hardErrors.length) return slideJson({ issues: hardErrors, model: "output-rules" });
     existingGenerationKey();
+    const classroomContext = await materialClassroomContext(authorized.classId, taskContext);
     const diagnostic = visualId === undefined ? await slideDiagnosticContext(authorized, lesson.lessonNumber) : undefined;
     const prompt = slideCheckPrompt(lesson, strategy, draft, visualId as string | undefined, diagnostic, classroomContext, focus);
     if (visualId === undefined) {

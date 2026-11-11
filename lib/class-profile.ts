@@ -189,3 +189,17 @@ export function describeClassProfile(profile: ClassProfileAnswers | null) {
     supports: supports.length ? supports.join(", ") : "No supports noted",
   };
 }
+
+/** Instructional context only: demographics and record identifiers are not learning needs. */
+export function classProfileGenerationSummary(profile: ClassProfile | null): string {
+  if (!profile || profile.status !== "saved") return "";
+  const details = [
+    profile.locale && `School setting: ${labelOf(SCHOOL_LOCALES, profile.locale)}.`,
+    profile.classType && `Class type: ${labelOf(CLASS_TYPES, profile.classType)}.`,
+    profile.englishLearners && "Include clear language and vocabulary scaffolds for English learners.",
+    profile.iepOr504 && "Use explicit steps and accessible presentation to support learning accommodations.",
+  ].filter(Boolean);
+  return details.length
+    ? `Class profile (teacher-provided): ${details.join(" ")} Use this for presentation and access, not to infer individual ability, beliefs or familiarity. Do not disclose the profile in student-facing materials.`
+    : "";
+}

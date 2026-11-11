@@ -7,6 +7,7 @@ import {
   savedClassProfile,
   EMPTY_CLASS_PROFILE,
   describeClassProfile,
+  classProfileGenerationSummary,
   parseClassProfileAnswers,
   toggleGroupAlternative,
   toggleStudentGroup,
@@ -22,6 +23,18 @@ const full = {
   englishLearners: true,
   iepOr504: false,
 };
+
+it("adds only stated instructional context and omits unset, skipped and demographic-only profiles", () => {
+  expect(classProfileGenerationSummary(null)).toBe("");
+  const profile = savedClassProfile({ ...EMPTY_CLASS_PROFILE, groups: ["asian"] }, "private-class", "private-author");
+  expect(classProfileGenerationSummary(profile)).toBe("");
+  expect(classProfileGenerationSummary({ ...profile, status: "skipped", locale: "rural" })).toBe("");
+  const summary = classProfileGenerationSummary({ ...profile, locale: "rural", englishLearners: true });
+  expect(summary).toContain("School setting: Rural");
+  expect(summary).toContain("vocabulary scaffolds");
+  expect(summary).toContain("not to infer individual ability");
+  expect(summary).not.toMatch(/asian|private-class|private-author|Class type|accommodations/);
+});
 
 describe("parseClassProfileAnswers", () => {
   it("accepts a full profile and keeps the group order", () => {

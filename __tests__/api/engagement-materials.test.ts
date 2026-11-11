@@ -5,11 +5,11 @@ import { analogyActivity, conflictActivity, bridgingActivity, critiquingActivity
 const { complete, generate, edit } = vi.hoisted(() => ({ complete: vi.fn(), generate: vi.fn(), edit: vi.fn() }));
 vi.mock("openai", () => ({ default: class { chat = { completions: { create: complete } }; images = { generate, edit }; }, toFile: vi.fn(async () => "image-input") }));
 vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null) }));
-vi.mock("@/lib/nosql", () => ({ listStudentAnswers: vi.fn(async () => []), getMedia: vi.fn(), upsertMedia: vi.fn() }));
+vi.mock("@/lib/nosql", () => ({ getClassProfile: vi.fn(async () => null), listStudentAnswers: vi.fn(async () => []), getMedia: vi.fn(), upsertMedia: vi.fn() }));
 import { POST as content } from "@/app/api/engagement-content/route";
 import { POST as image } from "@/app/api/engagement-image/route";
 import { guardWorkspaceRequest } from "@/lib/workspace-access";
-import { listStudentAnswers } from "@/lib/nosql";
+import { listStudentAnswers, getClassProfile } from "@/lib/nosql";
 
 const request = (fields: unknown) => new Request("http://localhost/api/engagement-content", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields) });
 const completion = (items: unknown) => ({ choices: [{ message: { content: JSON.stringify({ items }) } }] });
@@ -21,6 +21,7 @@ beforeEach(() => {
   generate.mockResolvedValue({ data: [{ b64_json: "dGVzdA==" }] });
   edit.mockResolvedValue({ data: [{ b64_json: "dGVzdA==" }] });
   vi.mocked(listStudentAnswers).mockResolvedValue([]);
+  vi.mocked(getClassProfile).mockResolvedValue(null);
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -168,16 +169,16 @@ describe("source-aligned material APIs", () => {
     expect(complete).not.toHaveBeenCalled();
     expect(listStudentAnswers).not.toHaveBeenCalled();
   });
-  it("uses only the authorized class, task and lesson diagnostics, never names or GENIUS IDs", async () => {
+  it.each(["ea-class-c1", "genius-class-c1"])("uses only authorized %s task/lesson diagnostics, including DynamoDB keys, never names or IDs", async classId => {
     vi.mocked(listStudentAnswers).mockResolvedValue([
-      { student_id: "secret-id", student_name: "Private Student", class_id: "ea-class-c1", assignment_id: "a1", lesson_number: 1, answers: { L1_Q1: "D" }, submitted_at: "" },
+      { student_id: "secret-id", student_name: "Private Student", class_id: `CLASS#${classId}`, assignment_id: "a1", lesson_number: 1, answers: { L1_Q1: "D" }, submitted_at: "" },
       { student_id: "another-id", student_name: "Other Student", class_id: "ea-class-c1", assignment_id: "a1", lesson_number: 2, answers: {}, submitted_at: "" },
       { student_id: "wrong-class", student_name: "Other Class", class_id: "ea-class-other", assignment_id: "a1", lesson_number: 1, answers: { L1_Q1: "D" }, submitted_at: "" },
       { student_id: "wrong-task", student_name: "Other Task", class_id: "ea-class-c1", assignment_id: "a2", lesson_number: 1, answers: { L1_Q1: "D" }, submitted_at: "" },
     ]);
     complete.mockResolvedValue(completion([{ title: "Observe", activity: conflictActivity }]));
-    expect((await content(request({ lessonNumber: 1, selectedStrategies: ["cognitive conflict"], classId: "ea-class-c1", assignmentId: "a1" }))).status).toBe(200);
-    expect(listStudentAnswers).toHaveBeenCalledWith("ea-class-c1", "a1");
+    expect((await content(request({ lessonNumber: 1, selectedStrategies: ["cognitive conflict"], classId, assignmentId: "a1" }))).status).toBe(200);
+    expect(listStudentAnswers).toHaveBeenCalledWith(classId, "a1");
     const sent = JSON.stringify(complete.mock.calls[0][0].messages);
     expect(sent).toContain("weak because nothing");
     expect(sent).not.toContain("Private Student");
@@ -189,11 +190,19 @@ describe("source-aligned material APIs", () => {
     expect(context.diagnostic.selections[0].count).toBe(1);
     expect(sent).not.toMatch(/wrong-class|wrong-task|Other Class|Other Task/);
   });
-  it("does not read private diagnostics for legacy non-workspace identifiers", async () => {
+  it("includes the verified class profile and task context in generation and review without returning it to students", async () => {
+    vi.mocked(getClassProfile).mockResolvedValue({ class_id: "c1", status: "saved", updated_at: "now", locale: "rural", classType: "honors", englishLearners: true, iepOr504: false, groups: ["asian"], groupAlternative: null });
     complete.mockResolvedValue(completion([{ title: "Observe", activity: conflictActivity }]));
-    expect((await content(request({ lessonNumber: 1, selectedStrategies: ["cognitive conflict"], classId: "c1", assignmentId: "a1" }))).status).toBe(200);
-    expect(listStudentAnswers).not.toHaveBeenCalled();
-    expect(JSON.stringify(complete.mock.calls[0][0].messages)).toContain('\\"responses\\":0');
+    const response = await content(request({ lessonNumber: 1, selectedStrategies: ["cognitive conflict"], classId: "c1", assignmentId: "a1", classroomContext: "Use classroom materials." }));
+    expect(response.status).toBe(200);
+    expect(getClassProfile).toHaveBeenCalledWith("c1");
+    for (const [parameters] of complete.mock.calls) {
+      const prompt = JSON.stringify(parameters.messages);
+      expect(prompt).toContain("School setting: Rural");
+      expect(prompt).toContain("Use classroom materials.");
+      expect(prompt).not.toContain("asian");
+    }
+    expect(await response.text()).not.toContain("Class profile");
   });
   it("fails closed without exposing storage details when authorized diagnostics cannot be read", async () => {
     vi.mocked(listStudentAnswers).mockRejectedValueOnce(new Error("private-storage-configuration-detail"));
@@ -208,6 +217,7 @@ describe("source-aligned material APIs", () => {
   it("does not generate or read responses when workspace authorization denies the request", async () => {
     vi.mocked(guardWorkspaceRequest).mockResolvedValue(NextResponse.json({ error: "Forbidden" }, { status: 403 }));
     expect((await content(request({ lessonNumber: 3, selectedStrategies: ["analogy"] }))).status).toBe(403);
+    expect(getClassProfile).not.toHaveBeenCalled();
     expect((await image(request({ item: {} }))).status).toBe(403);
     expect(complete).not.toHaveBeenCalled();
     expect(generate).not.toHaveBeenCalled();

@@ -9,7 +9,7 @@ vi.mock("@/lib/workspace", async original => ({ ...await original<object>(), wor
 vi.mock("@/lib/lesson-scope", () => ({ enterLessonScope: () => {}, loadTaskLessons: async () => new Map() }));
 vi.mock("@/lib/lessons-store", () => ({ listTaskLessons: async () => [] }));
 vi.mock("@/lib/workspace-store", () => ({ workspaceGet: mocks.get, workspacePut: mocks.put }));
-vi.mock("@/lib/nosql", () => ({ listStudentAnswers: mocks.answers, listPublishedContent: mocks.published, upsertContentPublish: mocks.upsert }));
+vi.mock("@/lib/nosql", () => ({ getClassProfile: vi.fn(async () => null), listStudentAnswers: mocks.answers, listPublishedContent: mocks.published, upsertContentPublish: mocks.upsert }));
 vi.mock("openai", () => ({ default: class { responses = { create: mocks.create, retrieve: mocks.retrieve, cancel: mocks.cancel }; } }));
 vi.mock("@aws-sdk/client-s3", async original => ({ ...await original<object>(), S3Client: class { send = mocks.send; destroy() {} } }));
 vi.mock("@aws-sdk/s3-request-presigner", () => ({ getSignedUrl: mocks.sign }));

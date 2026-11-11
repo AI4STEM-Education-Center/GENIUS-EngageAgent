@@ -2099,7 +2099,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                   value={classroomContext} onChange={(event) => setClassroomContext(event.target.value)}
                   placeholder="Grade, prior knowledge, familiar experiences and classroom constraints"
                   className="rounded-xl border border-slate-200 px-3 py-2 font-normal text-slate-800" />
-                <span className="font-normal text-slate-500">Include familiar activities reported in student surveys, if available. Use what you know about this class; no survey results are assumed.</span>
+                <span className="font-normal text-slate-500">Your saved class profile is included automatically when generating or revising materials. Add task-specific context here, including reported familiar activities if available; no survey results are assumed.</span>
               </label>
 
               {galleryCopyIds && galleryMediaError && <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-amber-800">

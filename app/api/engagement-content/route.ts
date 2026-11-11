@@ -14,7 +14,7 @@ import { buildMaterialPrompt, materialReviewInstructions, summarizeDiagnosticAns
 import { listStudentAnswers } from "@/lib/nosql";
 import { materialOutputFormat } from "@/lib/material-output-schema";
 import { materialInquiryIssues } from "@/lib/material-inquiry-quality";
-import { isWorkspaceClass } from "@/lib/workspace";
+import { materialClassroomContext } from "@/lib/material-classroom-context";
 import { FocusError, focusPromptLine, resolveStrategyFocus, type ResolvedFocus } from "@/lib/strategy-focus";
 
 type GeneratedContentItem = Pick<
@@ -171,13 +171,13 @@ export async function POST(request: Request) {
     const items: GeneratedResponseItem[] = [];
     const classKey = classId?.trim();
     const assignmentKey = assignmentId?.trim();
-    // The legacy embedded route has no workspace authorization guarantee.
-    // Only enrich prompts from classes the guard has actually authorized.
+    // The guard verifies native membership or an exact class/task-bound GENIUS
+    // launch before any private context is read. Both use the same diagnostics.
     let responses: Awaited<ReturnType<typeof listStudentAnswers>> = [];
-    if (isWorkspaceClass(classKey) && assignmentKey) {
+    if (classKey && assignmentKey) {
       try {
         responses = (await listStudentAnswers(classKey, assignmentKey)).filter(answer =>
-          answer.class_id === classKey && answer.assignment_id === assignmentKey && answer.lesson_number === lessonNumber);
+          [classKey, `CLASS#${classKey}`].includes(answer.class_id) && answer.assignment_id === assignmentKey && answer.lesson_number === lessonNumber);
       } catch {
         // A storage failure is not evidence that the class has no responses.
         // Keep infrastructure details out of the student-material API response.
@@ -185,6 +185,7 @@ export async function POST(request: Request) {
       }
     }
     const diagnostic = summarizeDiagnosticAnswers(lessonNumber, responses.map(answer => answer.answers));
+    const generationContext = await materialClassroomContext(classKey!, classroomContext);
 
     const strategyResults = await Promise.all(
       strategies.map(async (strategy) => {
@@ -192,7 +193,7 @@ export async function POST(request: Request) {
         const fallbackModel = process.env.OPENAI_FALLBACK_MODEL ?? (sourceAligned ? "gpt-4.1" : "gpt-4o-mini");
         const model = fallback ? fallbackModel : primaryModel;
         const prompt = sourceAligned
-          ? buildMaterialPrompt(lessonContext, getStrategyContext(strategy), diagnostic, classroomContext, focusByStrategy.get(strategy))
+          ? buildMaterialPrompt(lessonContext, getStrategyContext(strategy), diagnostic, generationContext, focusByStrategy.get(strategy))
           : buildPrompt(lessonContext, getStrategyContext(strategy), focusByStrategy.get(strategy));
         const generationOptions = sourceAligned ? { signal: AbortSignal.timeout(24_000), maxRetries: 0 } : undefined;
         const completion = await client.chat.completions.create({
