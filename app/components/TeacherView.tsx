@@ -1914,6 +1914,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
         <StepTabs label="Teacher steps" tabs={stepTabs} activeId={showDashboard ? "" : String(currentStep)} onSelect={(id) => { setShowDashboard(false); setCurrentStep(Number(id)); }} />
       </>}>
         {showGallery && <GalleryWorkspace key={`${classId}:${assignmentId}`} user={user} taskTitle={shell?.taskTitle}
+          recommendation={selectedLesson ? { lessonNumber: selectedLesson, strategy: selectedStrategies[0] || "", focus: strategyFocus } : undefined}
           registerLeaveGuard={registerGalleryLeaveGuard} onBack={() => setShowGallery(false)}
           onPublished={() => { setGalleryPublished(true); setSlidesPublicationVersion(value => value + 1); }} />}
         <section className="grid gap-6">

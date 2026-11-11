@@ -34,6 +34,9 @@ it("shares a teacher-reviewed independent copy without class context or changing
   fireEvent.change(screen.getByLabelText("Shared slide 1 body"), { target: { value: "Observe the two objects." } });
   fireEvent.change(screen.getByLabelText("Shared slide 1 notes"), { target: { value: "Ask what students notice." } });
   fireEvent.change(screen.getByLabelText("Shared teaching plan familiarExperience"), { target: { value: "A familiar playground experience" } });
+  expect(screen.getByLabelText("Teaching context (optional)")).toHaveProperty("value", "");
+  fireEvent.change(screen.getByLabelText("Teaching context (optional)"), { target: { value: "Safe, reusable context" } });
+  fireEvent.change(screen.getByLabelText("Class profile summary (optional)"), { target: { value: "Introductory physics" } });
   fireEvent.click(screen.getByRole("checkbox"));
   expect(share.disabled).toBe(false);
   fireEvent.click(share);
@@ -48,7 +51,7 @@ it("shares a teacher-reviewed independent copy without class context or changing
   expect(source.draft.slides[0].body).toBe("Observe the two objects.");
   expect(source.draft.slides[0].teacherNotes).toEqual(["Ask what students notice."]);
   expect(source.draft.analogyPlan.familiarExperience).toBe("A familiar playground experience");
-  expect(metadata).toMatchObject({ title: "A reusable example", sharingConfirmed: true, focus: { misconceptions: [], coreIdeas: [0] } });
+  expect(metadata).toMatchObject({ title: "A reusable example", sharingConfirmed: true, teachingContext: "Safe, reusable context", classProfile: "Introductory physics", focus: { misconceptions: [], coreIdeas: [0] } });
   expect(signal).toBeInstanceOf(AbortSignal);
   expect(deck).toEqual(original);
 });

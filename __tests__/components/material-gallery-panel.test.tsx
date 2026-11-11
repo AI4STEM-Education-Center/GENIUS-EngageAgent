@@ -36,6 +36,32 @@ it("previews actual slides without copying or changing the user's current materi
   expect(screen.getByLabelText("Rendered shared slide").textContent).toBe(deck.draft.slides[1].title);
 });
 
+it("combines standalone filters with task recommendations and displays author, count and teaching tags in preview", async () => {
+  const tagged = { ...material, creatorName: "A verified teacher", teacherCount: 14, promptTags: { TOPIC: "Contact forces", LEARNER_CONTEXT: "Visual scaffolding" } };
+  mocks.list.mockResolvedValue({ items: [tagged], facets: { lessons: [2, 3], strategies: ["cognitive conflict"] } });
+  mocks.preview.mockResolvedValue({ ...detail, material: tagged });
+  const focus = { misconceptions: ["a"], coreIdeas: [] };
+  render(<MaterialGalleryPanel {...props({ standalone: true, focus })} />);
+  await card();
+  expect(mocks.list.mock.lastCall?.[1]).toMatchObject({ recommendLesson: 3, recommendStrategy: "cognitive conflict", recommendFocus: JSON.stringify(focus) });
+  fireEvent.change(screen.getByLabelText("Filter Gallery by lesson"), { target: { value: "3" } });
+  fireEvent.change(screen.getByLabelText("Filter Gallery by strategy"), { target: { value: "cognitive conflict" } });
+  fireEvent.change(screen.getByLabelText("Search shared materials"), { target: { value: "Visual scaffolding" } });
+  fireEvent.click(screen.getByRole("button", { name: "Search Gallery" }));
+  await waitFor(() => expect(mocks.list.mock.lastCall?.[1]).toMatchObject({ lessonNumber: 3, strategy: "cognitive conflict", search: "Visual scaffolding" }));
+  fireEvent.change(screen.getByLabelText("Gallery sort order"), { target: { value: "newest" } });
+  await waitFor(() => expect(mocks.list.mock.lastCall?.[1].recommendLesson).toBeUndefined());
+  fireEvent.click(within(await card()).getByRole("button", { name: "Preview" }));
+  await screen.findByLabelText("Rendered shared slide");
+  const preview = within(screen.getByRole("dialog"));
+  expect(preview.getByText("By A verified teacher")).toBeTruthy();
+  expect(preview.getByText(/14 teachers have saved a copy/)).toBeTruthy();
+  fireEvent.click(preview.getByText("Teaching tags"));
+  expect(preview.getByText("Contact forces")).toBeTruthy();
+  expect(preview.getByText("Visual scaffolding")).toBeTruthy();
+  expect(mocks.copy).not.toHaveBeenCalled();
+});
+
 it("passes the selected copy mode and metadata to the editor, with an independent material ID", async () => {
   const onUse = vi.fn(); render(<MaterialGalleryPanel {...props({ onUse })} />);
   fireEvent.click(within(await card()).getByRole("button", { name: "Adapt" }));

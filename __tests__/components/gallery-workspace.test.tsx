@@ -6,9 +6,10 @@ import type { GalleryCopy, SavedGalleryCopy, SavedGalleryCopySummary } from "@/l
 import type { SlideDeck } from "@/lib/slides/model";
 import { deckFixture } from "../fixtures/slides";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), load: vi.fn(), save: vi.fn(), renew: vi.fn(), publish: vi.fn(), shared: null as GalleryCopy | null }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), load: vi.fn(), save: vi.fn(), renew: vi.fn(), attribution: vi.fn(), publish: vi.fn(), shared: null as GalleryCopy | null }));
 vi.mock("@/lib/material-gallery-client", () => ({ listSavedGalleryCopies: mocks.list, loadSavedGalleryCopy: mocks.load,
-  saveGalleryCopy: mocks.save, refreshGalleryCopyMedia: mocks.renew }));
+  saveGalleryCopy: mocks.save, refreshGalleryCopyMedia: mocks.renew,
+  galleryCopyAttribution: mocks.attribution }));
 vi.mock("@/lib/client-auth", () => ({ scopedTaskFetch: mocks.publish }));
 vi.mock("@/lib/lesson-client", () => ({ useTaskLesson: () => ({ lesson: { lesson_number: 3 }, error: "" }) }));
 vi.mock("@/app/components/MaterialGalleryPanel", () => ({ default: ({ onUse, disabled }: { onUse: (copy: GalleryCopy) => void; disabled?: boolean }) =>
@@ -81,6 +82,7 @@ async function editVideo(title: string, body?: string) {
 }
 beforeEach(() => {
   vi.resetAllMocks(); localStorage.clear(); server.clear(); mocks.shared = slides();
+  mocks.attribution.mockResolvedValue({ creatorName: "Shared Teacher", teacherCount: 2, promptTags: { SUBJECT: "Physics" } });
   mocks.list.mockImplementation(async () => ({ items: Array.from(server.values(), summary) }));
   mocks.load.mockImplementation(async (_scope, id: string) => structuredClone(server.get(id)!));
   mocks.save.mockImplementation(async (_scope, copy: GalleryCopy, revision: number) => {

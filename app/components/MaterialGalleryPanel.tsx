@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, LayoutGrid, LoaderCircle, Search, X } from "lucide-react";
 import { copyGalleryMaterial, listMaterialGallery, previewGalleryMaterial, previewGallerySlideDeck, unshareGalleryMaterial } from "@/lib/material-gallery-client";
-import type { GalleryCopy, GalleryFilters, GalleryMaterial, GalleryPreviewSource, GalleryScope } from "@/lib/material-gallery";
+import type { GalleryCopy, GalleryFacets, GalleryFilters, GalleryMaterial, GalleryPreviewSource, GalleryScope } from "@/lib/material-gallery";
+import GalleryMaterialDetails from "./GalleryMaterialDetails";
 import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
 import { loadTaskLesson } from "@/lib/lesson-client";
 import SlidePreview from "./SlidePreview";
@@ -19,6 +20,11 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
   const [expanded, setExpanded] = useState(standalone);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
+  const [selectedLesson, setSelectedLesson] = useState("");
+  const [selectedStrategy, setSelectedStrategy] = useState("");
+  const [recommended, setRecommended] = useState(true);
+  const [facets, setFacets] = useState<GalleryFacets>({ lessons: [], strategies: [] });
+  const focusKey = focus ? JSON.stringify(focus) : undefined;
   const [items, setItems] = useState<GalleryMaterial[]>([]);
   const [cursor, setCursor] = useState<string>();
   const [loading, setLoading] = useState(true);
@@ -43,16 +49,20 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     const controller = new AbortController(); request.current = controller;
     setLoading(true); setError("");
     const filters: GalleryFilters = { format, search: query || undefined, limit: expanded ? 12 : 6, cursor: nextCursor,
-      ...(filter === "topic" && lessonNumber > 0 ? { lessonNumber } : filter === "strategy" && strategy ? { strategy } : filter === "mine" ? { mine: true } : {}) };
+      ...(filter === "topic" && lessonNumber > 0 ? { lessonNumber } : filter === "strategy" && strategy ? { strategy } : filter === "mine" ? { mine: true } : {}),
+      ...(standalone && selectedLesson ? { lessonNumber: Number(selectedLesson) } : {}),
+      ...(standalone && selectedStrategy ? { strategy: selectedStrategy } : {}),
+      ...(standalone && recommended && lessonNumber > 0 ? { recommendLesson: lessonNumber, recommendStrategy: strategy || undefined, recommendFocus: focusKey } : {}) };
     try {
       const result = await listMaterialGallery({ classId: scope.classId, assignmentId: scope.assignmentId }, filters, controller.signal);
       if (controller.signal.aborted) return;
       setItems(old => nextCursor ? [...old, ...result.items.filter(item => !old.some(existing => existing.id === item.id))] : result.items);
       setCursor(result.nextCursor);
+      if (result.facets) setFacets(result.facets);
     } catch (reason) {
       if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to load shared materials.");
     } finally { if (!controller.signal.aborted) setLoading(false); }
-  }, [scope.classId, scope.assignmentId, format, query, expanded, filter, lessonNumber, strategy]);
+  }, [scope.classId, scope.assignmentId, format, query, expanded, filter, lessonNumber, strategy, standalone, selectedLesson, selectedStrategy, recommended, focusKey]);
   useEffect(() => { setItems([]); setCursor(undefined); void load(); return () => request.current?.abort(); }, [load, refreshKey, reload]);
   useEffect(() => {
     operation.current?.abort(); previewRequest.current?.abort(); if (dialog.current?.open) dialog.current.close();
@@ -119,6 +129,17 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
       <div><h3 className="flex items-center gap-2 text-base font-semibold"><LayoutGrid size={18} />{standalone ? "Shared materials" : expanded ? "Materials Gallery" : "Matches from the Gallery"}</h3><p className="mt-1 text-xs text-mute">{standalone ? "Open a material to edit your own copy." : "Shared by teachers · use a copy or adapt it to your class"}</p></div>
       {!standalone && <button type="button" className={button} onClick={() => setExpanded(value => !value)}>{expanded ? "Show matches" : "Open Gallery"}<ChevronRight size={16} /></button>}
     </div>
+    {standalone && <div className="mt-4 flex flex-wrap gap-3">
+      <label className="text-xs font-semibold text-mute">Lesson<select aria-label="Filter Gallery by lesson" value={selectedLesson} onChange={event => setSelectedLesson(event.target.value)} className="ml-2 min-h-10 rounded-lg border border-line bg-white px-3 text-sm text-ink">
+        <option value="">All lessons</option>{[...new Set([...facets.lessons, ...(selectedLesson ? [Number(selectedLesson)] : [])])].sort((a, b) => a - b).map(n => <option key={n} value={n}>Lesson {n}</option>)}
+      </select></label>
+      <label className="text-xs font-semibold text-mute">Strategy<select aria-label="Filter Gallery by strategy" value={selectedStrategy} onChange={event => setSelectedStrategy(event.target.value)} className="ml-2 min-h-10 rounded-lg border border-line bg-white px-3 text-sm text-ink">
+        <option value="">All strategies</option>{["analogy", "cognitive conflict", "engaged critiquing", "experience bridging"].map(value => <option key={value} value={value}>{getEngagementStrategyLabel(value)}</option>)}
+      </select></label>
+      {lessonNumber > 0 && <select aria-label="Gallery sort order" value={recommended ? "recommended" : "newest"} onChange={event => setRecommended(event.target.value === "recommended")} className="min-h-10 rounded-lg border border-line bg-white px-3 text-sm text-ink">
+        <option value="recommended">Recommended for this task</option><option value="newest">Newest first</option>
+      </select>}
+    </div>}
     <div className="mt-4 flex flex-wrap items-center gap-3">
       <div role="group" aria-label="Gallery filters" className="flex flex-wrap rounded-lg bg-line-2 p-1">
         {([["topic", "Same topic"], ["strategy", "Same strategy"], ["all", "All"], ["mine", "Shared by me"]] as const).filter(([id]) => !standalone || id === "all" || id === "mine").map(([id, label]) => <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)} className={`rounded-md px-3 py-2 text-sm font-semibold ${filter === id ? "bg-white text-ink shadow-sm" : "text-mute"}`}>{label}</button>)}
@@ -132,9 +153,16 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{items.map(material => <article key={material.id} className="flex min-w-0 flex-col rounded-xl border border-line bg-white p-4">
       <div className="flex justify-between gap-2 text-xs text-mute"><span>{material.format === "slides" ? `${material.slideCount ?? ""} slides` : "Animated video"}</span>{material.isOwner && <span className="font-semibold">Shared by you</span>}</div>
       <h4 className="mt-3 text-lg font-bold text-ink">{material.title}</h4>
+      <GalleryMaterialDetails {...material} />
       <p className="mt-2 text-sm text-mute">Lesson {material.lessonNumber} · {getEngagementStrategyLabel(material.strategy)}</p>
       {material.description && <p className="mt-3 text-sm leading-6 text-ink-2">{material.description}</p>}
-      <div className="my-3 flex flex-wrap gap-2 text-xs font-semibold">{material.lessonNumber === lessonNumber && <span className="rounded-full bg-ok-light px-2.5 py-1 text-ok">Same topic</span>}{material.strategy === strategy && <span className="rounded-full bg-info-light px-2.5 py-1 text-info">Same strategy</span>}{focusMatches(material) && <span className="rounded-full bg-ai-light px-2.5 py-1 text-ai">Same focus</span>}{material.gradeBand && <span className="rounded-full bg-line-2 px-2.5 py-1 text-mute">{material.gradeBand}</span>}</div>
+      <div className="my-3 flex flex-wrap gap-2 text-xs font-semibold">
+        {standalone ? material.matchReasons?.map(reason => <span key={reason} className="rounded-full bg-ok-light px-2.5 py-1 text-ok">{reason}</span>) : <>
+          {material.lessonNumber === lessonNumber && <span className="rounded-full bg-ok-light px-2.5 py-1 text-ok">Same topic</span>}
+          {material.strategy === strategy && <span className="rounded-full bg-info-light px-2.5 py-1 text-info">Same strategy</span>}
+          {focusMatches(material) && <span className="rounded-full bg-ai-light px-2.5 py-1 text-ai">Same focus</span>}</>}
+        {material.gradeBand && <span className="rounded-full bg-line-2 px-2.5 py-1 text-mute">{material.gradeBand}</span>}
+      </div>
       <div className="mt-auto flex flex-wrap gap-2 pt-3"><button type="button" className={primary} disabled={disabled || !!copying || (!standalone && material.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(material, standalone ? "adapt" : "use")}>{copying === material.id ? "Opening…" : standalone ? "Open" : "Use as is"}</button>{!standalone && <button type="button" className={button} disabled={disabled || !!copying || material.lessonNumber !== lessonNumber} onClick={() => void selectMaterial(material, "adapt")}>Adapt</button>}<button type="button" className={button} onClick={() => void openPreview(material)}>Preview</button></div>
       {!standalone && material.lessonNumber !== lessonNumber && <p className="mt-2 text-xs text-mute">Choose Lesson {material.lessonNumber} in Assessment to use this material.</p>}
       {material.isOwner && <button type="button" className="mt-3 self-start text-xs font-semibold text-mute underline" disabled={!!copying} onClick={() => setRemoveTarget(material)}>Remove from Gallery</button>}
@@ -143,6 +171,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     {removeTarget && <div role="alertdialog" aria-label="Remove shared material" className="mt-4 rounded-lg border border-warn bg-warn-light p-4 text-sm"><p>Remove “{removeTarget.title}” from the Gallery? Teachers who already copied it keep their copies.</p><div className="mt-3 flex gap-2"><button className={button} type="button" onClick={() => setRemoveTarget(null)}>Keep shared</button><button className={button} type="button" disabled={!!copying} onClick={() => void remove()}>Remove shared material</button></div></div>}
     <dialog ref={dialog} aria-label="Gallery material preview" onCancel={closePreview} className="fixed inset-0 m-auto max-h-[90vh] w-[94vw] max-w-3xl overflow-auto rounded-2xl border border-line bg-white p-6 backdrop:bg-ink/50">
       <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-mute">Gallery preview</p><h3 className="mt-1 text-xl font-bold">{previewItem?.title}</h3></div><button type="button" className={button} aria-label="Close Gallery preview" onClick={closePreview}><X size={18} /></button></div>
+      {previewItem && <GalleryMaterialDetails {...(preview?.material || previewItem)} showTags />}
       {previewLoading && <p role="status" className="py-10 text-mute">Loading preview…</p>}
       {previewSlide && <>{previewDeck ? <div className="mt-5"><SlidePreview deck={previewDeck} index={previewIndex} /></div> : <div className="mt-5 rounded-xl border border-line bg-canvas p-6"><p className="text-xs font-semibold uppercase text-mute">{previewSlide.stage}</p><h4 className="mt-3 text-2xl font-bold">{previewSlide.title}</h4><p className="mt-4 whitespace-pre-wrap text-lg leading-relaxed">{previewSlide.body}</p><p className="mt-6 font-semibold text-ok">{previewSlide.task}</p></div>}<div className="mt-3 flex items-center justify-between"><button type="button" className={button} disabled={previewIndex === 0} onClick={() => setPreviewIndex(value => value - 1)}><ChevronLeft size={16} />Previous</button><span className="text-sm text-mute">Slide {previewIndex + 1} of {preview?.draft?.slides.length}</span><button type="button" className={button} disabled={previewIndex >= (preview?.draft?.slides.length ?? 0) - 1} onClick={() => setPreviewIndex(value => value + 1)}>Next<ChevronRight size={16} /></button></div></>}
       {preview?.item && <div className="mt-5 space-y-4">{preview.media?.video && <video aria-label="Shared video preview" src={preview.media.video} poster={preview.media.image} controls playsInline preload="metadata" className="max-h-96 w-full rounded-xl bg-ink" />}<p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-2">{preview.item.body}</p>{preview.item.activity?.stages.map(stage => <div key={stage.id}><h4 className="font-semibold">{stage.title}</h4><p className="mt-1 text-sm text-mute">{stage.text}</p></div>)}</div>}

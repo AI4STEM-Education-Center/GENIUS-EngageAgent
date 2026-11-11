@@ -275,7 +275,10 @@ describe("a brand-new lesson 9 works through the whole flow", () => {
     const unknownFocus = await routes.gallery.POST(post("/api/material-gallery", { ...body, metadata: { ...metadata, focus: { misconceptions: ["MC30"], coreIdeas: [] } } }));
     expect(unknownFocus.status).toBe(422);
     expect((await routes.gallery.GET(get(`/api/material-gallery?${query(task, { lessonNumber: "9" })}`))).status).toBe(200);
-    expect((await routes.gallery.GET(get(`/api/material-gallery?${query(task, { lessonNumber: "10" })}`))).status).toBe(400);
+    // The cross-task Gallery may contain lessons absent from this task. An
+    // unmatched lesson is an empty filter, not an invalid generation request.
+    const empty = await routes.gallery.GET(get(`/api/material-gallery?${query(task, { lessonNumber: "10" })}`));
+    expect(empty.status).toBe(200); expect((await empty.json()).items).toEqual([]);
     const video = await routes.gallery.POST(post("/api/material-gallery", { ...task, action: "share-video", lessonNumber: 10, item: { id: "v", title: "t", body: "b", strategy: "analogy" }, metadata }));
     expect(video.status).toBe(422);
     expect((await video.json()).error).toBe("Choose a valid lesson.");
