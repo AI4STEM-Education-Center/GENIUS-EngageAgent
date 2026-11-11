@@ -16,7 +16,7 @@ vi.mock("@/lib/slides/jobs", async importOriginal => {
 });
 vi.mock("@/lib/session", () => ({ sessionUser: mocks.session, sameOriginRequest: (request: Request) => request.headers.get("origin") === "http://localhost" }));
 vi.mock("@/lib/workspace", async importOriginal => ({ ...await importOriginal<object>(), workspaceContext: mocks.context }));
-vi.mock("@/lib/nosql", () => ({ listStudentAnswers: mocks.answers }));
+vi.mock("@/lib/nosql", () => ({ getClassProfile: vi.fn(async () => null), listStudentAnswers: mocks.answers }));
 
 import { POST as startDraft } from "@/app/api/slides/route";
 import { POST as startCheck } from "@/app/api/slides/check/route";

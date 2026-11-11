@@ -7,6 +7,7 @@ import { existingGenerationKey, resolveSlideModel, slideModelCatalog, slideTextR
 import { analogyPromptRevision, isSlidePromptVersion, SLIDE_PROMPT_REVISION } from "@/lib/slides/prompt-versions";
 import { beginSlideJob } from "@/lib/slides/jobs";
 import { loadSlideSource } from "@/lib/slides/source-prompts";
+import { materialClassroomContext } from "@/lib/material-classroom-context";
 
 export const runtime = "nodejs";
 // Submit a background job; generation and polling use separate short requests.
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
     const authorized = await authorizeSlides(request, body);
     enterLessonScope(await loadTaskLessons(authorized, body.lessonNumber));
     const { lesson, strategy } = slideContext(body);
-    const classroomContext = requestClassroomContext(body.classroomContext);
+    const taskContext = requestClassroomContext(body.classroomContext);
     const promptVersion = body.promptVersion === undefined ? "optimized" : body.promptVersion;
     if (!isSlidePromptVersion(promptVersion)) throw new SlideRequestError("Unknown slide prompt version.");
     const operation = body.operation ?? "generate";
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
     const model = resolveSlideModel("text", body.textModel);
     const focus = requestFocus(lesson.lessonNumber, strategy, body.focus);
     existingGenerationKey();
+    const classroomContext = await materialClassroomContext(authorized.classId, taskContext);
     if (operation === "review-slide" && draft) {
       const slideIndex = Number(body.slideIndex);
       const prompt = slideRevisionPrompt(lesson, strategy, draft, slideIndex, body.feedback as string | undefined, classroomContext, focus);

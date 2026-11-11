@@ -3,11 +3,12 @@ const mocks = vi.hoisted(() => ({ begin: vi.fn(), session: vi.fn(), context: vi.
 vi.mock("@/lib/slides/jobs", () => ({ beginSlideJob: mocks.begin }));
 vi.mock("@/lib/session", () => ({ sessionUser: mocks.session, sameOriginRequest: (request: Request) => request.headers.get("origin") === "http://localhost" }));
 vi.mock("@/lib/workspace", async importOriginal => ({ ...await importOriginal<object>(), workspaceContext: mocks.context }));
-vi.mock("@/lib/nosql", () => ({ listStudentAnswers: mocks.answers }));
+vi.mock("@/lib/nosql", () => ({ getClassProfile: vi.fn(async () => null), listStudentAnswers: mocks.answers }));
 import { POST as draft } from "@/app/api/slides/route";
 import { POST as check } from "@/app/api/slides/check/route";
 import { POST as image } from "@/app/api/slides/image/route";
 import { slideJson } from "@/lib/slides/server";
+import { getClassProfile } from "@/lib/nosql";
 import { slidePrompt, slideOutputFormat, slideImagePrompt } from "@/lib/slides/prompts";
 import { textReviewFormat } from "@/lib/slides/review";
 import { getLessonGenerationContext } from "@/lib/lesson-context";
@@ -24,9 +25,39 @@ beforeEach(() => {
   mocks.session.mockResolvedValue({ role: "teacher", geniusId: "teacher-test" });
   mocks.context.mockResolvedValue({});
   mocks.answers.mockResolvedValue([]);
+  vi.mocked(getClassProfile).mockResolvedValue(null);
   mocks.begin.mockImplementation(async () => slideJson(pending, 202));
 });
 afterEach(() => vi.unstubAllEnvs());
+
+it.each(["generate", "review", "review-slide", "check"])("uses the authorized class profile for %s without replacing task context or leaking demographics", async operation => {
+  vi.mocked(getClassProfile).mockResolvedValue({ class_id: base.classId, status: "saved", updated_at: "now", updated_by: "private-teacher-id",
+    locale: "rural", classType: "honors", englishLearners: true, iepOr504: true, groups: ["hispanic_latino"], groupAlternative: null });
+  const response = await (operation === "check" ? check : draft)(request({ ...base,
+    operation: operation === "check" ? undefined : operation,
+    classroomContext: "Use a familiar rubber ball.",
+    classProfile: { locale: "city" }, // Client-supplied profile data cannot override storage.
+    ...(operation !== "generate" ? { draft: slideFixture("cognitive conflict") } : {}),
+    ...(operation === "review-slide" ? { slideIndex: 0 } : {}),
+  }));
+  expect(response.status).toBe(202);
+  expect(getClassProfile).toHaveBeenCalledWith(base.classId);
+  const prompt = JSON.stringify(mocks.begin.mock.calls[0][2].input);
+  expect(prompt).toContain("School setting: Rural");
+  expect(prompt).toContain("Class type: Honors");
+  expect(prompt).toContain("English learners");
+  expect(prompt).toContain("accessible presentation");
+  expect(prompt).toContain("Use a familiar rubber ball.");
+  expect(prompt).not.toMatch(/hispanic_latino|private-teacher-id|School setting: City/);
+});
+
+it("does not start a job or disguise a failed profile read as an absent profile", async () => {
+  vi.mocked(getClassProfile).mockRejectedValueOnce(new Error("private database details"));
+  const response = await draft(request(base));
+  expect(response.status).toBe(503);
+  expect(await response.text()).not.toContain("private database details");
+  expect(mocks.begin).not.toHaveBeenCalled();
+});
 
 it.each(["gpt-4.1", "gpt-5-mini", "gpt-6-astra", "gpt-6.1-sol"])("submits %s drafts as background work without waiting for completed output or changing prompts", async textModel => {
   const req = request({ ...base, textModel });
