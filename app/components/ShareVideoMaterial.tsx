@@ -18,10 +18,14 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
   const [confirmed, setConfirmed] = useState(false);
   const [grade, setGrade] = useState("");
   const [description, setDescription] = useState("");
+  const [experienceContext, setExperienceContext] = useState("");
+  const [quizPattern, setQuizPattern] = useState("");
+  const [teachingContext, setTeachingContext] = useState("");
+  const [classProfile, setClassProfile] = useState("");
   const [busy, setBusy] = useState(false);
   const [shared, setShared] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => setConfirmed(false), [draft, grade, description, focus, videoUrl, imageUrl]);
+  useEffect(() => setConfirmed(false), [draft, grade, description, focus, videoUrl, imageUrl, experienceContext, quizPattern, teachingContext, classProfile]);
   useEffect(() => () => request.current?.abort(), []);
   async function share() {
     if (!confirmed || busy || request.current || !draft.title.trim()) return;
@@ -31,6 +35,7 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
       const selected = focus ? focusForStrategy(focus, item.strategy) : undefined;
       await shareVideoMaterial(scope, { ...draft, id: item.id, title: draft.title.trim() }, lessonNumber, {
         title: draft.title.trim(), description: description.trim(), gradeBand: grade.trim(),
+        experienceContext: experienceContext.trim(), quizPattern: quizPattern.trim(), teachingContext: teachingContext.trim(), classProfile: classProfile.trim(),
         ...(selected ? { focus: { misconceptions: selected.misconceptions ?? [], coreIdeas: selected.coreIdeas ?? [] } } : {}), sharingConfirmed: true,
       }, controller.signal);
       if (controller.signal.aborted) return;
@@ -58,6 +63,15 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
         <label className="text-sm font-semibold">Shared title<input className={input} value={draft.title} maxLength={160} onChange={event => setDraft(value => ({ ...value, title: event.target.value }))} /></label>
         <label className="text-sm font-semibold">Description<textarea className={input} value={description} maxLength={1000} onChange={event => setDescription(event.target.value)} /></label>
         <label className="text-sm font-semibold">Grade band (optional)<input className={input} value={grade} maxLength={80} onChange={event => setGrade(event.target.value)} placeholder="e.g. Grades 6–8" /></label>
+        <details className="rounded-lg border border-line p-3"><summary className="cursor-pointer text-sm font-semibold">Teaching tags</summary>
+          <p className="mt-2 text-xs text-mute">Lesson, objective, strategy, focus and format are included. Add shareable summaries to help teachers find this material; keep student details out.</p>
+          <div className="mt-3 grid gap-3">
+            <label className="text-sm font-semibold">Experience context (optional)<input className={input} value={experienceContext} maxLength={200} onChange={event => setExperienceContext(event.target.value)} /></label>
+            <label className="text-sm font-semibold">Quiz pattern (optional)<input className={input} value={quizPattern} maxLength={200} onChange={event => setQuizPattern(event.target.value)} /></label>
+            <label className="text-sm font-semibold">Teaching context (optional)<textarea className={input} value={teachingContext} maxLength={400} onChange={event => setTeachingContext(event.target.value)} /></label>
+            <label className="text-sm font-semibold">Class profile summary (optional)<input className={input} value={classProfile} maxLength={200} onChange={event => setClassProfile(event.target.value)} /></label>
+          </div>
+        </details>
         <label className="text-sm font-semibold">Activity text<textarea className={input} rows={4} value={draft.body} onChange={event => setDraft(value => ({ ...value, body: event.target.value }))} /></label>
         {draft.activity?.stages.map((stage, index) => <fieldset key={stage.id} className="grid gap-3 rounded-lg border border-line p-3">
           <legend className="px-1 text-sm font-semibold">Stage {index + 1}</legend>

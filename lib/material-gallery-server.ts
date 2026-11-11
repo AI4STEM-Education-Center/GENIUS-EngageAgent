@@ -6,6 +6,7 @@ import { enterLessonScope, loadTaskLessons } from "./lesson-scope";
 import { resolveStrategyFocus } from "./strategy-focus";
 import { getMedia } from "./nosql";
 import { parseMaterialActivity } from "./material-activities";
+import { galleryMatches, galleryPromptTags } from "./material-gallery-tags";
 import { isSlideAsset, type SlideDraft } from "./slides/model";
 import type { ContentItem, TextMode } from "./types";
 import type { GalleryFilters, GalleryFocus, GalleryMaterial, GalleryMetadata, GalleryProvenance, GalleryScope, SavedGalleryCopySummary } from "./material-gallery";
@@ -18,6 +19,7 @@ const STAGING_SECONDS = 30 * 60;
 type AssetDescription = { width: number; height: number; digest: string };
 type Source = {
   id: string; revision: 1; ownerId: string; createdAt: string; expiresAt: number;
+  creatorName?: string; originMaterialId?: string; promptTags?: Record<string, string>;
   metadata: Omit<GalleryMetadata, "sharingConfirmed">;
   lessonNumber: number; strategy: string; format: "slides" | "video";
   draft?: SlideDraft; item?: ContentItem; assets: Record<string, AssetDescription>;
@@ -41,6 +43,9 @@ const sourceKey = (id: string) => `SOURCE#${id}`;
 const assetKey = (id: string, visualId: string) => `ASSET#${id}#${visualId}`;
 const copyPartition = (scope: GalleryScope) => `GALLERY_COPIES#${createHash("sha256").update(JSON.stringify([scope.classId, scope.assignmentId])).digest("hex")}`;
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
+const usagePartition = (id: string) => `GALLERY_USAGE#${id}`;
+const creatorName = (context: AuthorizedSlideContext) => context.teacherName?.replace(/[\u0000-\u001f\u007f]/gu, "").trim().slice(0, 120) || "Teacher";
+const teacherCount = async (id: string) => (await workspaceQuery(usagePartition(id), "TEACHER#")).length;
 const idValue = (value: unknown) => {
   if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)) throw new SlideRequestError("Choose a valid Gallery material.");
   return value;
@@ -52,7 +57,7 @@ function text(value: unknown, label: string, max: number, optional = true) {
 }
 function metadata(value: unknown, lessonNumber: number, strategy: string): Source["metadata"] {
   if (!record(value) || value.sharingConfirmed !== true) throw new SlideRequestError("Review the shared content and confirm that class details have been removed.", 422);
-  if (Object.keys(value).some(key => !["title", "description", "gradeBand", "experienceContext", "quizPattern", "focus", "sharingConfirmed"].includes(key))) throw new SlideRequestError("Unexpected sharing metadata.");
+  if (Object.keys(value).some(key => !["title", "description", "gradeBand", "experienceContext", "quizPattern", "teachingContext", "classProfile", "focus", "sharingConfirmed"].includes(key))) throw new SlideRequestError("Unexpected sharing metadata.");
   let focus: GalleryFocus | undefined;
   if (value.focus !== undefined) {
     const f = value.focus;
@@ -68,14 +73,17 @@ function metadata(value: unknown, lessonNumber: number, strategy: string): Sourc
   }
   return { title: text(value.title, "Title", 160, false), description: text(value.description, "Description", 1000),
     gradeBand: text(value.gradeBand, "Grade band", 80), experienceContext: text(value.experienceContext, "Experience context", 200),
-    quizPattern: text(value.quizPattern, "Quiz pattern", 200), ...(focus ? { focus } : {}) };
+    quizPattern: text(value.quizPattern, "Quiz pattern", 200),
+    ...(value.teachingContext === undefined ? {} : { teachingContext: text(value.teachingContext, "Teaching context", 400) }),
+    ...(value.classProfile === undefined ? {} : { classProfile: text(value.classProfile, "Class profile summary", 200) }), ...(focus ? { focus } : {}) };
 }
 function materialSummary(source: Source): Omit<GalleryMaterial, "isOwner"> {
   return { id: source.id, revision: source.revision, title: source.metadata.title,
     description: source.metadata.description || "", gradeBand: source.metadata.gradeBand || "", experienceContext: source.metadata.experienceContext || "",
     quizPattern: source.metadata.quizPattern || "", ...(source.metadata.focus ? { focus: source.metadata.focus } : {}),
     lessonNumber: source.lessonNumber, strategy: source.strategy, format: source.format, createdAt: source.createdAt,
-    ...(source.draft ? { slideCount: source.draft.slides.length } : {}), ...(source.derivedFrom ? { derivedFrom: source.derivedFrom } : {}) };
+    ...(source.draft ? { slideCount: source.draft.slides.length } : {}), ...(source.derivedFrom ? { derivedFrom: source.derivedFrom } : {}),
+    ...(source.creatorName ? { creatorName: source.creatorName } : {}), ...(source.promptTags ? { promptTags: source.promptTags } : {}) };
 }
 function publicMaterial(source: Source, ownerId: string): GalleryMaterial {
   return { ...materialSummary(source), isOwner: source.ownerId === ownerId };
@@ -151,8 +159,11 @@ async function startShare(body: Record<string, unknown>, context: AuthorizedSlid
   const parent = body.copyId === undefined ? undefined : await copiedSource(context, body.copyId);
   const derivedFrom = parent ? { templateId: parent.source.id, revision: parent.source.revision, title: parent.source.metadata.title } : undefined;
   const source: Source = boundedSource({ id: randomUUID(), revision: 1, ownerId: context.userId, createdAt: new Date().toISOString(), expiresAt: Math.floor(Date.now() / 1000) + STAGING_SECONDS,
+    creatorName: creatorName(context), ...(body.materialId === undefined ? {} : { originMaterialId: text(body.materialId, "Material ID", 160, false) }),
     metadata: metadata(body.metadata, Number(body.lessonNumber), strategy), format: "slides", lessonNumber: Number(body.lessonNumber), strategy,
     draft, assets, ...(derivedFrom ? { derivedFrom } : {}) });
+  source.promptTags = galleryPromptTags(source.lessonNumber, strategy, "slides", source.metadata, draft);
+  boundedSource(source);
   assertGalleryStorage();
   await workspacePut([{ partition: PARTITION, key: sourceKey(source.id), value: source, createOnly: true, expiresAt: source.expiresAt }]);
   return { id: source.id };
@@ -194,7 +205,7 @@ async function commitShare(body: Record<string, unknown>, context: AuthorizedSli
       { partition: PARTITION, key: `SHARED#${source.id}`, value: { id: source.id, ownerId: context.userId, material }, createOnly: true }]); }
     catch (error) { if (!(await isShared(source.id))) throw error; }
   }
-  return { material: publicMaterial(source, context.userId) };
+  return { material: { ...publicMaterial(source, context.userId), teacherCount: await teacherCount(source.id) } };
 }
 
 function videoItem(value: unknown, lessonNumber: number): ContentItem {
@@ -262,6 +273,8 @@ async function shareVideo(body: Record<string, unknown>, context: AuthorizedSlid
   const video = await savedVideoMedia(context, item, id, "video");
   const image = await savedVideoMedia(context, item, id, "image");
   const source: Source = boundedSource({ id, revision: 1, ownerId: context.userId, createdAt: new Date().toISOString(), expiresAt: Math.floor(Date.now() / 1000) + STAGING_SECONDS,
+    creatorName: creatorName(context), originMaterialId: item.id,
+    promptTags: galleryPromptTags(Number(body.lessonNumber), item.strategy, "video", meta, undefined, item.textModes),
     metadata: meta, format: "video", lessonNumber: Number(body.lessonNumber), strategy: item.strategy,
     // The originating class/task/content identifiers never enter the shared template.
     item: { ...item, id: `gallery-${id}` }, assets: {}, videoMedia: { video: video!, ...(image ? { image } : {}) }, ...(derivedFrom ? { derivedFrom } : {}) });
@@ -373,7 +386,11 @@ async function commitCopySave(body: Record<string, unknown>, context: Authorized
     // images and receipt pointer become durable in the very same transaction.
     await workspacePut([{ partition, key, value: pointer, createOnly: true },
       { partition, key: snapshotKey(snapshot.id), value: snapshot }, ...assets,
-      { partition, key: `COPY#${copy.id}`, value: { ...copy, saved: pointer } }]);
+      { partition, key: `COPY#${copy.id}`, value: { ...copy, saved: pointer } },
+      // One stable key per verified teacher across copies, classes and retries.
+      // Coupled to the successful save transaction, never to preview or open.
+      { partition: usagePartition(source.id), key: `TEACHER#${digest(context.userId)}`,
+        value: { teacherId: context.userId, templateId: source.id, classId: context.classId, assignmentId: context.assignmentId, copyId: copy.id, savedAt: saved.savedAt } }]);
   } catch (error) {
     const winner = await workspaceGet<{ snapshotId: string }>(partition, key);
     if (winner?.snapshotId !== snapshot.id) { if (winner) throw saveConflict(); throw error; }
@@ -500,6 +517,10 @@ export async function galleryGet(request: Request) {
       .map(copy => { const { snapshotId: _id, ...summary } = copy.saved!; void _id; return summary; }).sort((a, b) => b.savedAt.localeCompare(a.savedAt)) };
   }
   if (params.get("action") === "copy-media") return copyVideoMedia(context, params.get("copyId"));
+  if (params.get("action") === "copy-attribution") {
+    const { source } = await copiedSource(context, params.get("copyId"));
+    return { creatorName: source.creatorName, teacherCount: await teacherCount(source.id), promptTags: source.promptTags };
+  }
   if (params.get("action") === "asset") {
     const { source } = params.has("copyId") ? await copiedSource(context, params.get("copyId")) : { source: await sharedSource(params.get("id")) };
     const visualId = params.get("visualId");
@@ -512,19 +533,37 @@ export async function galleryGet(request: Request) {
   }
   if (params.has("id")) {
     const source = await sharedSource(params.get("id"));
-    return { material: publicMaterial(source, context.userId), ...(source.format === "slides" ? { draft: source.draft, visualIds: Object.keys(source.assets) } : { item: source.item, media: await videoUrls(source) }),
+    return { material: { ...publicMaterial(source, context.userId), teacherCount: await teacherCount(source.id) }, ...(source.format === "slides" ? { draft: source.draft, visualIds: Object.keys(source.assets) } : { item: source.item, media: await videoUrls(source) }),
       lessonNumber: source.lessonNumber, strategy: source.strategy };
   }
   const filters: GalleryFilters = {};
   if (params.has("lessonNumber")) {
-    const n = Number(params.get("lessonNumber")); enterLessonScope(await loadTaskLessons(context, n)); if (!Number.isInteger(n) || !getLesson(n)) throw new SlideRequestError("Choose a valid lesson."); filters.lessonNumber = n;
+    const n = Number(params.get("lessonNumber")); if (!Number.isSafeInteger(n) || n < 1) throw new SlideRequestError("Choose a valid lesson."); filters.lessonNumber = n;
   }
-  if (params.has("strategy")) filters.strategy = text(params.get("strategy"), "Strategy", 80, false);
+  const strategies = ["analogy", "cognitive conflict", "engaged critiquing", "experience bridging"];
+  if (params.has("strategy")) { filters.strategy = text(params.get("strategy"), "Strategy", 80, false); if (!strategies.includes(filters.strategy)) throw new SlideRequestError("Choose a supported strategy."); }
+  const recommendLesson = Number(params.get("recommendLesson") || 0), recommendStrategy = params.get("recommendStrategy") || "";
+  if (!Number.isSafeInteger(recommendLesson) || recommendLesson < 0 || (recommendStrategy && !strategies.includes(recommendStrategy))) throw new SlideRequestError("Choose a valid recommendation context.");
+  let recommendFocus: GalleryFocus | undefined;
+  if (params.has("recommendFocus")) {
+    try {
+      const value = JSON.parse(params.get("recommendFocus")!);
+      if (!record(value) || !Array.isArray(value.misconceptions) || value.misconceptions.length > 2 || !value.misconceptions.every(v => typeof v === "string" && v.length < 100)
+        || !Array.isArray(value.coreIdeas) || value.coreIdeas.length > 2 || !value.coreIdeas.every(v => Number.isSafeInteger(v) && v >= 0)) throw new Error();
+      recommendFocus = value as GalleryFocus;
+    } catch { throw new SlideRequestError("Choose a valid recommendation focus."); }
+  }
+  let recommendationTags: Record<string, string> | undefined;
+  if (recommendLesson) {
+    enterLessonScope(await loadTaskLessons(context, recommendLesson));
+    const lesson = getLesson(recommendLesson);
+    if (lesson) recommendationTags = { TOPIC: lesson.topic?.trim() && lesson.target_concept?.trim() ? lesson.topic.trim() : lesson.lesson_title, LEARNING_OBJECTIVE: lesson.learning_objective };
+  }
   if (params.has("format")) { if (!["slides", "video"].includes(params.get("format")!)) throw new SlideRequestError("Choose slides or video."); filters.format = params.get("format") as "slides" | "video"; }
   const search = text(params.get("search") ?? undefined, "Search", 200).toLocaleLowerCase();
   const limit = params.has("limit") ? Number(params.get("limit")) : 12;
   if (!Number.isInteger(limit) || limit < 1 || limit > 60) throw new SlideRequestError("Page size must be between 1 and 60.");
-  const fingerprint = digest(JSON.stringify([filters, search, params.get("mine") === "true", context.userId]));
+  const fingerprint = digest(JSON.stringify([filters, search, params.get("mine") === "true", context.userId, recommendLesson, recommendStrategy, recommendFocus, recommendationTags]));
   let after = "";
   if (params.has("cursor")) {
     try { const c = JSON.parse(Buffer.from(params.get("cursor")!, "base64url").toString()); if (!record(c) || c.fingerprint !== fingerprint || typeof c.after !== "string" || c.after.length > 90) throw new Error(); after = c.after; }
@@ -532,12 +571,18 @@ export async function galleryGet(request: Request) {
   }
   const [shared, withdrawals] = await Promise.all([workspaceQuery<Shared>(PARTITION, "SHARED#"), workspaceQuery<{ id: string }>(PARTITION, "WITHDRAWN#")]);
   const withdrawn = new Set(withdrawals.map(row => row.id));
-  const matches = shared.filter(row => !withdrawn.has(row.id) && (params.get("mine") !== "true" || row.ownerId === context.userId)
+  const available = shared.filter(row => !withdrawn.has(row.id) && (!filters.format || row.material.format === filters.format));
+  const rank = (row: Shared) => galleryMatches({ ...row.material, isOwner: row.ownerId === context.userId }, recommendLesson, recommendStrategy, recommendFocus, recommendationTags);
+  const orderKey = (row: Shared) => `${String(rank(row).score).padStart(2, "0")}|${row.material.createdAt}|${row.id}`;
+  const matches = available.filter(row => (params.get("mine") !== "true" || row.ownerId === context.userId)
     && (!filters.lessonNumber || row.material.lessonNumber === filters.lessonNumber) && (!filters.strategy || row.material.strategy === filters.strategy)
-    && (!filters.format || row.material.format === filters.format) && (!search || [row.material.title, row.material.description, row.material.experienceContext, row.material.gradeBand, row.material.strategy].join(" ").toLocaleLowerCase().includes(search)))
-    .sort((a, b) => `${b.material.createdAt}|${b.id}`.localeCompare(`${a.material.createdAt}|${a.id}`))
-    .filter(row => !after || `${row.material.createdAt}|${row.id}` < after);
+    && (!search || [row.material.title, row.material.description, row.material.experienceContext, row.material.gradeBand, row.material.quizPattern, row.material.strategy,
+      row.material.creatorName, ...Object.values(row.material.promptTags || {})].join(" ").toLocaleLowerCase().includes(search)))
+    .sort((a, b) => orderKey(b).localeCompare(orderKey(a)))
+    .filter(row => !after || orderKey(row) < after);
   const page = matches.slice(0, limit); const last = page.at(-1);
-  return { items: page.map(row => ({ ...row.material, isOwner: row.ownerId === context.userId })),
-    ...(matches.length > limit && last ? { nextCursor: Buffer.from(JSON.stringify({ fingerprint, after: `${last.material.createdAt}|${last.id}` })).toString("base64url") } : {}) };
+  return { items: await Promise.all(page.map(async row => ({ ...row.material, isOwner: row.ownerId === context.userId, teacherCount: await teacherCount(row.id),
+    ...(recommendLesson || recommendStrategy ? { matchReasons: rank(row).reasons } : {}) }))),
+    facets: { lessons: [...new Set(available.map(row => row.material.lessonNumber))].sort((a, b) => a - b), strategies: [...new Set(available.map(row => row.material.strategy))].sort() },
+    ...(matches.length > limit && last ? { nextCursor: Buffer.from(JSON.stringify({ fingerprint, after: orderKey(last) })).toString("base64url") } : {}) };
 }

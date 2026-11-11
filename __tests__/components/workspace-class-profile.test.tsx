@@ -219,7 +219,7 @@ it("tells the teacher when the class was added but its profile didn't save, unti
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(within(section).queryByText("Not set yet.")).toBeNull();
 
-  fireEvent.click(within(section).getByRole("button", { name: "Add class profile" }));
+  fireEvent.click(await within(section).findByRole("button", { name: "Add class profile" }));
   const form = await screen.findByRole("dialog", { name: "Tell EngageAgent about this class" });
   fireEvent.click(within(form).getByRole("button", { name: "Honors" }));
   fireEvent.click(within(form).getByRole("button", { name: "Save" }));

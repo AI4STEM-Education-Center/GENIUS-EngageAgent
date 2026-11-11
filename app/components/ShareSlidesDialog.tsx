@@ -21,6 +21,8 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
   const [gradeBand, setGradeBand] = useState("");
   const [experienceContext, setExperienceContext] = useState("");
   const [quizPattern, setQuizPattern] = useState("");
+  const [teachingContext, setTeachingContext] = useState("");
+  const [classProfile, setClassProfile] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -47,6 +49,7 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
       const material = await shareSlideMaterial(scope, source, {
         title: title.trim(), description: description.trim(), gradeBand: gradeBand.trim(),
         experienceContext: experienceContext.trim(), quizPattern: quizPattern.trim(),
+        teachingContext: teachingContext.trim(), classProfile: classProfile.trim(),
         ...(deck.focus ? { focus: { misconceptions: deck.strategy === "cognitive conflict" || deck.strategy === "engaged critiquing" ? deck.focus.misconceptions ?? [] : [], coreIdeas: deck.strategy === "analogy" || deck.strategy === "experience bridging" ? deck.focus.coreIdeas ?? [] : [] } } : {}),
         sharingConfirmed: true,
       }, controller.signal);
@@ -73,6 +76,14 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
         <label className="block text-sm font-semibold text-ink-2">Experience context (optional)<input className={input} maxLength={160} placeholder="e.g. Soccer" value={experienceContext} onChange={event => { setExperienceContext(event.target.value); setConfirmed(false); }} /></label>
         <label className="block text-sm font-semibold text-ink-2">Quiz pattern (optional)<input className={input} maxLength={160} placeholder="e.g. Force and damage" value={quizPattern} onChange={event => { setQuizPattern(event.target.value); setConfirmed(false); }} /></label>
       </div>
+      <details className="rounded-lg border border-line p-3">
+        <summary className="cursor-pointer text-sm font-semibold">Teaching tags</summary>
+        <p className="mt-2 text-xs text-mute">Lesson, learning objective, strategy, focus and material type are included automatically. Add reusable summaries below; these will be visible to other teachers and searchable in Gallery.</p>
+        <div className="mt-3 grid gap-3">
+          <label className="text-sm font-semibold">Teaching context (optional)<textarea className={input} maxLength={400} rows={2} placeholder="e.g. Familiar ball games; brief instructions and visual comparisons" value={teachingContext} onChange={event => { setTeachingContext(event.target.value); setConfirmed(false); }} /></label>
+          <label className="text-sm font-semibold">Class profile summary (optional)<input className={input} maxLength={200} placeholder="e.g. Introductory physics; visual and language supports" value={classProfile} onChange={event => { setClassProfile(event.target.value); setConfirmed(false); }} /></label>
+        </div>
+      </details>
       <div className="rounded-lg border border-amber-200 bg-warn-light p-3 text-sm leading-relaxed text-warn">
         Classroom context is excluded. Review the slides, notes and images below and remove student names, counts, survey quotes and other class details. Changes here apply only to the Gallery copy.
       </div>

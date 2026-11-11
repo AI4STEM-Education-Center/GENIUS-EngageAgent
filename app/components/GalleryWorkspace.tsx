@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, LoaderCircle, Save, Send } from "lucide-react";
 import type { UserContext } from "@/lib/auth";
-import type { GalleryCopy, SavedGalleryCopySummary } from "@/lib/material-gallery";
-import { listSavedGalleryCopies, loadSavedGalleryCopy, refreshGalleryCopyMedia, saveGalleryCopy } from "@/lib/material-gallery-client";
+import type { GalleryCopy, GalleryMaterial, SavedGalleryCopySummary } from "@/lib/material-gallery";
+import { galleryCopyAttribution, listSavedGalleryCopies, loadSavedGalleryCopy, refreshGalleryCopyMedia, saveGalleryCopy } from "@/lib/material-gallery-client";
+import GalleryMaterialDetails from "./GalleryMaterialDetails";
+import type { StrategyFocus } from "@/lib/strategy-focus";
 import { scopedTaskFetch } from "@/lib/client-auth";
 import { useTaskLesson } from "@/lib/lesson-client";
 import type { SlideDeck } from "@/lib/slides/model";
@@ -21,16 +23,17 @@ type Editor = { copy: GalleryCopy; revision: number; savedAt?: string };
 type LeaveGuard = (proceed: () => void) => void;
 type HistoryNavigation = EventTarget & { traverseTo: (key: string) => { committed: Promise<unknown>; finished: Promise<unknown> } };
 type HistoryNavigateEvent = Event & { navigationType?: string; destination?: { key?: string; sameDocument?: boolean } };
-type Props = { user: UserContext; taskTitle?: string; onBack: () => void; onPublished?: () => void; registerLeaveGuard?: (guard: LeaveGuard | null) => void };
+type Props = { user: UserContext; taskTitle?: string; recommendation?: { lessonNumber: number; strategy: string; focus?: StrategyFocus }; onBack: () => void; onPublished?: () => void; registerLeaveGuard?: (guard: LeaveGuard | null) => void };
 
 /** A separate task-scoped library/editor. It never changes the generation workflow's draft or strategy. */
-export default function GalleryWorkspace({ user, taskTitle, onBack, onPublished, registerLeaveGuard }: Props) {
+export default function GalleryWorkspace({ user, taskTitle, recommendation, onBack, onPublished, registerLeaveGuard }: Props) {
   const classId = user.classId || "", assignmentId = user.assignmentId || "";
   const [tab, setTab] = useState<"shared" | "saved">("shared");
   const [format, setFormat] = useState<"slides" | "video">("slides");
   const [saved, setSaved] = useState<SavedGalleryCopySummary[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [attribution, setAttribution] = useState<Pick<GalleryMaterial, "creatorName" | "teacherCount" | "promptTags"> | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const working = useRef<GalleryCopy | null>(null);
   const baseline = useRef<SlideDeck | GalleryCopy | null>(null);
@@ -51,6 +54,15 @@ export default function GalleryWorkspace({ user, taskTitle, onBack, onPublished,
   const activeId = editor ? copyId(editor.copy) : "";
   const slideLesson = useTaskLesson({ classId, assignmentId }, editor?.copy.format === "slides" ? editor.copy.deck.lessonNumber : null);
   const keepEditing = useCallback(() => { pendingLeaveRef.current = null; setPendingLeave(null); }, []);
+  useEffect(() => {
+    setAttribution(null);
+    if (!activeId) return;
+    const controller = new AbortController();
+    galleryCopyAttribution({ classId, assignmentId }, activeId, controller.signal).then(value => {
+      if (!controller.signal.aborted) setAttribution(value);
+    }).catch(() => { /* Attribution is optional for legacy/offline materials; never block editing. */ });
+    return () => controller.abort();
+  }, [activeId, classId, assignmentId, refresh]);
 
   useEffect(() => {
     const requestSet = requests.current;
@@ -245,6 +257,7 @@ export default function GalleryWorkspace({ user, taskTitle, onBack, onPublished,
         <span className="text-sm text-mute">{dirty ? "Unsaved changes" : editor.savedAt ? "Saved to your materials" : "Your editable copy"}</span>
       </div>
       <p className="text-sm text-mute">Your copy of “{editor.copy.source.title}”. Saving keeps it private to this task.</p>
+      {attribution && <GalleryMaterialDetails {...attribution} showTags />}
       {editor.copy.format === "slides" ? !slideLesson.lesson ? <p role={slideLesson.error ? "alert" : "status"} className="text-sm text-mute">{slideLesson.error || "Loading the lesson…"}</p> : <fieldset disabled={busy} className="min-w-0"><SlidesWorkspace key={activeId} user={user}
         embeddedContext={{ lessonNumber: editor.copy.deck.lessonNumber, strategy: editor.copy.deck.strategy, classroomContext: editor.copy.deck.classroomContext, focus: editor.copy.deck.focus }}
         incomingDeck={editor.copy.deck} incomingDeckSaved={editor.revision > 0} draftNamespace={`gallery:${activeId}`} compactEditor
@@ -268,7 +281,7 @@ export default function GalleryWorkspace({ user, taskTitle, onBack, onPublished,
         </div>
         <div role="group" aria-label="Gallery material type" className="flex gap-2">{(["slides", "video"] as const).map(value => <button key={value} type="button" className={format === value ? primary : button} aria-pressed={format === value} onClick={() => setFormat(value)}>{value === "slides" ? "Slides" : "Video"}</button>)}</div>
       </div>
-      {tab === "shared" ? <MaterialGalleryPanel scope={{ classId, assignmentId }} lessonNumber={0} strategy="" format={format} standalone disabled={busy} onUse={copy => openEditor(copy)} />
+      {tab === "shared" ? <MaterialGalleryPanel scope={{ classId, assignmentId }} lessonNumber={recommendation?.lessonNumber || 0} strategy={recommendation?.strategy || ""} focus={recommendation?.focus} format={format} standalone disabled={busy} onUse={copy => openEditor(copy)} />
         : <div className="grid gap-4 sm:grid-cols-2">
           {listLoading && <p role="status" className="flex items-center gap-2 text-sm text-mute"><LoaderCircle size={16} className="animate-spin" />Loading saved materials…</p>}
           {saved.filter(item => item.format === format).map(item => <article key={item.copyId} className="rounded-xl border border-line bg-white p-5">

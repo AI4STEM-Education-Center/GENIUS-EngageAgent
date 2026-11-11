@@ -16,7 +16,7 @@ export class SlideRequestError extends Error {
   constructor(message: string, public status = 400, public code?: typeof GENIUS_LAUNCH_UPGRADE_CODE) { super(message); }
 }
 
-export type AuthorizedSlideContext = { classId: string; assignmentId: string; userId: string };
+export type AuthorizedSlideContext = { classId: string; assignmentId: string; userId: string; teacherName?: string };
 
 /** Resolve each request independently so two embedded classes cannot overwrite a global session. */
 export async function authorizeSlideAccess(request: Request, context: Record<string, unknown>, access: "read" | "write"): Promise<AuthorizedSlideContext> {
@@ -61,7 +61,7 @@ export async function authorizeSlideAccess(request: Request, context: Record<str
     if (user.role !== "teacher" && user.role !== "student") throw new SlideRequestError("Join this class to read its slides.", 403);
     await workspaceContext(user, classId, assignmentId);
   }
-  return { classId, assignmentId, userId: user.geniusId };
+  return { classId, assignmentId, userId: user.geniusId, teacherName: user.name };
 }
 
 export async function authorizeSlides(request: Request, context: Record<string, unknown>) {
