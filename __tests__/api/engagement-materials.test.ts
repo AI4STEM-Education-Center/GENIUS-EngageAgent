@@ -10,6 +10,8 @@ import { POST as content } from "@/app/api/engagement-content/route";
 import { POST as image } from "@/app/api/engagement-image/route";
 import { guardWorkspaceRequest } from "@/lib/workspace-access";
 import { listStudentAnswers, getClassProfile } from "@/lib/nosql";
+import * as lessonContext from "@/lib/lesson-context";
+import * as generationRecords from "@/lib/generation-record-server";
 
 const request = (fields: unknown) => new Request("http://localhost/api/engagement-content", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields) });
 const completion = (items: unknown) => ({ choices: [{ message: { content: JSON.stringify({ items }) } }] });
@@ -24,6 +26,25 @@ beforeEach(() => {
   vi.mocked(getClassProfile).mockResolvedValue(null);
 });
 afterEach(() => vi.unstubAllEnvs());
+
+it("records the configured video curriculum and the exact model options through review", async () => {
+  const curriculum = vi.spyOn(lessonContext, "configuredLessonFocus").mockReturnValue({ topic: "Contact forces", target: "Temporary deformation", guidance: "Use this curriculum." });
+  const records = vi.spyOn(generationRecords, "recordGeneration");
+  try {
+    complete.mockResolvedValue(completion([{ title: "Contact", activity: conflictActivity }]));
+    const response = await content(request({ lessonNumber: 3, selectedStrategies: ["cognitive conflict"] }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).items[0].generation.tags).toMatchObject({ TOPIC: "Contact forces", TARGET_CONCEPT: "Temporary deformation" });
+    expect(records.mock.calls.length).toBe(complete.mock.calls.length);
+    records.mock.calls.forEach(([, record], index) => {
+      const actual = complete.mock.calls[index][0];
+      expect(record.parameters?.response_format).toEqual(actual.response_format);
+      expect(record.parameters?.temperature).toBe(actual.temperature);
+      expect(record.parameters?.reasoning_effort).toBe(actual.reasoning_effort);
+      expect(record.model).toBe(actual.model);
+    });
+  } finally { curriculum.mockRestore(); records.mockRestore(); }
+});
 
 it("uses lesson-owned focus wording in text generation and blocks forged focus", async () => {
   complete.mockResolvedValue(completion([{ title: "Observe", activity: conflictActivity }]));
