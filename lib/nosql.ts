@@ -1616,8 +1616,12 @@ export const listPublishedContent = async (
   if (useDynamoDb) {
     const client = getDynamoClient();
     if (!client) return [];
-    const result = await client.send(
-      new QueryCommand({
+    const items: Record<string, unknown>[] = [];
+    let cursor: Record<string, unknown> | undefined;
+    do {
+      const result = await client.send(
+        new QueryCommand({
+          ...(cursor ? { ExclusiveStartKey: cursor } : {}),
         TableName: dynamoTableName,
         // A newly sent material must be readable immediately after publishing.
         ConsistentRead: true,
@@ -1632,8 +1636,11 @@ export const listPublishedContent = async (
           ":skPrefix": `CONTENT_PUB#ASSIGN#${assignmentId}#ITEM#`,
         },
       }),
-    );
-    return (result.Items ?? [])
+      );
+      items.push(...(result.Items ?? []));
+      cursor = result.LastEvaluatedKey;
+    } while (cursor);
+    return items
       .filter((item) => item.record_type === "content_publish" && item.published)
       .map((item) => ({
         class_id: (item.class_id as string) ?? classId,
@@ -1760,8 +1767,12 @@ export const listReviewQuestions = async (
     const client = getDynamoClient();
     if (!client) return [];
     const studentKey = `REVIEW_Q#ASSIGN#${assignmentId}#STUDENT#${studentId}`;
-    const result = await client.send(
-      new QueryCommand({
+    const items: Record<string, unknown>[] = [];
+    let cursor: Record<string, unknown> | undefined;
+    do {
+      const result = await client.send(
+        new QueryCommand({
+          ...(cursor ? { ExclusiveStartKey: cursor } : {}),
         TableName: dynamoTableName,
         // A student's ID may be a prefix of another ID. Only teachers listing
         // the whole assignment may use a prefix query for these records.
@@ -1777,8 +1788,11 @@ export const listReviewQuestions = async (
           ...(studentId ? { ":sk": studentKey } : { ":skPrefix": `REVIEW_Q#ASSIGN#${assignmentId}#STUDENT#` }),
         },
       }),
-    );
-    return (result.Items ?? [])
+      );
+      items.push(...(result.Items ?? []));
+      cursor = result.LastEvaluatedKey;
+    } while (cursor);
+    return items
       .filter((item) => item.record_type === "review_questions")
       .map((item) => ({
         class_id: (item.class_id as string) ?? classId,
@@ -2197,8 +2211,12 @@ export const listContentRatings = async (
     const skPrefix = studentId
       ? `RATING#ASSIGN#${assignmentId}#STUDENT#${studentId}#ITEM#`
       : `RATING#ASSIGN#${assignmentId}#STUDENT#`;
-    const result = await client.send(
-      new QueryCommand({
+    const items: Record<string, unknown>[] = [];
+    let cursor: Record<string, unknown> | undefined;
+    do {
+      const result = await client.send(
+        new QueryCommand({
+          ...(cursor ? { ExclusiveStartKey: cursor } : {}),
         TableName: dynamoTableName,
         KeyConditionExpression:
           "#pk = :pk AND begins_with(#sk, :skPrefix)",
@@ -2211,8 +2229,11 @@ export const listContentRatings = async (
           ":skPrefix": skPrefix,
         },
       }),
-    );
-    return (result.Items ?? [])
+      );
+      items.push(...(result.Items ?? []));
+      cursor = result.LastEvaluatedKey;
+    } while (cursor);
+    return items
       .filter((item) => item.record_type === "content_rating")
       .map((item) => ({
         class_id: (item.class_id as string) ?? classId,

@@ -23,6 +23,7 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
   const [quizPattern, setQuizPattern] = useState("");
   const [teachingContext, setTeachingContext] = useState("");
   const [classProfile, setClassProfile] = useState("");
+  const [keywords, setKeywords] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -49,7 +50,7 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
       const material = await shareSlideMaterial(scope, source, {
         title: title.trim(), description: description.trim(), gradeBand: gradeBand.trim(),
         experienceContext: experienceContext.trim(), quizPattern: quizPattern.trim(),
-        teachingContext: teachingContext.trim(), classProfile: classProfile.trim(),
+        teachingContext: teachingContext.trim(), classProfile: classProfile.trim(), keywords: keywords.split(",").map(tag => tag.trim()).filter(Boolean),
         ...(deck.focus ? { focus: { misconceptions: deck.strategy === "cognitive conflict" || deck.strategy === "engaged critiquing" ? deck.focus.misconceptions ?? [] : [], coreIdeas: deck.strategy === "analogy" || deck.strategy === "experience bridging" ? deck.focus.coreIdeas ?? [] : [] } } : {}),
         sharingConfirmed: true,
       }, controller.signal);
@@ -80,6 +81,7 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
         <summary className="cursor-pointer text-sm font-semibold">Teaching tags</summary>
         <p className="mt-2 text-xs text-mute">Lesson, learning objective, strategy, focus and material type are included automatically. Add reusable summaries below; these will be visible to other teachers and searchable in Gallery.</p>
         <div className="mt-3 grid gap-3">
+          <label className="text-sm font-semibold">Keywords (optional)<input className={input} value={keywords} maxLength={490} placeholder="e.g. collisions, soccer, visual learning" onChange={event => { setKeywords(event.target.value); setConfirmed(false); }} /><span className="mt-1 block text-xs font-normal text-mute">Separate with commas. Up to 12 keywords.</span></label>
           <label className="text-sm font-semibold">Teaching context (optional)<textarea className={input} maxLength={400} rows={2} placeholder="e.g. Familiar ball games; brief instructions and visual comparisons" value={teachingContext} onChange={event => { setTeachingContext(event.target.value); setConfirmed(false); }} /></label>
           <label className="text-sm font-semibold">Class profile summary (optional)<input className={input} maxLength={200} placeholder="e.g. Introductory physics; visual and language supports" value={classProfile} onChange={event => { setClassProfile(event.target.value); setConfirmed(false); }} /></label>
         </div>

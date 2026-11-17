@@ -52,11 +52,15 @@ export default function Workspace() {
   const classPath = useCallback((id: string) => `${home}?classId=${encodeURIComponent(id)}${galleryView ? "&view=gallery" : ""}`, [home, galleryView]);
 
   useEffect(() => {
+    if (teacher && params.get("view") === "gallery") router.replace("/teacher/materials");
+  }, [teacher, params, router]);
+
+  useEffect(() => {
     if (auth.user && window.location.pathname !== home) router.replace(`${home}${window.location.search}`);
   }, [auth.user, home, router]);
 
   useEffect(() => {
-    if (!auth.user) return;
+    if (!auth.user || galleryView) return;
     const query = new URLSearchParams();
     if (classId) query.set("classId", classId);
     if (assignmentId) query.set("assignmentId", assignmentId);
@@ -75,7 +79,7 @@ export default function Workspace() {
       }).catch(err => { if (!controller.signal.aborted && err.name !== "AbortError") setError(err.message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [auth.user, classId, assignmentId, refresh]);
+  }, [auth.user, classId, assignmentId, refresh, galleryView]);
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
@@ -100,6 +104,8 @@ export default function Workspace() {
 
   if (auth.loading) return <p role="status" className="p-8 text-sm">Checking your session...</p>;
   if (!auth.user || auth.error) return <GeniusSignIn error={auth.error} />;
+
+  if (galleryView) return <p role="status" className="p-8">Opening material library…</p>;
 
   const taskUser = data?.user;
   const taskContextMatches = taskUser?.classId === classId && taskUser?.assignmentId === assignmentId

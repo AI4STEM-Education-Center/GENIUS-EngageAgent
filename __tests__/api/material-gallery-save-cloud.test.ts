@@ -67,13 +67,14 @@ it("commits the revision guard, receipt, private snapshot and complete assets in
   mocks.failCommit = false;
   expect((await post({ action: "commit-save", copyId, saveId: second })).status).toBe(200);
   const transaction = mocks.db.mock.calls.map(([command]) => command.input.TransactItems).filter(Boolean).at(-1);
-  expect(transaction).toHaveLength(5);
+  expect(transaction).toHaveLength(6);
   expect(transaction[0].Put).toMatchObject({ ConditionExpression: "attribute_not_exists(record_id)", Item: { class_id: partition, record_id: `SAVE#${copyId}#0000000002` } });
   expect(transaction.map((item: { Put: { Item: { record_id: string } } }) => item.Put.Item.record_id)).toEqual([
-    `SAVE#${copyId}#0000000002`, `DRAFT#${second}`, `ASSET#${second}#evidence`, `COPY#${copyId}`, `TEACHER#${createHash("sha256").update("cloud-teacher").digest("hex")}`,
+    `SAVE#${copyId}#0000000002`, `DRAFT#${second}`, `ASSET#${second}#evidence`, `COPY#${copyId}`, `COPY#${copyId}`, `TEACHER#${createHash("sha256").update("cloud-teacher").digest("hex")}`,
   ]);
   for (const { Put } of transaction.slice(0, 4)) { expect(Put.Item.expiresAt).toBeUndefined(); expect(Put.Item.class_id).toBe(partition); }
-  expect(transaction[4].Put.Item.class_id).toBe(`GALLERY_USAGE#${templateId}`);
+  expect(transaction[4].Put.Item.class_id).toMatch(/^GALLERY_LIBRARY#/);
+  expect(transaction[5].Put.Item.class_id).toBe(`GALLERY_USAGE#${templateId}`);
   expect((await (await load()).json()).revision).toBe(2);
   expect([...mocks.rows.keys()].some(id => id.includes("SHARED#"))).toBe(false);
 });

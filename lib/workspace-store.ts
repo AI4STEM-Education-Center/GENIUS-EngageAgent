@@ -1,5 +1,5 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, QueryCommand, ScanCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -60,6 +60,28 @@ export async function workspaceQuery<T>(partition: string, prefix: string): Prom
 export type WriteRecord =
   | { partition: string; key: string; value: RecordValue; createOnly?: boolean; expiresAt?: number; remove?: undefined }
   | { partition: string; key: string; remove: true };
+
+/** One-time, owner-filtered discovery for the material-library migration.
+ * Only legacy copy receipts are read; students and other teachers' rows never
+ * leave this server helper. New materials are indexed without a scan. */
+export async function legacyGalleryCopies<T extends { ownerId: string }>(ownerId: string): Promise<{ partition: string; value: T }[]> {
+  const db = database();
+  const rows: Stored[] = [];
+  if (!db) { await writes; rows.push(...await localRecords()); }
+  else {
+    let cursor: Record<string, unknown> | undefined;
+    do {
+      const result = await db.send(new ScanCommand({ TableName: process.env.DYNAMODB_TABLE,
+        FilterExpression: "begins_with(class_id, :partition) AND begins_with(record_id, :copy) AND #v.#owner = :owner",
+        ExpressionAttributeNames: { "#v": "value", "#owner": "ownerId" },
+        ExpressionAttributeValues: { ":partition": "GALLERY_COPIES#", ":copy": "COPY#", ":owner": ownerId },
+        ProjectionExpression: "class_id, record_id, #v", ConsistentRead: true, ExclusiveStartKey: cursor }));
+      rows.push(...(result.Items || []) as Stored[]); cursor = result.LastEvaluatedKey;
+    } while (cursor);
+  }
+  return rows.filter(row => row.class_id.startsWith("GALLERY_COPIES#") && row.record_id.startsWith("COPY#") && row.value?.ownerId === ownerId)
+    .map(row => ({ partition: row.class_id, value: row.value as T }));
+}
 
 const LOCAL_CONFLICT = "Workspace record already exists.";
 

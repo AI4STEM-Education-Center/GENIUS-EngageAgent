@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, LoaderCircle, Save, Send } from "lucide-react";
 import type { UserContext } from "@/lib/auth";
 import type { GalleryCopy, GalleryMaterial, SavedGalleryCopySummary } from "@/lib/material-gallery";
-import { galleryCopyAttribution, listSavedGalleryCopies, loadSavedGalleryCopy, refreshGalleryCopyMedia, saveGalleryCopy } from "@/lib/material-gallery-client";
+import { galleryCopyAttribution, prepareGalleryDelivery, listSavedGalleryCopies, loadSavedGalleryCopy, refreshGalleryCopyMedia, saveGalleryCopy } from "@/lib/material-gallery-client";
 import GalleryMaterialDetails from "./GalleryMaterialDetails";
 import type { StrategyFocus } from "@/lib/strategy-focus";
 import { scopedTaskFetch } from "@/lib/client-auth";
@@ -15,6 +15,9 @@ import MaterialGalleryPanel from "./MaterialGalleryPanel";
 import SlidesWorkspace from "./SlidesWorkspace";
 import VideoMaterialEditor from "./VideoMaterialEditor";
 import MaterialActivityView from "./MaterialActivityView";
+import SendMaterialDialog from "./SendMaterialDialog";
+import { publishSlideDeck } from "@/lib/slides/publish-client";
+import type { GalleryScope } from "@/lib/material-gallery";
 
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold hover:bg-canvas disabled:opacity-50";
 const primary = `${button} !border-brand !bg-brand !text-white hover:!bg-brand-dark`;
@@ -23,17 +26,20 @@ type Editor = { copy: GalleryCopy; revision: number; savedAt?: string };
 type LeaveGuard = (proceed: () => void) => void;
 type HistoryNavigation = EventTarget & { traverseTo: (key: string) => { committed: Promise<unknown>; finished: Promise<unknown> } };
 type HistoryNavigateEvent = Event & { navigationType?: string; destination?: { key?: string; sameDocument?: boolean } };
-type Props = { user: UserContext; taskTitle?: string; recommendation?: { lessonNumber: number; strategy: string; focus?: StrategyFocus }; onBack: () => void; onPublished?: () => void; registerLeaveGuard?: (guard: LeaveGuard | null) => void };
+type Props = { user: UserContext; initialCopy?: GalleryCopy; taskTitle?: string; recommendation?: { lessonNumber: number; strategy: string; focus?: StrategyFocus }; onBack: () => void; onPublished?: () => void; registerLeaveGuard?: (guard: LeaveGuard | null) => void };
 
 /** A separate task-scoped library/editor. It never changes the generation workflow's draft or strategy. */
-export default function GalleryWorkspace({ user, taskTitle, recommendation, onBack, onPublished, registerLeaveGuard }: Props) {
+export default function GalleryWorkspace({ user, initialCopy, taskTitle, recommendation, onBack, onPublished, registerLeaveGuard }: Props) {
   const classId = user.classId || "", assignmentId = user.assignmentId || "";
+  const [sending, setSending] = useState(false);
   const [tab, setTab] = useState<"shared" | "saved">("shared");
   const [format, setFormat] = useState<"slides" | "video">("slides");
   const [saved, setSaved] = useState<SavedGalleryCopySummary[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
-  const [attribution, setAttribution] = useState<Pick<GalleryMaterial, "creatorName" | "teacherCount" | "promptTags"> | null>(null);
+  const initialOpened = useRef(false);
+  useEffect(() => { if (initialCopy && !initialOpened.current) { initialOpened.current = true; openEditor(initialCopy); } }, [initialCopy]);
+  const [attribution, setAttribution] = useState<Partial<GalleryMaterial> | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const working = useRef<GalleryCopy | null>(null);
   const baseline = useRef<SlideDeck | GalleryCopy | null>(null);
@@ -216,22 +222,23 @@ export default function GalleryWorkspace({ user, taskTitle, recommendation, onBa
     return () => { controller.abort(); requestSet.delete(controller); window.clearInterval(interval); window.removeEventListener("focus", visible); document.removeEventListener("visibilitychange", visible); };
   }, [activeId, classId, assignmentId]);
 
-  async function sendVideo() {
-    const copy = working.current; if (copy?.format !== "video" || busy || videoEditing) return;
+  async function sendMaterial(destination: GalleryScope) {
+    const copy = working.current;
+    if (!copy || busy || videoEditing) throw new Error("Finish editing before sending.");
     const controller = new AbortController(); requests.current.add(controller);
     try {
-      await saveCopy(copy);
-      if (controller.signal.aborted) return;
-      setBusy(true);
-      const latest = working.current; if (latest?.format !== "video") return;
-      const response = await scopedTaskFetch({ classId, assignmentId }, "/api/content-publish", {
-        method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classId, assignmentId, publishedBy: user.userId, contentItems: [{ ...latest.item, media: latest.media, galleryWorkspace: true }] }),
-      });
-      const result = await response.json(); if (!response.ok) throw new Error(result.error || "Unable to send this material.");
-      if (!controller.signal.aborted) { setNotice("Sent to students in this task."); onPublished?.(); }
-    } catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to send this material."); }
-    finally { requests.current.delete(controller); if (mounted.current) setBusy(false); }
+      await saveCopy(copy); controller.signal.throwIfAborted(); setBusy(true);
+      if (copy.format === "slides") await publishSlideDeck(copy.deck, destination, controller.signal);
+      else {
+        const deliveryId = await prepareGalleryDelivery(destination, copyId(copy), controller.signal);
+        const response = await scopedTaskFetch(destination, "/api/content-publish", {
+          method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...destination, contentItems: [{ ...copy.item, id: deliveryId, media: copy.media, galleryWorkspace: true }] }),
+        });
+        const result = await response.json(); if (!response.ok) throw new Error(result.error || "Unable to send this material.");
+      }
+      if (!controller.signal.aborted) { setNotice("Sent to students. Your saved material remains in your library."); onPublished?.(); }
+    } finally { requests.current.delete(controller); if (mounted.current) setBusy(false); }
   }
   async function saveAndLeave() {
     const copy = working.current, proceed = pendingLeaveRef.current;
@@ -246,8 +253,8 @@ export default function GalleryWorkspace({ user, taskTitle, recommendation, onBa
   const disabled = busy || slideBusy;
   return <section aria-label="Gallery workspace" className="space-y-6">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h1 className="text-2xl font-bold">Gallery</h1><p className="mt-1 text-sm text-mute">{user.className || "Selected class"} · {taskTitle || "Current learning task"}</p></div>
-      <button type="button" className={button} disabled={disabled} onClick={() => requestLeave(onBack)}><ArrowLeft size={16} />Back to task</button>
+      <div><h1 className="text-2xl font-bold">Gallery</h1><p className="mt-1 text-sm text-mute">Browse, edit and save materials across your classes. Choose a class only when sending.</p></div>
+      <button type="button" className={button} disabled={disabled} onClick={() => requestLeave(onBack)}><ArrowLeft size={16} />{classId ? "Back to task" : "My classes"}</button>
     </div>
     {error && !pendingLeave && <p role="alert" className="rounded-lg bg-bad-light p-3 text-sm text-bad">{error}</p>}
     {notice && <p role="status" className="rounded-lg bg-ok-light p-3 text-sm">{notice}</p>}
@@ -256,19 +263,19 @@ export default function GalleryWorkspace({ user, taskTitle, recommendation, onBa
         <button type="button" className={button} disabled={disabled} onClick={() => requestLeave(closeEditor)}><ArrowLeft size={16} />Back to Gallery</button>
         <span className="text-sm text-mute">{dirty ? "Unsaved changes" : editor.savedAt ? "Saved to your materials" : "Your editable copy"}</span>
       </div>
-      <p className="text-sm text-mute">Your copy of “{editor.copy.source.title}”. Saving keeps it private to this task.</p>
+      <p className="text-sm text-mute">Your copy of “{editor.copy.source.title}”. Saving keeps it in your private material library.</p>
       {attribution && <GalleryMaterialDetails {...attribution} showTags />}
       {editor.copy.format === "slides" ? !slideLesson.lesson ? <p role={slideLesson.error ? "alert" : "status"} className="text-sm text-mute">{slideLesson.error || "Loading the lesson…"}</p> : <fieldset disabled={busy} className="min-w-0"><SlidesWorkspace key={activeId} user={user}
         embeddedContext={{ lessonNumber: editor.copy.deck.lessonNumber, strategy: editor.copy.deck.strategy, classroomContext: editor.copy.deck.classroomContext, focus: editor.copy.deck.focus }}
         incomingDeck={editor.copy.deck} incomingDeckSaved={editor.revision > 0} draftNamespace={`gallery:${activeId}`} compactEditor
-        onSaveDraft={saveSlides} onDraftChange={changedSlides} onBusyChange={onSlideBusy} onPublished={onPublished} /></fieldset>
+        onSaveDraft={saveSlides} onDraftChange={changedSlides} onRequestSend={deck => { changedSlides(deck); setSending(true); }} onBusyChange={onSlideBusy} onPublished={onPublished} /></fieldset>
         : <article className="rounded-xl border border-line bg-white p-5">
           <h2 className="text-xl font-bold">{editor.copy.item.title}</h2>
           <div className="my-4 flex flex-wrap gap-2">
             <VideoMaterialEditor item={editor.copy.item} videoUrl={editor.copy.media.video} imageUrl={editor.copy.media.image} disabled={disabled} draftOnly onEditingChange={onVideoEditingChange}
               onChange={item => { const current = working.current; if (current?.format !== "video") return; approvedLeave.current = false; const next = { ...current, item: { ...item, gallerySource: current.source } }; working.current = next; setEditor(previous => previous ? { ...previous, copy: next } : previous); setDirty(true); setNotice(""); }} />
             <button type="button" className={button} disabled={disabled || videoEditing} onClick={() => { if (working.current) void saveCopy(working.current).catch(() => {}); }}><Save size={16} />{busy ? "Saving…" : "Save changes"}</button>
-            <button type="button" className={primary} disabled={disabled || videoEditing} onClick={() => void sendVideo()}><Send size={16} />Send to students</button>
+            <button type="button" className={primary} disabled={disabled || videoEditing} onClick={() => setSending(true)}><Send size={16} />Send to students</button>
           </div>
           {editor.copy.item.activity ? <MaterialActivityView activity={editor.copy.item.activity} preview media={editor.copy.media} />
             : <><video aria-label="Gallery video" src={editor.copy.media.video} poster={editor.copy.media.image} controls playsInline className="my-4 max-h-96 w-full rounded-lg" /><p className="whitespace-pre-wrap">{editor.copy.item.body}</p></>}
@@ -291,6 +298,7 @@ export default function GalleryWorkspace({ user, taskTitle, recommendation, onBa
           {!listLoading && !saved.some(item => item.format === format) && <p className="py-6 text-sm text-mute">No saved {format === "slides" ? "slide decks" : "videos"} yet. Open a shared material, edit it, and save your copy.</p>}
         </div>}
     </>}
+    {sending && <SendMaterialDialog current={classId && assignmentId ? { classId, assignmentId } : undefined} className={user.className} taskTitle={taskTitle} onClose={() => setSending(false)} onSend={sendMaterial} />}
     <dialog ref={leaveDialog} role="alertdialog" aria-label="Save your Gallery changes" aria-modal="true"
       onCancel={event => { event.preventDefault(); keepEditing(); }}
       onClose={() => { if (!leaveDialog.current?.open) keepEditing(); }}

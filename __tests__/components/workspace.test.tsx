@@ -83,7 +83,7 @@ it("does not open an old slides link when workspace ownership verification fails
   expect(screen.queryByText(/Teacher workflow/)).toBeNull();
 });
 it.each([true, false])("ignores a previous task's late decoded response after the new task is verified (old request succeeds: %s)", async oldRequestSucceeds => {
-  mocks.query = "classId=ea-class-a&assignmentId=ea-task-a&view=gallery";
+  mocks.query = "classId=ea-class-a&assignmentId=ea-task-a&view=slides";
   let finishOld!: (value: unknown) => void;
   const oldBody = new Promise<unknown>(resolve => { finishOld = resolve; });
   mocks.fetch.mockResolvedValueOnce({ ok: oldRequestSucceeds, json: () => oldBody })
@@ -91,7 +91,7 @@ it.each([true, false])("ignores a previous task's late decoded response after th
   const page = render(<Workspace />);
   await waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
   const oldSignal = mocks.fetch.mock.calls[0][1].signal as AbortSignal;
-  mocks.query = "classId=ea-class-b&assignmentId=ea-task-b&view=gallery";
+  mocks.query = "classId=ea-class-b&assignmentId=ea-task-b&view=slides";
   page.rerender(<Workspace />);
   const current = await screen.findByText("Teacher workflow ea-task-b");
   expect(current.getAttribute("data-task-title")).toBe("Task B title");
@@ -113,7 +113,7 @@ it("never mounts the previous task under a newly selected task URL while verific
   const page = render(<Workspace />);
   expect((await screen.findByText("Teacher workflow ea-task-a")).getAttribute("data-task-title")).toBe("Task A title");
   mocks.workflow.mockClear();
-  mocks.query = "classId=ea-class-b&assignmentId=ea-task-b&view=gallery";
+  mocks.query = "classId=ea-class-b&assignmentId=ea-task-b&view=slides";
   page.rerender(<Workspace />);
   // Also catch a transient render before the old data-clearing effect runs: a
   // task editor must never receive A's identity alongside B's route/shell.
@@ -138,83 +138,15 @@ it("frames the class list with the shared header", async () => {
   const header = screen.getByRole("banner");
   expect(header.querySelector('a[href="/teacher/classes"]')?.textContent).toBe("EngageAgent");
   expect(screen.getByRole("link", { name: "Physics · Period 3" }).getAttribute("href")).toBe("/teacher/classes?classId=ea-class-a");
-  expect(screen.getByRole("link", { name: "Gallery" }).getAttribute("href")).toBe("/teacher/classes?classId=ea-class-a&view=gallery");
+  expect(screen.getByRole("link", { name: "Gallery" }).getAttribute("href")).toBe("/teacher/materials");
   expect(screen.getByRole("button", { name: "Sign out of EngageAgent" })).toBeTruthy();
 });
 
-it("opens Gallery from the class list through existing workspace classes", async () => {
-  mocks.fetch.mockResolvedValue(reply({ classes: [{ id: "ea-class-a", name: "Physics" }] }));
-  const page = render(<Workspace />);
-  await screen.findByRole("heading", { name: "My classes" });
-  expect(screen.getByRole("link", { name: "Gallery" }).getAttribute("href")).toBe("/teacher/classes?view=gallery");
-
-  mocks.query = "view=gallery";
-  page.rerender(<Workspace />);
-  expect(screen.getByRole("heading", { name: "Choose a class for your materials" })).toBeTruthy();
-  expect(screen.getByRole("link", { name: "Physics" }).getAttribute("href")).toBe("/teacher/classes?classId=ea-class-a&view=gallery");
-  expect(screen.getByRole("link", { name: "Gallery" }).getAttribute("aria-current")).toBe("page");
-  expect(screen.getByRole("link", { name: "Back to my classes" }).getAttribute("href")).toBe("/teacher/classes");
-  expect(screen.queryByRole("button", { name: "Add class" })).toBeNull();
-  expect(mocks.fetch).toHaveBeenCalledTimes(1);
-  expect(mocks.fetch.mock.calls[0][0]).toBe("/api/workspace?");
-  expect(mocks.fetch.mock.calls[0][1]).toMatchObject({ cache: "no-store" });
-});
-
-it("uses the selected class to choose a Gallery task without class setup or data creation", async () => {
-  mocks.query = "classId=ea-class-a&view=gallery";
-  mocks.fetch.mockResolvedValue(reply({
-    classroom: { id: "ea-class-a", name: "Physics", joinCode: "PRIVATECLASSCODE" },
-    assignments: [{ id: "ea-task-a", title: "Collisions" }],
-    members: [{ geniusId: "student", name: "A student" }],
-  }));
-  render(<Workspace />);
-  await screen.findByRole("heading", { name: "Choose a task for your materials" });
-  expect(screen.getByRole("link", { name: "Collisions" }).getAttribute("href")).toBe("/teacher/classes?classId=ea-class-a&view=gallery&assignmentId=ea-task-a");
-  expect(screen.getByRole("link", { name: "All classes" }).getAttribute("href")).toBe("/teacher/classes?view=gallery");
-  expect(screen.getByRole("link", { name: "Back to class" }).getAttribute("href")).toBe("/teacher/classes?classId=ea-class-a");
-  expect(screen.queryByLabelText("New task title")).toBeNull();
-  expect(screen.queryByRole("region", { name: "Class profile" })).toBeNull();
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(screen.queryByText("PRIVATECLASSCODE")).toBeNull();
-  expect(screen.queryByText("A student")).toBeNull();
-  expect(mocks.fetch).toHaveBeenCalledTimes(1);
-  expect(mocks.fetch.mock.calls[0][0]).toBe("/api/workspace?classId=ea-class-a");
-  expect(mocks.fetch.mock.calls[0][1].method).toBeUndefined();
-});
-
-it("opens Gallery only after the workspace verifies the task and keeps Gallery return links", async () => {
-  mocks.query = "classId=ea-class-a&assignmentId=ea-task-a&view=gallery";
-  let complete: (value: unknown) => void = () => {};
-  mocks.fetch.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
-  render(<Workspace />);
-  expect(screen.queryByText(/Teacher workflow/)).toBeNull();
-  complete(reply({ user: { ...teacher, classId: "ea-class-a", assignmentId: "ea-task-a" } }));
-  const workflow = await screen.findByText("Teacher workflow ea-task-a");
-  expect(workflow.getAttribute("data-initial-view")).toBe("gallery");
-  expect(workflow.getAttribute("data-initial-material-format")).toBeNull();
-  expect(workflow.getAttribute("data-home-href")).toBe("/teacher/classes?view=gallery");
-  expect(workflow.getAttribute("data-class-href")).toBe("/teacher/classes?classId=ea-class-a&view=gallery");
-  expect(screen.queryByRole("banner")).toBeNull();
-});
-
-it("applies Gallery navigation to an already-mounted task without creating a new workspace", async () => {
-  mocks.query = "classId=ea-class-a&assignmentId=ea-task-a";
-  mocks.fetch.mockResolvedValue(reply({ user: { ...teacher, classId: "ea-class-a", assignmentId: "ea-task-a" } }));
-  const page = render(<Workspace />);
-  const workflow = await screen.findByText("Teacher workflow ea-task-a");
-  mocks.query += "&view=gallery";
-  page.rerender(<Workspace />);
-  const gallery = screen.getByText("Teacher workflow ea-task-a");
-  expect(gallery).not.toBe(workflow);
-  expect(gallery.getAttribute("data-initial-view")).toBe("gallery");
-  expect(mocks.fetch).toHaveBeenCalledTimes(1);
-});
-
-it("keeps an unauthorized Gallery task closed", async () => {
-  mocks.query = "classId=ea-class-other&assignmentId=ea-task-other&view=gallery";
-  mocks.fetch.mockResolvedValue(reply({ error: "Forbidden" }, false));
-  render(<Workspace />);
-  expect((await screen.findByRole("alert")).textContent).toContain("Forbidden");
+it.each(["view=gallery", "classId=ea-class-a&view=gallery", "classId=ea-class-a&assignmentId=ea-task-a&view=gallery"])("redirects the legacy Gallery URL %s to the independent material library", async query => {
+  mocks.query = query; render(<Workspace />);
+  await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/teacher/materials"));
+  expect(screen.getByRole("status").textContent).toContain("Opening material library");
+  expect(mocks.fetch).not.toHaveBeenCalled();
   expect(screen.queryByText(/Teacher workflow/)).toBeNull();
 });
 

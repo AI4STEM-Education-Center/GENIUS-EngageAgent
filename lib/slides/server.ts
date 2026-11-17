@@ -68,8 +68,21 @@ export async function authorizeSlides(request: Request, context: Record<string, 
   return authorizeSlideAccess(request, context, "write");
 }
 
+/** Teacher library operations have no class. Task credentials still have to
+ * match their signed scope; this never broadens student publication access. */
+export async function authorizeMaterialLibrary(request: Request, context: Record<string, unknown>): Promise<AuthorizedSlideContext> {
+  if (context.classId || context.assignmentId || request.headers.has("authorization")) return authorizeSlides(request, context);
+  if (context.library !== true && context.library !== "true") throw new SlideRequestError("Open the material library first.");
+  const user = await sessionUser();
+  if (!user) throw new SlideRequestError("Sign in to EngageAgent first.", 401);
+  if (user.role !== "teacher") throw new SlideRequestError("Only teachers can access the material library.", 403);
+  if (request.method !== "GET" && !sameOriginRequest(request)) throw new SlideRequestError("Invalid request origin.", 403);
+  return { classId: "", assignmentId: "", userId: user.geniusId, teacherName: user.name };
+}
+
 // Call only after workspace authorization; provider context contains counts, not identities.
 export async function slideDiagnosticContext(context: { classId: string; assignmentId: string }, lessonNumber: number) {
+  if (!context.classId || !context.assignmentId) return undefined;
   const answers = await listStudentAnswers(context.classId, context.assignmentId);
   return summarizeDiagnosticAnswers(lessonNumber, answers
     // DynamoDB exposes its physical class partition; local JSON uses the logical ID.

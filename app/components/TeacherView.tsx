@@ -19,6 +19,8 @@ import SlidesWorkspace, { type SlidesWorkspaceHandle } from "./SlidesWorkspace";
 import PublishedSlidesList from "./PublishedSlidesList";
 import StrategyStep from "./StrategyStep";
 import GalleryWorkspace from "./GalleryWorkspace";
+import MaterialGalleryPanel from "./MaterialGalleryPanel";
+import type { GalleryCopy } from "@/lib/material-gallery";
 import { useInGenius } from "./layout/useInGenius";
 import { useAuth } from "./AuthContext";
 import ShareVideoMaterial from "./ShareVideoMaterial";
@@ -443,6 +445,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   // The assignment dashboard is its own view from the header, not a step (#182).
   const [showDashboard, setShowDashboard] = useState(initialView === "dashboard");
   const [showGallery, setShowGallery] = useState(initialView === "gallery");
+  const [recommendedCopy, setRecommendedCopy] = useState<GalleryCopy | undefined>();
   const [galleryPublished, setGalleryPublished] = useState(false);
   const galleryLeaveGuard = useRef<((proceed: () => void) => void) | null>(null);
   const registerGalleryLeaveGuard = useCallback((guard: ((proceed: () => void) => void) | null) => { galleryLeaveGuard.current = guard; }, []);
@@ -1869,7 +1872,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     }
   };
 
-  const openGallery = () => { if (!generationBusy) { setShowDashboard(false); setShowGallery(true); } };
+  const openGallery = () => { if (!generationBusy) { setRecommendedCopy(undefined); setShowDashboard(false); setShowGallery(true); } };
   const leaveGallery = (proceed: () => void) => {
     if (showGallery && galleryLeaveGuard.current) galleryLeaveGuard.current(proceed);
     else proceed();
@@ -1905,15 +1908,15 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
       header={<AppHeader userName={user.name} homeHref={shell?.homeHref} context={taskContext(user, shell)} canSignOut={shell?.canSignOut}
         beforeNavigate={showGallery ? leaveGallery : undefined}
         actions={[
-          // The top menu (#208), with this task's gallery opening in place; then the task's own tools.
-          ...teacherNavActions({ classId, gallery: { onClick: openGallery, active: showGallery } }),
+          // Native teachers use the independent library; signed GENIUS launches retain their scoped editor.
+          ...teacherNavActions({ classId, ...((inGenius || isGeniusEmbed) ? { gallery: { onClick: openGallery, active: showGallery } } : {}) }),
           { label: "Class profile", icon: <Users size={15} />, onClick: classProfile.openEditor, comingSoon: !hasAssignmentContext },
         ]} />}
       tabs={!showGallery && <>
         {(inGenius || isGeniusEmbed) && <nav aria-label="Material library" className="flex justify-end border-b border-line bg-white px-5 py-2"><button type="button" onClick={openGallery} disabled={generationBusy || !hasAssignmentContext} className="inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-ink hover:bg-canvas disabled:opacity-50"><LayoutGrid size={16} />Gallery</button></nav>}
         <StepTabs label="Teacher steps" tabs={stepTabs} activeId={showDashboard ? "" : String(currentStep)} onSelect={(id) => { setShowDashboard(false); setCurrentStep(Number(id)); }} />
       </>}>
-        {showGallery && <GalleryWorkspace key={`${classId}:${assignmentId}`} user={user} taskTitle={shell?.taskTitle}
+        {showGallery && <GalleryWorkspace key={`${classId}:${assignmentId}`} user={user} initialCopy={recommendedCopy} taskTitle={shell?.taskTitle}
           recommendation={selectedLesson ? { lessonNumber: selectedLesson, strategy: selectedStrategies[0] || "", focus: strategyFocus } : undefined}
           registerLeaveGuard={registerGalleryLeaveGuard} onBack={() => setShowGallery(false)}
           onPublished={() => { setGalleryPublished(true); setSlidesPublicationVersion(value => value + 1); }} />}
@@ -2048,9 +2051,15 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
               <div className="flex flex-col gap-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 3</p>
                 <h2 className="text-2xl font-semibold text-slate-900">Material Generation</h2>
-                <p className="text-sm text-slate-600">Create teaching materials, then review and edit them before sending to your class.</p>
+                <p className="text-sm text-slate-600">Find a material for this lesson, review it, and send the version you choose to your students.</p>
               </div>
 
+              {visibleStep === 3 && isHydrated && hasAssignmentContext && selectedLesson && selectedStrategies.length === 1 && hasFocus && <MaterialGalleryPanel
+                scope={{ classId, assignmentId }} lessonNumber={selectedLesson} strategy={selectedStrategies[0]} focus={chosenFocus ? { misconceptions: chosenFocus.misconceptions || [], coreIdeas: chosenFocus.coreIdeas || [] } : undefined}
+                format={materialFormat === "video" ? "video" : "slides"} recommendationsOnly disabled={generationBusy}
+                onBrowse={openGallery} onUse={copy => { setRecommendedCopy(copy); setShowDashboard(false); setShowGallery(true); }} />}
+
+              <div className="border-t border-line pt-5"><h3 className="text-lg font-semibold">Create new material</h3><p className="mt-1 text-sm text-mute">Use your lesson and class context to generate a draft.</p></div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {[
                   { name: "Lesson", title: selectedLessonData?.lesson_title || "Choose in Step 1", detail: selectedLessonData ? `${selectedLessonData.core_ideas?.length ?? 0} core ideas` : "" },
@@ -2116,6 +2125,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                   {generationBusy ? "Generating materials..." : materialFormat === "slides" ? "Generate new slide deck" : "Generate new animated video"}
                 </button>
               </div>
+              {generationBusy && <p role="status" className="text-sm text-mute">Creating a new material can take a few minutes, especially video. Text and images appear as they are ready.</p>}
               {materialFormat === "slides" && !slidesAvailable && <p role="status" className="text-sm text-amber-800">Open a class task in GENIUS or My classes to generate slides.</p>}
               {materialFormat === "slides" && unsupportedSlideStrategies.length > 0 && <p role="status" className="text-sm text-amber-800">Slides do not yet support {unsupportedSlideStrategies.map(getStrategyLabel).join(", ")}. Change the strategy in Step 2, or choose Video.</p>}
               {(!selectedLesson || !selectedStrategies.length) && <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">

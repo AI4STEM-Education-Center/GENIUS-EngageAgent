@@ -26,7 +26,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-it("follows the teacher across every step and the task Gallery and keeps the thread", async () => {
+it("keeps the thread across every teacher step and links to the independent material library", async () => {
   render(<TeacherView user={teacher} shell={{ taskTitle: "Collisions" }} />);
   await waitFor(() => expect(stepButtons().length).toBe(4));
   fireEvent.click(screen.getByRole("button", { name: "Ask EngageAgent" }));
@@ -49,8 +49,7 @@ it("follows the teacher across every step and the task Gallery and keeps the thr
   }
 
   const header = within(screen.getByRole("banner"));
-  fireEvent.click(header.getByRole("button", { name: "Gallery" }));
-  await waitFor(() => expect(panel().textContent).toContain("Helping with: Gallery"));
+  expect(header.getByRole("link", { name: "Gallery" }).getAttribute("href")).toBe("/teacher/materials");
   expect(within(panel()).getByText("A question to keep")).toBeTruthy();
 });
 

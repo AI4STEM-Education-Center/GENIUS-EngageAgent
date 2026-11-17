@@ -22,10 +22,11 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
   const [quizPattern, setQuizPattern] = useState("");
   const [teachingContext, setTeachingContext] = useState("");
   const [classProfile, setClassProfile] = useState("");
+  const [keywords, setKeywords] = useState("");
   const [busy, setBusy] = useState(false);
   const [shared, setShared] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => setConfirmed(false), [draft, grade, description, focus, videoUrl, imageUrl, experienceContext, quizPattern, teachingContext, classProfile]);
+  useEffect(() => setConfirmed(false), [draft, grade, description, focus, videoUrl, imageUrl, experienceContext, quizPattern, teachingContext, classProfile, keywords]);
   useEffect(() => () => request.current?.abort(), []);
   async function share() {
     if (!confirmed || busy || request.current || !draft.title.trim()) return;
@@ -35,7 +36,7 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
       const selected = focus ? focusForStrategy(focus, item.strategy) : undefined;
       await shareVideoMaterial(scope, { ...draft, id: item.id, title: draft.title.trim() }, lessonNumber, {
         title: draft.title.trim(), description: description.trim(), gradeBand: grade.trim(),
-        experienceContext: experienceContext.trim(), quizPattern: quizPattern.trim(), teachingContext: teachingContext.trim(), classProfile: classProfile.trim(),
+        experienceContext: experienceContext.trim(), quizPattern: quizPattern.trim(), teachingContext: teachingContext.trim(), classProfile: classProfile.trim(), keywords: keywords.split(",").map(tag => tag.trim()).filter(Boolean),
         ...(selected ? { focus: { misconceptions: selected.misconceptions ?? [], coreIdeas: selected.coreIdeas ?? [] } } : {}), sharingConfirmed: true,
       }, controller.signal);
       if (controller.signal.aborted) return;
@@ -68,7 +69,8 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
           <div className="mt-3 grid gap-3">
             <label className="text-sm font-semibold">Experience context (optional)<input className={input} value={experienceContext} maxLength={200} onChange={event => setExperienceContext(event.target.value)} /></label>
             <label className="text-sm font-semibold">Quiz pattern (optional)<input className={input} value={quizPattern} maxLength={200} onChange={event => setQuizPattern(event.target.value)} /></label>
-            <label className="text-sm font-semibold">Teaching context (optional)<textarea className={input} value={teachingContext} maxLength={400} onChange={event => setTeachingContext(event.target.value)} /></label>
+            <label className="text-sm font-semibold">Keywords (optional)<input className={input} value={keywords} maxLength={490} placeholder="e.g. collisions, soccer, visual learning" onChange={event => { setKeywords(event.target.value); setConfirmed(false); }} /><span className="mt-1 block text-xs font-normal text-mute">Separate with commas. Up to 12 keywords.</span></label>
+          <label className="text-sm font-semibold">Teaching context (optional)<textarea className={input} value={teachingContext} maxLength={400} onChange={event => setTeachingContext(event.target.value)} /></label>
             <label className="text-sm font-semibold">Class profile summary (optional)<input className={input} value={classProfile} maxLength={200} onChange={event => setClassProfile(event.target.value)} /></label>
           </div>
         </details>

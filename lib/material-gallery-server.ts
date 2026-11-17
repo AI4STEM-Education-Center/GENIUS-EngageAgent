@@ -1,6 +1,7 @@
+import { galleryFeedback, galleryFeedbackCache, indexGalleryUse } from "./material-gallery-feedback";
 import { createHash, randomUUID } from "node:crypto";
-import { workspaceGet, workspacePut, workspaceQuery } from "./workspace-store";
-import { authorizeSlides, requestDraft, slideContext, SlideRequestError, type AuthorizedSlideContext } from "./slides/server";
+import { workspaceGet, workspacePut, workspaceQuery, legacyGalleryCopies } from "./workspace-store";
+import { authorizeSlides, authorizeMaterialLibrary, requestDraft, slideContext, SlideRequestError, type AuthorizedSlideContext } from "./slides/server";
 import { getLesson } from "./quiz-data";
 import { enterLessonScope, loadTaskLessons } from "./lesson-scope";
 import { resolveStrategyFocus } from "./strategy-focus";
@@ -26,7 +27,8 @@ type Source = {
   videoMedia?: { video: GalleryBlob; image?: GalleryBlob };
   derivedFrom?: Pick<GalleryProvenance, "templateId" | "revision" | "title">;
 };
-type Copy = { id: string; ownerId: string; classId: string; assignmentId: string; templateId: string; source: GalleryProvenance; createdAt: string; saved?: SavedGalleryCopySummary & { snapshotId: string } };
+type LibraryContext = AuthorizedSlideContext & { storagePartition?: string };
+type Copy = { deliveryOnly?: boolean; videoMedia?: Source["videoMedia"]; storagePartition?: string; id: string; ownerId: string; classId: string; assignmentId: string; templateId: string; source: GalleryProvenance; createdAt: string; saved?: SavedGalleryCopySummary & { snapshotId: string } };
 type CopySnapshot = {
   id: string; copyId: string; expectedRevision: number; createdAt: string; expiresAt: number;
   format: "slides" | "video"; lessonNumber: number; strategy: string;
@@ -41,10 +43,12 @@ type Shared = { id: string; ownerId: string; material: Omit<GalleryMaterial, "is
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const sourceKey = (id: string) => `SOURCE#${id}`;
 const assetKey = (id: string, visualId: string) => `ASSET#${id}#${visualId}`;
-const copyPartition = (scope: GalleryScope) => `GALLERY_COPIES#${createHash("sha256").update(JSON.stringify([scope.classId, scope.assignmentId])).digest("hex")}`;
+const legacyCopyPartition = (scope: GalleryScope) => `GALLERY_COPIES#${createHash("sha256").update(JSON.stringify([scope.classId, scope.assignmentId])).digest("hex")}`;
+const libraryPartition = (userId: string) => `GALLERY_LIBRARY#${createHash("sha256").update(userId).digest("hex")}`;
+const copyPartition = (scope: GalleryScope & { userId?: string; storagePartition?: string }) => scope.storagePartition || (scope.userId ? libraryPartition(scope.userId) : legacyCopyPartition(scope));
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 const usagePartition = (id: string) => `GALLERY_USAGE#${id}`;
-const creatorName = (context: AuthorizedSlideContext) => context.teacherName?.replace(/[\u0000-\u001f\u007f]/gu, "").trim().slice(0, 120) || "Teacher";
+const creatorName = (context: LibraryContext) => context.teacherName?.replace(/[\u0000-\u001f\u007f]/gu, "").trim().slice(0, 120) || "Teacher";
 const teacherCount = async (id: string) => (await workspaceQuery(usagePartition(id), "TEACHER#")).length;
 const idValue = (value: unknown) => {
   if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)) throw new SlideRequestError("Choose a valid Gallery material.");
@@ -57,7 +61,8 @@ function text(value: unknown, label: string, max: number, optional = true) {
 }
 function metadata(value: unknown, lessonNumber: number, strategy: string): Source["metadata"] {
   if (!record(value) || value.sharingConfirmed !== true) throw new SlideRequestError("Review the shared content and confirm that class details have been removed.", 422);
-  if (Object.keys(value).some(key => !["title", "description", "gradeBand", "experienceContext", "quizPattern", "teachingContext", "classProfile", "focus", "sharingConfirmed"].includes(key))) throw new SlideRequestError("Unexpected sharing metadata.");
+  if (Object.keys(value).some(key => !["title", "description", "gradeBand", "experienceContext", "quizPattern", "teachingContext", "classProfile", "focus", "keywords", "sharingConfirmed"].includes(key))) throw new SlideRequestError("Unexpected sharing metadata.");
+  if (value.keywords !== undefined && (!Array.isArray(value.keywords) || value.keywords.length > 12 || value.keywords.some(tag => typeof tag !== "string" || !tag.trim() || tag.length > 40 || /[\u0000-\u001f\u007f]/u.test(tag)))) throw new SlideRequestError("Use up to 12 keywords, each 1–40 characters.", 422);
   let focus: GalleryFocus | undefined;
   if (value.focus !== undefined) {
     const f = value.focus;
@@ -72,6 +77,7 @@ function metadata(value: unknown, lessonNumber: number, strategy: string): Sourc
     }
   }
   return { title: text(value.title, "Title", 160, false), description: text(value.description, "Description", 1000),
+    ...(Array.isArray(value.keywords) ? { keywords: [...new Set(value.keywords.map(tag => String(tag).trim()))] } : {}),
     gradeBand: text(value.gradeBand, "Grade band", 80), experienceContext: text(value.experienceContext, "Experience context", 200),
     quizPattern: text(value.quizPattern, "Quiz pattern", 200),
     ...(value.teachingContext === undefined ? {} : { teachingContext: text(value.teachingContext, "Teaching context", 400) }),
@@ -151,7 +157,7 @@ function imageDimensions(bytes: Buffer, mime: string): { width: number; height: 
   return null;
 }
 
-async function startShare(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+async function startShare(body: Record<string, unknown>, context: LibraryContext) {
   enterLessonScope(await loadTaskLessons(context, body.lessonNumber));
   const { strategy } = slideContext(body);
   const draft = requestDraft(body.draft, strategy, true);
@@ -168,7 +174,7 @@ async function startShare(body: Record<string, unknown>, context: AuthorizedSlid
   await workspacePut([{ partition: PARTITION, key: sourceKey(source.id), value: source, createOnly: true, expiresAt: source.expiresAt }]);
   return { id: source.id };
 }
-async function uploadAsset(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+async function uploadAsset(body: Record<string, unknown>, context: LibraryContext) {
   const source = await activeStage(body.id, context.userId);
   if (source.format !== "slides" || typeof body.visualId !== "string" || !Object.hasOwn(source.assets, body.visualId)) throw new SlideRequestError("Choose an image in this template.", 422);
   const asset = body.asset;
@@ -187,7 +193,7 @@ async function uploadAsset(body: Record<string, unknown>, context: AuthorizedSli
   }
   return { id: source.id, visualId: body.visualId };
 }
-async function commitShare(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+async function commitShare(body: Record<string, unknown>, context: LibraryContext) {
   const source = await ownedSource(body.id, context.userId);
   if (await workspaceGet(PARTITION, `WITHDRAWN#${source.id}`)) throw new SlideRequestError("This item was removed from the Gallery. Share a new copy instead.", 409);
   if (!(await isShared(source.id))) {
@@ -205,6 +211,7 @@ async function commitShare(body: Record<string, unknown>, context: AuthorizedSli
       { partition: PARTITION, key: `SHARED#${source.id}`, value: { id: source.id, ownerId: context.userId, material }, createOnly: true }]); }
     catch (error) { if (!(await isShared(source.id))) throw error; }
   }
+  if (source.originMaterialId) await indexGalleryUse(source.id, context, source.format === "slides" ? `slides-${source.originMaterialId}` : source.originMaterialId);
   return { material: { ...publicMaterial(source, context.userId), teacherCount: await teacherCount(source.id) } };
 }
 
@@ -231,13 +238,14 @@ function videoItem(value: unknown, lessonNumber: number): ContentItem {
     ...(value.textModes !== undefined ? { textModes: [...new Set(value.textModes as TextMode[])] } : {}),
     ...(activity ? { activity } : {}) };
 }
-async function savedVideoMedia(context: AuthorizedSlideContext, item: ContentItem, id: string, kind: "video" | "image") {
-  const record = await getMedia(context.classId, context.assignmentId, "cohort", item.id, kind);
+async function savedVideoMedia(context: LibraryContext, item: ContentItem, id: string, kind: "video" | "image") {
+  const record = context.classId && context.assignmentId ? await getMedia(context.classId, context.assignmentId, "cohort", item.id, kind) : null;
   if (!record) {
     const copyId = /^gallery-copy-([a-f0-9-]{36})$/iu.exec(item.id)?.[1];
     if (copyId) {
-      const { source } = await copiedSource(context, copyId);
-      const saved = source.videoMedia?.[kind];
+      const { copy, source } = await copiedSource(context, copyId);
+      const snapshot = copy.saved ? await workspaceGet<CopySnapshot>(copyPartition(context), snapshotKey(copy.saved.snapshotId)) : null;
+      const saved = snapshot?.videoMedia?.[kind] || source.videoMedia?.[kind];
       if (saved) return duplicateGalleryBlob(`material-gallery/${id}/${kind}-${digest(randomUUID())}`, saved);
     }
     if (kind === "image") return undefined;
@@ -254,7 +262,7 @@ async function savedVideoMedia(context: AuthorizedSlideContext, item: ContentIte
   if (bytes.toString("base64") !== match[2]) throw new SlideRequestError("The saved media is invalid.", 422);
   return storeGalleryBlob(key, bytes, mime);
 }
-async function shareVideo(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+async function shareVideo(body: Record<string, unknown>, context: LibraryContext) {
   enterLessonScope(await loadTaskLessons(context, body.lessonNumber));
   if (!Number.isInteger(body.lessonNumber) || !getLesson(Number(body.lessonNumber))) throw new SlideRequestError("Choose a valid lesson.", 422);
   const item = videoItem(body.item, Number(body.lessonNumber));
@@ -281,9 +289,17 @@ async function shareVideo(body: Record<string, unknown>, context: AuthorizedSlid
   await workspacePut([{ partition: PARTITION, key: sourceKey(id), value: source, createOnly: true, expiresAt: source.expiresAt }]);
   return commitShare({ id }, context);
 }
-async function copiedSource(context: AuthorizedSlideContext, copyId: unknown) {
-  const copy = await workspaceGet<Copy>(copyPartition(context), `COPY#${idValue(copyId)}`);
-  if (!copy || copy.ownerId !== context.userId || copy.classId !== context.classId || copy.assignmentId !== context.assignmentId) throw new SlideRequestError("Copied material not found.", 404);
+async function copiedSource(context: LibraryContext, copyId: unknown) {
+  const key = `COPY#${idValue(copyId)}`;
+  const entry = await workspaceGet<Copy>(libraryPartition(context.userId), key);
+  let partition = entry?.storagePartition || libraryPartition(context.userId);
+  let copy = entry?.storagePartition ? await workspaceGet<Copy>(partition, key) : entry;
+  if (!copy && context.classId && context.assignmentId) {
+    partition = legacyCopyPartition(context);
+    copy = await workspaceGet<Copy>(partition, key);
+  }
+  if (!copy || copy.ownerId !== context.userId) throw new SlideRequestError("Copied material not found.", 404);
+  context.storagePartition = partition;
   const source = await workspaceGet<Source>(PARTITION, sourceKey(copy.templateId));
   if (!source) throw new SlideRequestError("Copied material not found.", 404);
   return { copy, source };
@@ -296,7 +312,7 @@ function sameFocus(a: unknown, b: unknown) {
   ]) : "[[],[]]";
   return normalized(a) === normalized(b);
 }
-async function startCopySave(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+async function startCopySave(body: Record<string, unknown>, context: LibraryContext) {
   const { copy, source } = await copiedSource(context, body.copyId);
   enterLessonScope(await loadTaskLessons(context, source.lessonNumber));
   if (!Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 0) throw new SlideRequestError("Provide the last saved revision.", 422);
@@ -337,13 +353,13 @@ async function startCopySave(body: Record<string, unknown>, context: AuthorizedS
   await workspacePut([{ partition: copyPartition(context), key: snapshotKey(id), value: snapshot, createOnly: true, expiresAt: snapshot.expiresAt }]);
   return { saveId: id };
 }
-async function copySaveStage(context: AuthorizedSlideContext, copyId: unknown, saveId: unknown) {
+async function copySaveStage(context: LibraryContext, copyId: unknown, saveId: unknown) {
   const { copy, source } = await copiedSource(context, copyId);
   const snapshot = await workspaceGet<CopySnapshot>(copyPartition(context), snapshotKey(idValue(saveId)));
   if (!snapshot || snapshot.copyId !== copy.id) throw new SlideRequestError("Saved copy not found.", 404);
   return { copy, source, snapshot };
 }
-async function uploadCopyAsset(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+async function uploadCopyAsset(body: Record<string, unknown>, context: LibraryContext) {
   const { snapshot } = await copySaveStage(context, body.copyId, body.saveId);
   const partition = copyPartition(context);
   if (await workspaceGet(partition, savedKey(snapshot.copyId, snapshot.expectedRevision + 1))) throw saveConflict();
@@ -364,7 +380,7 @@ async function uploadCopyAsset(body: Record<string, unknown>, context: Authorize
   }
   return { saveId: snapshot.id, visualId: body.visualId };
 }
-async function commitCopySave(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+async function commitCopySave(body: Record<string, unknown>, context: LibraryContext) {
   const { copy, source, snapshot } = await copySaveStage(context, body.copyId, body.saveId);
   const partition = copyPartition(context), revision = snapshot.expectedRevision + 1, key = savedKey(copy.id, revision);
   const previous = await workspaceGet<SavedGalleryCopySummary & { snapshotId: string }>(partition, key);
@@ -387,6 +403,7 @@ async function commitCopySave(body: Record<string, unknown>, context: Authorized
     await workspacePut([{ partition, key, value: pointer, createOnly: true },
       { partition, key: snapshotKey(snapshot.id), value: snapshot }, ...assets,
       { partition, key: `COPY#${copy.id}`, value: { ...copy, saved: pointer } },
+      ...(partition === libraryPartition(context.userId) ? [] : [{ partition: libraryPartition(context.userId), key: `COPY#${copy.id}`, value: { ...copy, storagePartition: partition } }]),
       // One stable key per verified teacher across copies, classes and retries.
       // Coupled to the successful save transaction, never to preview or open.
       { partition: usagePartition(source.id), key: `TEACHER#${digest(context.userId)}`,
@@ -397,7 +414,7 @@ async function commitCopySave(body: Record<string, unknown>, context: Authorized
   }
   return { saved };
 }
-async function savedSnapshot(context: AuthorizedSlideContext, copyId: unknown, revision?: number) {
+async function savedSnapshot(context: LibraryContext, copyId: unknown, revision?: number) {
   const { copy, source } = await copiedSource(context, copyId);
   const pointer = revision === undefined ? copy.saved : await workspaceGet<SavedGalleryCopySummary & { snapshotId: string }>(copyPartition(context), savedKey(copy.id, revision));
   if (!pointer) throw new SlideRequestError("This copy has not been saved yet.", 404);
@@ -405,7 +422,7 @@ async function savedSnapshot(context: AuthorizedSlideContext, copyId: unknown, r
   if (!snapshot || snapshot.copyId !== copy.id) throw new SlideRequestError("The saved copy is unavailable.", 503);
   return { copy, source, snapshot, pointer };
 }
-async function loadCopySave(context: AuthorizedSlideContext, copyId: unknown) {
+async function loadCopySave(context: LibraryContext, copyId: unknown) {
   const { copy, source, snapshot, pointer } = await savedSnapshot(context, copyId);
   const common = { source: copy.source };
   return { revision: pointer.revision, savedAt: pointer.savedAt,
@@ -415,7 +432,7 @@ async function loadCopySave(context: AuthorizedSlideContext, copyId: unknown) {
       gallerySource: copy.source }, media: await videoUrls(snapshot) },
     visualIds: Object.keys(snapshot.assets) };
 }
-async function savedCopyAsset(context: AuthorizedSlideContext, params: URLSearchParams) {
+async function savedCopyAsset(context: LibraryContext, params: URLSearchParams) {
   const revision = Number(params.get("revision"));
   if (!Number.isSafeInteger(revision) || revision < 1) throw new SlideRequestError("Choose a saved revision.", 422);
   const { snapshot } = await savedSnapshot(context, params.get("copyId"), revision);
@@ -429,12 +446,14 @@ async function savedCopyAsset(context: AuthorizedSlideContext, params: URLSearch
   return { asset: { data: `data:${asset.mime};base64,${bytes.toString("base64")}`, width: asset.width, height: asset.height,
     ...(description.sourcePrompt === undefined ? {} : { sourcePrompt: description.sourcePrompt }) }, referenceDigest: description.referenceDigest };
 }
-async function copyMaterial(body: Record<string, unknown>, context: AuthorizedSlideContext) {
+async function copyMaterial(body: Record<string, unknown>, context: LibraryContext) {
   if (body.mode !== "use" && body.mode !== "adapt") throw new SlideRequestError("Choose use or adapt.");
   const source = await sharedSource(body.id);
   const copy: Copy = { id: randomUUID(), ownerId: context.userId, classId: context.classId, assignmentId: context.assignmentId, templateId: source.id,
     source: { templateId: source.id, revision: source.revision, title: source.metadata.title, mode: body.mode }, createdAt: new Date().toISOString() };
-  await workspacePut([{ partition: copyPartition(context), key: `COPY#${copy.id}`, value: copy, createOnly: true }]);
+  await workspacePut([{ partition: libraryPartition(context.userId), key: `COPY#${copy.id}`, value: copy, createOnly: true },
+    ...(context.classId && context.assignmentId ? [{ partition: legacyCopyPartition(context), key: `COPY#${copy.id}`, value: { ...copy, deliveryOnly: true }, createOnly: true }] : [])]);
+  await indexGalleryUse(source.id, context, source.format === "slides" ? `slides-${copy.id}` : `gallery-copy-${copy.id}`);
   if (source.format === "slides") return { format: "slides", copyId: copy.id, source: copy.source,
     deck: { id: copy.id, lessonNumber: source.lessonNumber, strategy: source.strategy, draft: source.draft, assets: {}, gallerySource: copy.source,
       ...(source.metadata.focus ? { focus: source.metadata.focus } : {}) }, visualIds: Object.keys(source.assets) };
@@ -447,14 +466,14 @@ async function videoUrls(source: { videoMedia?: Source["videoMedia"] }) {
 }
 
 /** A copied draft is private to its teacher/task even before student publication. */
-async function copyVideoMedia(context: AuthorizedSlideContext, copyId: unknown) {
+async function copyVideoMedia(context: LibraryContext, copyId: unknown) {
   const { copy, source } = await copiedSource(context, copyId);
   if (source.format !== "video") throw new SlideRequestError("Choose a copied video material.", 422);
   const contentItemId = `gallery-copy-${copy.id}`;
   const [fallback, image, video] = await Promise.all([
     videoUrls(source),
-    getMedia(context.classId, context.assignmentId, "cohort", contentItemId, "image"),
-    getMedia(context.classId, context.assignmentId, "cohort", contentItemId, "video"),
+    context.classId ? getMedia(context.classId, context.assignmentId, "cohort", contentItemId, "image") : null,
+    context.classId ? getMedia(context.classId, context.assignmentId, "cohort", contentItemId, "video") : null,
   ]);
   const media = { ...fallback };
   for (const [kind, saved] of [["image", image], ["video", video]] as const) {
@@ -477,13 +496,41 @@ export async function resolveGalleryContentMedia(classId: string, assignmentId: 
   if (!match) return undefined;
   const copy = await workspaceGet<Copy>(copyPartition({ classId, assignmentId }), `COPY#${match[1]}`);
   if (!copy || copy.classId !== classId || copy.assignmentId !== assignmentId) return undefined;
+  if (copy.videoMedia) return videoUrls(copy);
   const source = await workspaceGet<Source>(PARTITION, sourceKey(copy.templateId));
   return source?.format === "video" ? videoUrls(source) : undefined;
 }
 
 export async function galleryPost(request: Request, body: Record<string, unknown>) {
-  const context = await authorizeSlides(request, body);
+  const context = await authorizeMaterialLibrary(request, body);
   switch (body.action) {
+    case "prepare-delivery": {
+      const target = await authorizeSlides(request, body);
+      const { copy, source } = await copiedSource(context, body.copyId);
+      if (!copy.saved) throw new SlideRequestError("Save this material before sending it.", 422);
+      const { snapshot } = await savedSnapshot(context, copy.id);
+      // A delivery gets its own immutable ID. Preparing a newer saved version
+      // must not change the media of an already-published version, even if the
+      // later publish fails. Never overwrite a legacy copy's canonical receipt.
+      const partition = legacyCopyPartition(target);
+      const key = `DELIVERY#${copy.id}#${copy.saved.revision}`;
+      let delivery = await workspaceGet<{ id: string }>(partition, key);
+      if (!delivery) {
+        delivery = { id: randomUUID() };
+        try { await workspacePut([
+          { partition, key, value: delivery, createOnly: true },
+          { partition, key: `COPY#${delivery.id}`, createOnly: true,
+            value: { ...copy, id: delivery.id, classId: target.classId, assignmentId: target.assignmentId, deliveryOnly: true,
+              videoMedia: snapshot.videoMedia || source.videoMedia } },
+        ]); } catch (error) {
+          const existing = await workspaceGet<{ id: string }>(partition, key);
+          if (!existing) throw error;
+          delivery = existing;
+        }
+      }
+      await indexGalleryUse(source.id, target, `gallery-copy-${delivery.id}`);
+      return { ready: true, contentItemId: `gallery-copy-${delivery.id}` };
+    }
     case "start-save": return startCopySave(body, context);
     case "upload-copy-asset": return uploadCopyAsset(body, context);
     case "commit-save": return commitCopySave(body, context);
@@ -508,18 +555,33 @@ export async function galleryPost(request: Request, body: Record<string, unknown
 export async function galleryGet(request: Request) {
   const params = new URL(request.url).searchParams;
   if (new Set(params.keys()).size !== [...params.keys()].length) throw new SlideRequestError("Repeated query parameters are not allowed.");
-  const context = await authorizeSlides(request, Object.fromEntries(params));
+  const context = await authorizeMaterialLibrary(request, Object.fromEntries(params));
   if (params.get("action") === "saved-copy") return loadCopySave(context, params.get("copyId"));
   if (params.get("action") === "saved-asset") return savedCopyAsset(context, params);
   if (params.get("action") === "saved-copies") {
-    const copies = await workspaceQuery<Copy>(copyPartition(context), "COPY#");
-    return { items: copies.filter(copy => copy.ownerId === context.userId && copy.classId === context.classId && copy.assignmentId === context.assignmentId && copy.saved)
+    const partition = libraryPartition(context.userId);
+    if (!await workspaceGet(partition, "LEGACY_INDEXED_V2")) {
+      for (const legacy of await legacyGalleryCopies<Copy>(context.userId)) {
+        const original = await workspaceGet<Source>(PARTITION, sourceKey(legacy.value.templateId));
+        if (original) await indexGalleryUse(original.id, legacy.value, original.format === "slides" ? `slides-${legacy.value.id}` : `gallery-copy-${legacy.value.id}`);
+        if (!legacy.value.saved || legacy.value.deliveryOnly) continue;
+        const key = `COPY#${legacy.value.id}`;
+        if (!await workspaceGet(partition, key)) {
+          try { await workspacePut([{ partition, key, value: { ...legacy.value, storagePartition: legacy.partition }, createOnly: true }]); }
+          catch (error) { if (!await workspaceGet(partition, key)) throw error; }
+        }
+      }
+      await workspacePut([{ partition, key: "LEGACY_INDEXED_V2", value: { indexedAt: new Date().toISOString() } }]);
+    }
+    const entries = await workspaceQuery<Copy>(partition, "COPY#");
+    const copies = await Promise.all(entries.map(entry => entry.storagePartition ? workspaceGet<Copy>(entry.storagePartition, `COPY#${entry.id}`) : entry));
+    return { items: copies.filter((copy): copy is Copy => !!copy && copy.ownerId === context.userId && !!copy.saved)
       .map(copy => { const { snapshotId: _id, ...summary } = copy.saved!; void _id; return summary; }).sort((a, b) => b.savedAt.localeCompare(a.savedAt)) };
   }
   if (params.get("action") === "copy-media") return copyVideoMedia(context, params.get("copyId"));
   if (params.get("action") === "copy-attribution") {
     const { source } = await copiedSource(context, params.get("copyId"));
-    return { creatorName: source.creatorName, teacherCount: await teacherCount(source.id), promptTags: source.promptTags };
+    return { ...publicMaterial(source, context.userId), teacherCount: await teacherCount(source.id), feedback: await galleryFeedback(source.id) };
   }
   if (params.get("action") === "asset") {
     const { source } = params.has("copyId") ? await copiedSource(context, params.get("copyId")) : { source: await sharedSource(params.get("id")) };
@@ -533,7 +595,7 @@ export async function galleryGet(request: Request) {
   }
   if (params.has("id")) {
     const source = await sharedSource(params.get("id"));
-    return { material: { ...publicMaterial(source, context.userId), teacherCount: await teacherCount(source.id) }, ...(source.format === "slides" ? { draft: source.draft, visualIds: Object.keys(source.assets) } : { item: source.item, media: await videoUrls(source) }),
+    return { material: { ...publicMaterial(source, context.userId), teacherCount: await teacherCount(source.id), feedback: await galleryFeedback(source.id) }, ...(source.format === "slides" ? { draft: source.draft, visualIds: Object.keys(source.assets) } : { item: source.item, media: await videoUrls(source) }),
       lessonNumber: source.lessonNumber, strategy: source.strategy };
   }
   const filters: GalleryFilters = {};
@@ -560,10 +622,14 @@ export async function galleryGet(request: Request) {
     if (lesson) recommendationTags = { TOPIC: lesson.topic?.trim() && lesson.target_concept?.trim() ? lesson.topic.trim() : lesson.lesson_title, LEARNING_OBJECTIVE: lesson.learning_objective };
   }
   if (params.has("format")) { if (!["slides", "video"].includes(params.get("format")!)) throw new SlideRequestError("Choose slides or video."); filters.format = params.get("format") as "slides" | "video"; }
+  const gradeBand = text(params.get("gradeBand") ?? undefined, "Grade band", 80).toLocaleLowerCase();
+  const recommendedOnly = params.get("recommendedOnly") === "true";
+  if (recommendedOnly && (!recommendLesson || !recommendStrategy || !filters.format)) throw new SlideRequestError("Choose a lesson, strategy and material type for recommendations.");
   const search = text(params.get("search") ?? undefined, "Search", 200).toLocaleLowerCase();
-  const limit = params.has("limit") ? Number(params.get("limit")) : 12;
+  const requestedLimit = params.has("limit") ? Number(params.get("limit")) : 12;
+  const limit = recommendedOnly ? Math.min(requestedLimit, 3) : requestedLimit;
   if (!Number.isInteger(limit) || limit < 1 || limit > 60) throw new SlideRequestError("Page size must be between 1 and 60.");
-  const fingerprint = digest(JSON.stringify([filters, search, params.get("mine") === "true", context.userId, recommendLesson, recommendStrategy, recommendFocus, recommendationTags]));
+  const fingerprint = digest(JSON.stringify([filters, search, params.get("mine") === "true", context.userId, recommendLesson, recommendStrategy, recommendFocus, recommendationTags, recommendedOnly, gradeBand]));
   let after = "";
   if (params.has("cursor")) {
     try { const c = JSON.parse(Buffer.from(params.get("cursor")!, "base64url").toString()); if (!record(c) || c.fingerprint !== fingerprint || typeof c.after !== "string" || c.after.length > 90) throw new Error(); after = c.after; }
@@ -575,14 +641,25 @@ export async function galleryGet(request: Request) {
   const rank = (row: Shared) => galleryMatches({ ...row.material, isOwner: row.ownerId === context.userId }, recommendLesson, recommendStrategy, recommendFocus, recommendationTags);
   const orderKey = (row: Shared) => `${String(rank(row).score).padStart(2, "0")}|${row.material.createdAt}|${row.id}`;
   const matches = available.filter(row => (params.get("mine") !== "true" || row.ownerId === context.userId)
+    && (!gradeBand || row.material.gradeBand.toLocaleLowerCase() === gradeBand)
+    && (!recommendedOnly || (!!recommendationTags && !!row.material.promptTags && rank(row).reasons.includes("Same lesson")
+      && rank(row).reasons.includes("Same strategy") && (!recommendFocus || !(recommendFocus.misconceptions.length || recommendFocus.coreIdeas.length) || rank(row).reasons.includes("Same focus"))))
     && (!filters.lessonNumber || row.material.lessonNumber === filters.lessonNumber) && (!filters.strategy || row.material.strategy === filters.strategy)
     && (!search || [row.material.title, row.material.description, row.material.experienceContext, row.material.gradeBand, row.material.quizPattern, row.material.strategy,
       row.material.creatorName, ...Object.values(row.material.promptTags || {})].join(" ").toLocaleLowerCase().includes(search)))
     .sort((a, b) => orderKey(b).localeCompare(orderKey(a)))
     .filter(row => !after || orderKey(row) < after);
   const page = matches.slice(0, limit); const last = page.at(-1);
-  return { items: await Promise.all(page.map(async row => ({ ...row.material, isOwner: row.ownerId === context.userId, teacherCount: await teacherCount(row.id),
-    ...(recommendLesson || recommendStrategy ? { matchReasons: rank(row).reasons } : {}) }))),
-    facets: { lessons: [...new Set(available.map(row => row.material.lessonNumber))].sort((a, b) => a - b), strategies: [...new Set(available.map(row => row.material.strategy))].sort() },
-    ...(matches.length > limit && last ? { nextCursor: Buffer.from(JSON.stringify({ fingerprint, after: orderKey(last) })).toString("base64url") } : {}) };
+  const feedbackCache = galleryFeedbackCache();
+  return { items: await Promise.all(page.map(async row => {
+    const source = await workspaceGet<Source>(PARTITION, sourceKey(row.id));
+    const firstVisual = Object.keys(source?.assets || {})[0];
+    const image = source?.format === "video" ? source.videoMedia?.image
+      : firstVisual ? await workspaceGet<GalleryBlob>(PARTITION, assetKey(row.id, firstVisual)) : null;
+    return { ...row.material, isOwner: row.ownerId === context.userId, teacherCount: await teacherCount(row.id), feedback: await galleryFeedback(row.id, feedbackCache),
+      ...(image ? { previewImage: await galleryBlobUrl(image) } : {}),
+      ...(recommendLesson || recommendStrategy ? { matchReasons: rank(row).reasons } : {}) };
+  })),
+    facets: { lessons: [...new Set(available.map(row => row.material.lessonNumber))].sort((a, b) => a - b), strategies: [...new Set(available.map(row => row.material.strategy))].sort(), grades: [...new Set(available.map(row => row.material.gradeBand).filter(Boolean))].sort() },
+    ...(!recommendedOnly && matches.length > limit && last ? { nextCursor: Buffer.from(JSON.stringify({ fingerprint, after: orderKey(last) })).toString("base64url") } : {}) };
 }

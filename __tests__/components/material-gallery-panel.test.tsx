@@ -57,7 +57,7 @@ it("combines standalone filters with task recommendations and displays author, c
   expect(preview.getByText("By A verified teacher")).toBeTruthy();
   expect(preview.getByText(/14 teachers have saved a copy/)).toBeTruthy();
   fireEvent.click(preview.getByText("Teaching tags"));
-  expect(preview.getByText("Contact forces")).toBeTruthy();
+  expect(preview.getByText("Contact forces", { selector: "dd" })).toBeTruthy();
   expect(preview.getByText("Visual scaffolding")).toBeTruthy();
   expect(mocks.copy).not.toHaveBeenCalled();
 });
@@ -166,4 +166,29 @@ it("directs adapted video copies to the actual video editor", async () => {
   fireEvent.click(within(await card()).getByRole("button", { name: "Adapt" }));
   expect(await screen.findByText(/Open Edit material to adapt/)).toBeTruthy();
   expect(screen.queryByText(/Revise with AI/)).toBeNull();
+});
+
+
+it("shows at most three task recommendations with no browsing filters or pagination", async () => {
+  mocks.list.mockResolvedValue({ items: Array.from({ length: 4 }, (_, i) => ({ ...material, id: `match-${i}`, title: `Match ${i}` })), nextCursor: "unexpected-cursor" });
+  render(<MaterialGalleryPanel {...props({ recommendationsOnly: true, focus: { misconceptions: ["a"], coreIdeas: [] } })} />);
+  await screen.findByRole("heading", { name: "Match 0" });
+  expect(screen.getAllByRole("article")).toHaveLength(3);
+  expect(screen.queryByRole("heading", { name: "Match 3" })).toBeNull();
+  expect(screen.queryByRole("group", { name: "Gallery filters" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  expect(mocks.list.mock.lastCall?.[1]).toMatchObject({ recommendedOnly: true, limit: 3, format: "slides", recommendLesson: 3 });
+});
+
+it("hides recommendations when none fit and ignores a previous format's late response", async () => {
+  let finishOld!: (value: unknown) => void;
+  mocks.list.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; })).mockResolvedValue({ items: [] });
+  const view = render(<MaterialGalleryPanel {...props({ recommendationsOnly: true })} />);
+  const oldSignal = mocks.list.mock.calls[0][2] as AbortSignal;
+  view.rerender(<MaterialGalleryPanel {...props({ recommendationsOnly: true, format: "video" })} />);
+  await waitFor(() => expect(screen.queryByRole("region", { name: "Materials Gallery" })).toBeNull());
+  expect(oldSignal.aborted).toBe(true);
+  await act(async () => finishOld({ items: [material] }));
+  expect(screen.queryByRole("region", { name: "Materials Gallery" })).toBeNull();
+  expect(screen.queryByText(/No shared materials/)).toBeNull();
 });

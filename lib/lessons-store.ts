@@ -185,6 +185,7 @@ export async function getLessonVersion(lessonNumber: number, version?: number): 
  * version that can't be found gives null rather than a different version.
  */
 export async function getTaskLesson(classId: string, assignmentId: string, lessonNumber: number): Promise<LessonVersion | null> {
+  if (!classId && !assignmentId) return getLessonVersion(lessonNumber);
   const [pin, quiz] = await Promise.all([getTaskLessonPin(classId, assignmentId), getPublishedTaskQuiz(classId, assignmentId)]);
   const version = await getLessonVersion(lessonNumber, pin?.lessonNumber === lessonNumber ? pin.version : undefined);
   // A quiz published for this task (#177) replaces the lesson's own, with its answer keys and matches.
@@ -410,6 +411,7 @@ export async function listLessonVersionTasks(lessonNumber: number, versionNumber
 }
 
 export async function getTaskLessonPin(classId: string, assignmentId: string) {
+  if (!classId && !assignmentId) return null;
   return workspaceGet<LessonTaskPin>(taskPinPartition(classId, assignmentId), "META");
 }
 

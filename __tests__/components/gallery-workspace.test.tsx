@@ -6,10 +6,10 @@ import type { GalleryCopy, SavedGalleryCopy, SavedGalleryCopySummary } from "@/l
 import type { SlideDeck } from "@/lib/slides/model";
 import { deckFixture } from "../fixtures/slides";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), load: vi.fn(), save: vi.fn(), renew: vi.fn(), attribution: vi.fn(), publish: vi.fn(), shared: null as GalleryCopy | null }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), load: vi.fn(), save: vi.fn(), renew: vi.fn(), attribution: vi.fn(), publish: vi.fn(), prepare: vi.fn(), shared: null as GalleryCopy | null }));
 vi.mock("@/lib/material-gallery-client", () => ({ listSavedGalleryCopies: mocks.list, loadSavedGalleryCopy: mocks.load,
   saveGalleryCopy: mocks.save, refreshGalleryCopyMedia: mocks.renew,
-  galleryCopyAttribution: mocks.attribution }));
+  galleryCopyAttribution: mocks.attribution, prepareGalleryDelivery: mocks.prepare }));
 vi.mock("@/lib/client-auth", () => ({ scopedTaskFetch: mocks.publish }));
 vi.mock("@/lib/lesson-client", () => ({ useTaskLesson: () => ({ lesson: { lesson_number: 3 }, error: "" }) }));
 vi.mock("@/app/components/MaterialGalleryPanel", () => ({ default: ({ onUse, disabled }: { onUse: (copy: GalleryCopy) => void; disabled?: boolean }) =>
@@ -89,13 +89,15 @@ beforeEach(() => {
     const saved = seed(copy, revision + 1); return summary(saved);
   });
   mocks.renew.mockResolvedValue({ video: "https://media.test/ball.mp4?signature=fresh", image: "https://media.test/ball.png?signature=fresh" });
+  mocks.prepare.mockResolvedValue("gallery-copy-delivery-version-a");
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("classId=") ? { assignments: [{ id: user.assignmentId, title: "Lesson task" }] } : { classes: [{ id: user.classId, name: "Physics" }] }), { status: 200 })));
   mocks.publish.mockResolvedValue({ ok: true, json: async () => ({ published: true }) });
   HTMLDialogElement.prototype.showModal = vi.fn(function(this: HTMLDialogElement) { this.setAttribute("open", ""); });
   HTMLDialogElement.prototype.close = vi.fn(function(this: HTMLDialogElement) { this.removeAttribute("open"); this.dispatchEvent(new Event("close")); });
 });
 const originalNavigation = Object.getOwnPropertyDescriptor(window, "navigation");
 afterEach(() => {
-  cleanup(); vi.restoreAllMocks(); vi.useRealTimers();
+  cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals();
   if (originalNavigation) Object.defineProperty(window, "navigation", originalNavigation);
   else Reflect.deleteProperty(window, "navigation");
 });
@@ -167,17 +169,19 @@ it("saves edited video text and renewed media first, then publishes exactly that
   expect(mocks.save.mock.calls[0][2]).toBe(0);
   const pending = deferred<SavedGalleryCopySummary>();
   mocks.save.mockReturnValueOnce(pending.promise);
-  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  if (!screen.queryByRole("dialog", { name: "Send to students" })) fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Send material" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Send material" }));
   expect(mocks.save.mock.calls[1][2]).toBe(1);
   expect(mocks.publish).not.toHaveBeenCalled();
   const copy = mocks.save.mock.calls[1][1] as GalleryCopy;
   await act(async () => pending.resolve(summary(seed(copy, 2))));
-  await screen.findByText("Sent to students in this task.");
+  await screen.findByText("Sent to students. Your saved material remains in your library.");
   expect(mocks.publish).toHaveBeenCalledOnce();
   const [publishedScope, endpoint, init] = mocks.publish.mock.calls[0];
   expect(publishedScope).toEqual(scope); expect(endpoint).toBe("/api/content-publish");
   const body = JSON.parse(init.body);
-  expect(body).toMatchObject({ ...scope, publishedBy: user.userId, contentItems: [{ id: "gallery-copy-video-a", title: "Our video title", body: "Our own contact activity.", media: { video: "https://media.test/ball.mp4?signature=fresh" } }] });
+  expect(body).toMatchObject({ ...scope, contentItems: [{ id: "gallery-copy-delivery-version-a", title: "Our video title", body: "Our own contact activity.", media: { video: "https://media.test/ball.mp4?signature=fresh" } }] });
   expect(body.contentItems).toHaveLength(1); expect(body.contentItems[0]).not.toHaveProperty("gallerySavedRevision");
   expect(published).toHaveBeenCalledOnce();
 });
@@ -186,14 +190,18 @@ it("blocks video publication after a failed save and keeps edited text available
   render(<GalleryWorkspace user={user} onBack={vi.fn()} />);
   await openShared(video()); await editVideo("Retain this video edit");
   mocks.save.mockRejectedValueOnce(new Error("Storage temporarily unavailable."));
-  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Storage temporarily unavailable");
+  if (!screen.queryByRole("dialog", { name: "Send to students" })) fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Send material" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Send material" }));
+  expect((await screen.findAllByRole("alert"))[0]).toHaveTextContent("Storage temporarily unavailable");
   expect(mocks.publish).not.toHaveBeenCalled();
   expect(screen.getByRole("heading", { name: "Retain this video edit" })).toBeVisible();
   expect(screen.getByText("Unsaved changes")).toBeVisible();
-  expect(screen.queryByText("Sent to students in this task.")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
-  await screen.findByText("Sent to students in this task."); expect(mocks.publish).toHaveBeenCalledOnce();
+  expect(screen.queryByText("Sent to students. Your saved material remains in your library.")).toBeNull();
+  if (!screen.queryByRole("dialog", { name: "Send to students" })) fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Send material" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Send material" }));
+  await screen.findByText("Sent to students. Your saved material remains in your library."); expect(mocks.publish).toHaveBeenCalledOnce();
 });
 
 it("offers keep editing, discard, and save-and-leave without implicitly publishing", async () => {
@@ -263,7 +271,9 @@ it("aborts pending video send on unmount and never publishes after its save comp
   const published = vi.fn(); const pending = deferred<SavedGalleryCopySummary>();
   const view = render(<GalleryWorkspace user={user} onBack={vi.fn()} onPublished={published} />);
   await openShared(video()); mocks.save.mockReturnValueOnce(pending.promise);
-  fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  if (!screen.queryByRole("dialog", { name: "Send to students" })) fireEvent.click(screen.getByRole("button", { name: "Send to students" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Send material" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Send material" }));
   const signal = mocks.save.mock.calls[0][3] as AbortSignal; view.unmount(); expect(signal.aborted).toBe(true);
   await act(async () => pending.resolve(summary(seed(mocks.save.mock.calls[0][1], 1))));
   expect(mocks.publish).not.toHaveBeenCalled(); expect(published).not.toHaveBeenCalled();

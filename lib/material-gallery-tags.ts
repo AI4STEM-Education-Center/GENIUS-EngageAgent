@@ -1,4 +1,5 @@
 import { GALLERY_TAG_LABELS, type GalleryMaterial, type GalleryMetadata } from "./material-gallery";
+import { toMisconceptionIds } from "./misconceptions";
 import { getLesson } from "./quiz-data";
 import { getEngagementStrategyLabel } from "./engagement-strategies";
 import { resolveStrategyFocus } from "./strategy-focus";
@@ -27,13 +28,17 @@ export function galleryPromptTags(lessonNumber: number, strategy: string, format
   tags.GRADE_LEVEL = metadata.gradeBand || "Not shared (prompt default: high school)";
   tags.CURRENT_UNDERSTANDING = metadata.quizPattern || "Not shared";
   tags.MISCONCEPTION_OR_GAP = focus?.kind === "misconceptions" ? focus.items.join("; ") : tags.MISCONCEPTION_OR_GAP || "Not selected";
-  tags.KNOWLEDGE_GAP ||= tags.MISCONCEPTION_OR_GAP;
+  if (focus?.kind === "misconceptions") tags.KNOWLEDGE_GAP = focus.items.join("; ");
+  else tags.KNOWLEDGE_GAP ||= tags.MISCONCEPTION_OR_GAP;
   if (focus?.kind === "coreIdeas") tags.TARGET_UNDERSTANDING = focus.items.join(" ");
   tags.SELECTED_STRATEGY = getEngagementStrategyLabel(strategy);
+  if (metadata.focus) tags.FOCUS_ITEMS = [...metadata.focus.misconceptions.map(code => toMisconceptionIds(lessonNumber, code).join(" + ") || `Target ${code}`),
+    ...metadata.focus.coreIdeas.map(index => `Core idea ${index + 1}`)].join(" · ");
   tags.LEARNER_CONTEXT = metadata.teachingContext || "Not shared";
   tags.CLASS_PROFILE = metadata.classProfile || "Not shared";
   tags.EXPERIENCE_CONTEXT = metadata.experienceContext || "Not supplied";
   if (strategy === "analogy" && draft?.analogyMethod) tags.ANALOGY_METHOD = draft.analogyMethod;
+  if (metadata.keywords?.length) tags.KEYWORDS = metadata.keywords.join(", ");
   if (textModes?.length) tags.TEXT_MODES = textModes.join(", ");
   return Object.fromEntries(Object.entries(tags).filter(([key, value]) => key in GALLERY_TAG_LABELS && typeof value === "string")
     .map(([key, value]) => [key, value.slice(0, 4000)]));
@@ -49,5 +54,8 @@ export function galleryMatches(material: GalleryMaterial, lesson: number, strate
   if (material.strategy === strategy) reasons.push("Same strategy");
   if (sameLesson && material.focus && focus &&
     (material.focus.misconceptions.some(id => focus.misconceptions.includes(id)) || material.focus.coreIdeas.some(id => focus.coreIdeas.includes(id)))) reasons.push("Same focus");
-  return { score: (reasons.includes("Same lesson") ? 4 : 0) + (reasons.includes("Same strategy") ? 2 : 0) + (reasons.includes("Same focus") ? 8 : 0), reasons };
+  const overlappingFocus = sameLesson && material.focus && focus
+    ? material.focus.misconceptions.filter(id => focus.misconceptions.includes(id)).length + material.focus.coreIdeas.filter(id => focus.coreIdeas.includes(id)).length : 0;
+  return { score: (reasons.includes("Same lesson") ? 4 : 0) + (reasons.includes("Same strategy") ? 2 : 0)
+    + (reasons.includes("Same focus") ? 8 + Math.max(0, overlappingFocus - 1) * 2 : 0), reasons };
 }

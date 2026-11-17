@@ -2,7 +2,7 @@ import { slideRevisionOutputFormat, slideRevisionPrompt, validSlideRevisionIndex
 import { listTaskLessons } from "@/lib/lessons-store";
 import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import { slideOutputFormat, slidePrompt } from "@/lib/slides/prompts";
-import { authorizeSlides, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, requestFocus, slideContext, slideDiagnosticContext, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
+import { authorizeMaterialLibrary, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, requestFocus, slideContext, slideDiagnosticContext, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
 import { existingGenerationKey, resolveSlideModel, slideModelCatalog, slideTextRequestLimits, slideTextSettings } from "@/lib/slides/model-config";
 import { analogyPromptRevision, isSlidePromptVersion, SLIDE_PROMPT_REVISION } from "@/lib/slides/prompt-versions";
 import { beginSlideJob } from "@/lib/slides/jobs";
@@ -15,7 +15,7 @@ export const maxDuration = 30;
 
 export async function GET(request: Request) {
   try {
-    const { classId, assignmentId } = await authorizeSlides(request, Object.fromEntries(new URL(request.url).searchParams));
+    const { classId, assignmentId } = await authorizeMaterialLibrary(request, Object.fromEntries(new URL(request.url).searchParams));
     return slideJson({ lessons: (await listTaskLessons(classId, assignmentId)).map(lesson => ({ lessonNumber: lesson.lessonNumber, lessonTitle: lesson.title, learningObjective: lesson.learningObjective })), models: slideModelCatalog() });
   } catch (error) { return slideFailure(error); }
 }
@@ -23,7 +23,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await readSlideBody(request);
-    const authorized = await authorizeSlides(request, body);
+    const authorized = await authorizeMaterialLibrary(request, body);
     enterLessonScope(await loadTaskLessons(authorized, body.lessonNumber));
     const { lesson, strategy } = slideContext(body);
     const taskContext = requestClassroomContext(body.classroomContext);

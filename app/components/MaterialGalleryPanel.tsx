@@ -13,15 +13,16 @@ import type { StrategyFocus } from "@/lib/strategy-focus";
 
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50";
 const primary = `${button} !border-brand !bg-brand !text-white hover:!bg-brand-dark`;
-type Props = { scope: GalleryScope; lessonNumber: number; strategy: string; format: "slides" | "video"; focus?: StrategyFocus; disabled?: boolean; onUse: (copy: GalleryCopy, material: GalleryMaterial) => void; refreshKey?: number; browseRequest?: number; standalone?: boolean };
+type Props = { scope: GalleryScope; lessonNumber: number; strategy: string; format: "slides" | "video"; focus?: StrategyFocus; disabled?: boolean; onUse: (copy: GalleryCopy, material: GalleryMaterial) => void; refreshKey?: number; browseRequest?: number; standalone?: boolean; recommendationsOnly?: boolean; onBrowse?: () => void };
 
-export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, format, focus, disabled, onUse, refreshKey = 0, browseRequest = 0, standalone = false }: Props) {
+export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, format, focus, disabled, onUse, refreshKey = 0, browseRequest = 0, standalone = false, recommendationsOnly = false, onBrowse }: Props) {
   const [filter, setFilter] = useState<"topic" | "strategy" | "all" | "mine">(standalone ? "all" : "topic");
   const [expanded, setExpanded] = useState(standalone);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [selectedLesson, setSelectedLesson] = useState("");
   const [selectedStrategy, setSelectedStrategy] = useState("");
+  const [selectedGrade, setSelectedGrade] = useState("");
   const [recommended, setRecommended] = useState(true);
   const [facets, setFacets] = useState<GalleryFacets>({ lessons: [], strategies: [] });
   const focusKey = focus ? JSON.stringify(focus) : undefined;
@@ -42,17 +43,18 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
   const request = useRef<AbortController | null>(null);
   const operation = useRef<AbortController | null>(null);
   const previewRequest = useRef<AbortController | null>(null);
-  const scopeKey = JSON.stringify([scope.classId, scope.assignmentId]);
+  const scopeKey = JSON.stringify([scope.classId, scope.assignmentId, lessonNumber, strategy, format, focusKey]);
 
   const load = useCallback(async (nextCursor?: string) => {
     request.current?.abort();
     const controller = new AbortController(); request.current = controller;
     setLoading(true); setError("");
-    const filters: GalleryFilters = { format, search: query || undefined, limit: expanded ? 12 : 6, cursor: nextCursor,
+    const filters: GalleryFilters = { format, ...(selectedGrade ? { gradeBand: selectedGrade } : {}), search: query || undefined, limit: recommendationsOnly ? 3 : expanded ? 12 : 6, cursor: nextCursor,
       ...(filter === "topic" && lessonNumber > 0 ? { lessonNumber } : filter === "strategy" && strategy ? { strategy } : filter === "mine" ? { mine: true } : {}),
       ...(standalone && selectedLesson ? { lessonNumber: Number(selectedLesson) } : {}),
       ...(standalone && selectedStrategy ? { strategy: selectedStrategy } : {}),
-      ...(standalone && recommended && lessonNumber > 0 ? { recommendLesson: lessonNumber, recommendStrategy: strategy || undefined, recommendFocus: focusKey } : {}) };
+      ...(recommendationsOnly ? { recommendedOnly: true } : {}),
+      ...((recommendationsOnly || standalone && recommended) && lessonNumber > 0 ? { recommendLesson: lessonNumber, recommendStrategy: strategy || undefined, recommendFocus: focusKey } : {}) };
     try {
       const result = await listMaterialGallery({ classId: scope.classId, assignmentId: scope.assignmentId }, filters, controller.signal);
       if (controller.signal.aborted) return;
@@ -62,7 +64,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     } catch (reason) {
       if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to load shared materials.");
     } finally { if (!controller.signal.aborted) setLoading(false); }
-  }, [scope.classId, scope.assignmentId, format, query, expanded, filter, lessonNumber, strategy, standalone, selectedLesson, selectedStrategy, recommended, focusKey]);
+  }, [scope.classId, scope.assignmentId, format, query, expanded, filter, lessonNumber, strategy, standalone, selectedLesson, selectedStrategy, recommended, focusKey, recommendationsOnly, selectedGrade]);
   useEffect(() => { setItems([]); setCursor(undefined); void load(); return () => request.current?.abort(); }, [load, refreshKey, reload]);
   useEffect(() => {
     operation.current?.abort(); previewRequest.current?.abort(); if (dialog.current?.open) dialog.current.close();
@@ -123,12 +125,14 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
   }
   const focusMatches = (item: GalleryMaterial) => item.lessonNumber === lessonNumber && !!focus && !!item.focus && (item.focus.misconceptions.some(id => focus.misconceptions.includes(id)) || item.focus.coreIdeas.some(id => focus.coreIdeas.includes(id)));
   const previewSlide = preview?.draft?.slides[previewIndex];
+  if (recommendationsOnly && !loading && !error && !items.length) return null;
 
   return <section aria-label="Materials Gallery" className="rounded-xl border border-line bg-canvas/60 p-4 sm:p-5">
-    <div className="flex flex-wrap items-center justify-between gap-3">
+    {!recommendationsOnly && <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h3 className="flex items-center gap-2 text-base font-semibold"><LayoutGrid size={18} />{standalone ? "Shared materials" : expanded ? "Materials Gallery" : "Matches from the Gallery"}</h3><p className="mt-1 text-xs text-mute">{standalone ? "Open a material to edit your own copy." : "Shared by teachers · use a copy or adapt it to your class"}</p></div>
       {!standalone && <button type="button" className={button} onClick={() => setExpanded(value => !value)}>{expanded ? "Show matches" : "Open Gallery"}<ChevronRight size={16} /></button>}
-    </div>
+    </div>}
+    {recommendationsOnly && <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-bold">Recommended from Gallery</h3><p className="mt-1 text-sm text-mute">Matches your lesson, strategy and focus. Open a material to review or adapt it.</p></div>{onBrowse && <button type="button" className={button} onClick={onBrowse}>Browse all materials</button>}</div>}
     {standalone && <div className="mt-4 flex flex-wrap gap-3">
       <label className="text-xs font-semibold text-mute">Lesson<select aria-label="Filter Gallery by lesson" value={selectedLesson} onChange={event => setSelectedLesson(event.target.value)} className="ml-2 min-h-10 rounded-lg border border-line bg-white px-3 text-sm text-ink">
         <option value="">All lessons</option>{[...new Set([...facets.lessons, ...(selectedLesson ? [Number(selectedLesson)] : [])])].sort((a, b) => a - b).map(n => <option key={n} value={n}>Lesson {n}</option>)}
@@ -136,38 +140,38 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
       <label className="text-xs font-semibold text-mute">Strategy<select aria-label="Filter Gallery by strategy" value={selectedStrategy} onChange={event => setSelectedStrategy(event.target.value)} className="ml-2 min-h-10 rounded-lg border border-line bg-white px-3 text-sm text-ink">
         <option value="">All strategies</option>{["analogy", "cognitive conflict", "engaged critiquing", "experience bridging"].map(value => <option key={value} value={value}>{getEngagementStrategyLabel(value)}</option>)}
       </select></label>
+      <label className="text-sm font-semibold text-mute">Grade<select aria-label="Gallery grade filter" value={selectedGrade} onChange={event => setSelectedGrade(event.target.value)} className="ml-2 min-h-10 rounded-lg border border-line bg-white px-3 text-sm text-ink"><option value="">All grades</option>{facets.grades?.map(value => <option key={value}>{value}</option>)}</select></label>
       {lessonNumber > 0 && <select aria-label="Gallery sort order" value={recommended ? "recommended" : "newest"} onChange={event => setRecommended(event.target.value === "recommended")} className="min-h-10 rounded-lg border border-line bg-white px-3 text-sm text-ink">
         <option value="recommended">Recommended for this task</option><option value="newest">Newest first</option>
       </select>}
     </div>}
-    <div className="mt-4 flex flex-wrap items-center gap-3">
+    {!recommendationsOnly && <div className="mt-4 flex flex-wrap items-center gap-3">
       <div role="group" aria-label="Gallery filters" className="flex flex-wrap rounded-lg bg-line-2 p-1">
         {([["topic", "Same topic"], ["strategy", "Same strategy"], ["all", "All"], ["mine", "Shared by me"]] as const).filter(([id]) => !standalone || id === "all" || id === "mine").map(([id, label]) => <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)} className={`rounded-md px-3 py-2 text-sm font-semibold ${filter === id ? "bg-white text-ink shadow-sm" : "text-mute"}`}>{label}</button>)}
       </div>
       {expanded && <form className="flex min-w-0 flex-1 gap-2" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); }}><input aria-label="Search shared materials" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search materials" maxLength={160} className="min-w-0 flex-1 rounded-lg border border-line bg-white px-3 py-2 text-sm" /><button className={button} aria-label="Search Gallery"><Search size={17} /></button></form>}
-    </div>
+    </div>}
     {loading && !items.length && <p role="status" className="mt-5 flex items-center gap-2 text-sm text-mute"><LoaderCircle size={16} className="animate-spin" />Finding shared materials…</p>}
     {error && <div role="alert" className="mt-4 rounded-lg bg-bad-light p-3 text-sm text-bad">{error}<button type="button" className={`${button} ml-3`} onClick={() => setReload(value => value + 1)}>Try again</button></div>}
     {notice && <p role="status" className="mt-4 rounded-lg bg-ok-light p-3 text-sm text-ok">{notice}</p>}
     {!loading && !error && !items.length && <div className="py-8 text-center"><p className="font-semibold text-ink">No shared materials match yet</p><p className="mt-2 text-sm text-mute">{standalone ? "Try another filter or search. Materials shared by teachers will appear here." : "Try another filter, or generate a new material below. You can share it after reviewing."}</p></div>}
-    <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{items.map(material => <article key={material.id} className="flex min-w-0 flex-col rounded-xl border border-line bg-white p-4">
+    <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{(recommendationsOnly ? items.slice(0, 3) : items).map(material => <article key={material.id} className="flex min-w-0 flex-col rounded-xl border border-line bg-white p-4">
+      {material.previewImage && <div className="mb-3 aspect-video overflow-hidden rounded-lg bg-canvas"><img src={material.previewImage} alt="" loading="lazy" className="h-full w-full object-contain" /></div>}
       <div className="flex justify-between gap-2 text-xs text-mute"><span>{material.format === "slides" ? `${material.slideCount ?? ""} slides` : "Animated video"}</span>{material.isOwner && <span className="font-semibold">Shared by you</span>}</div>
       <h4 className="mt-3 text-lg font-bold text-ink">{material.title}</h4>
       <GalleryMaterialDetails {...material} />
-      <p className="mt-2 text-sm text-mute">Lesson {material.lessonNumber} · {getEngagementStrategyLabel(material.strategy)}</p>
       {material.description && <p className="mt-3 text-sm leading-6 text-ink-2">{material.description}</p>}
       <div className="my-3 flex flex-wrap gap-2 text-xs font-semibold">
-        {standalone ? material.matchReasons?.map(reason => <span key={reason} className="rounded-full bg-ok-light px-2.5 py-1 text-ok">{reason}</span>) : <>
+        {(standalone || recommendationsOnly) ? material.matchReasons?.map(reason => <span key={reason} className="rounded-full bg-ok-light px-2.5 py-1 text-ok">{reason}</span>) : <>
           {material.lessonNumber === lessonNumber && <span className="rounded-full bg-ok-light px-2.5 py-1 text-ok">Same topic</span>}
           {material.strategy === strategy && <span className="rounded-full bg-info-light px-2.5 py-1 text-info">Same strategy</span>}
           {focusMatches(material) && <span className="rounded-full bg-ai-light px-2.5 py-1 text-ai">Same focus</span>}</>}
-        {material.gradeBand && <span className="rounded-full bg-line-2 px-2.5 py-1 text-mute">{material.gradeBand}</span>}
       </div>
       <div className="mt-auto flex flex-wrap gap-2 pt-3"><button type="button" className={primary} disabled={disabled || !!copying || (!standalone && material.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(material, standalone ? "adapt" : "use")}>{copying === material.id ? "Opening…" : standalone ? "Open" : "Use as is"}</button>{!standalone && <button type="button" className={button} disabled={disabled || !!copying || material.lessonNumber !== lessonNumber} onClick={() => void selectMaterial(material, "adapt")}>Adapt</button>}<button type="button" className={button} onClick={() => void openPreview(material)}>Preview</button></div>
       {!standalone && material.lessonNumber !== lessonNumber && <p className="mt-2 text-xs text-mute">Choose Lesson {material.lessonNumber} in Assessment to use this material.</p>}
       {material.isOwner && <button type="button" className="mt-3 self-start text-xs font-semibold text-mute underline" disabled={!!copying} onClick={() => setRemoveTarget(material)}>Remove from Gallery</button>}
     </article>)}</div>
-    {cursor && <button type="button" className={`${button} mt-4`} disabled={loading} onClick={() => void load(cursor)}>{loading ? "Loading…" : "Load more"}</button>}
+    {cursor && !recommendationsOnly && <button type="button" className={`${button} mt-4`} disabled={loading} onClick={() => void load(cursor)}>{loading ? "Loading…" : "Load more"}</button>}
     {removeTarget && <div role="alertdialog" aria-label="Remove shared material" className="mt-4 rounded-lg border border-warn bg-warn-light p-4 text-sm"><p>Remove “{removeTarget.title}” from the Gallery? Teachers who already copied it keep their copies.</p><div className="mt-3 flex gap-2"><button className={button} type="button" onClick={() => setRemoveTarget(null)}>Keep shared</button><button className={button} type="button" disabled={!!copying} onClick={() => void remove()}>Remove shared material</button></div></div>}
     <dialog ref={dialog} aria-label="Gallery material preview" onCancel={closePreview} className="fixed inset-0 m-auto max-h-[90vh] w-[94vw] max-w-3xl overflow-auto rounded-2xl border border-line bg-white p-6 backdrop:bg-ink/50">
       <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-mute">Gallery preview</p><h3 className="mt-1 text-xl font-bold">{previewItem?.title}</h3></div><button type="button" className={button} aria-label="Close Gallery preview" onClick={closePreview}><X size={18} /></button></div>

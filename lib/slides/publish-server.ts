@@ -1,3 +1,4 @@
+import { indexPublishedGalleryUse } from "../material-gallery-feedback";
 import { createHash, randomUUID } from "node:crypto";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -122,6 +123,7 @@ async function startPublication(context: Context, body: Record<string, unknown>,
       && Object.keys(current.assets).length === draft.visuals.length
       && draft.visuals.every(({ id }) => current.assets[id]?.digest === digests[id]
         && current.assets[id].width === dimensions[id].width && current.assets[id].height === dimensions[id].height)) {
+      await indexPublishedGalleryUse(context, ownerId, `slides-${body.deckId}`);
       return { alreadyPublished: true, publicationId: current.publicationId, contentItemId: current.contentItemId, slides: current.slides };
     }
   }
@@ -184,6 +186,7 @@ async function commitPublication(context: Context, body: Record<string, unknown>
   const publication = await ownedPublication(context, body.publicationId, ownerId);
   if (publication.state === "published") {
     if (!await currentlyPublished(publication)) throw new SlideRequestError("This publication has been replaced. Publish the current draft again.", 409);
+    await indexPublishedGalleryUse(context, ownerId, `slides-${publication.deckId}`);
     return committed(publication);
   }
   const assets = await publicationAssets(publication);
@@ -195,6 +198,7 @@ async function commitPublication(context: Context, body: Record<string, unknown>
   await workspacePut([{ partition: partition(context.classId), key: publicationKey(publication.id), value: ready },
     ...assets.map(asset => ({ partition: partition(context.classId), key: assetKey(publication.id, asset.visualId), value: asset }))]);
   const item = { id: `slides-${publication.deckId}`, type: "Slides", title: publication.manifest.title, body: "", strategy: publication.manifest.strategy, slides: reference(publication) };
+  await indexPublishedGalleryUse(context, ownerId, item.id);
   await upsertContentPublish({ class_id: context.classId, assignment_id: context.assignmentId, content_item_id: item.id, content_json: JSON.stringify(item),
     published: true, published_at: new Date().toISOString(), published_by: ownerId });
   await workspacePut([{ partition: partition(context.classId), key: publicationKey(publication.id), value: { ...durable, state: "published" } }]);

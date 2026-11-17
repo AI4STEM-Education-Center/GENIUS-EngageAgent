@@ -48,3 +48,15 @@ it("preserves teacher aggregation of all students in only the selected class and
   }
   expect((await listReviewQuestions("ea-class-1", "ea-task-1")).map(record => record.student_id)).toEqual(["student1", "student10"]);
 });
+
+it.each(["listContentRatings", "listReviewQuestions", "listPublishedContent"] as const)("reads every DynamoDB page for accurate feedback: %s", async operation => {
+  const nosql = await import("@/lib/nosql");
+  const kind = operation === "listContentRatings" ? "content_rating" : operation === "listReviewQuestions" ? "review_questions" : "content_publish";
+  const cursor = { class_id: "CLASS#ea-class-1", record_id: "last-key" };
+  const item = (n: number) => ({ class_id: "CLASS#ea-class-1", assignment_id: "ea-task-1", record_type: kind,
+    student_id: `STUDENT#s${n}`, content_item_id: `material-${n}`, published: true, rating: n, questions: [`Question ${n}`] });
+  mocks.send.mockReset().mockResolvedValueOnce({ Items: [item(1)], LastEvaluatedKey: cursor }).mockResolvedValueOnce({ Items: [item(2)] });
+  const result = await nosql[operation]("ea-class-1", "ea-task-1");
+  expect(result).toHaveLength(2);
+  expect(mocks.send.mock.calls[1][0].input.ExclusiveStartKey).toEqual(cursor);
+});

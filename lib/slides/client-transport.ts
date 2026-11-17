@@ -58,9 +58,10 @@ function pendingJob(data: Record<string, unknown>) {
 }
 
 /** Submit once, then poll that same operation. A transient poll never starts another model request. */
-export async function postSlideRequest<T>(path: string, body: { classId?: string; assignmentId?: string } & object, signal: AbortSignal): Promise<T> {
+export async function postSlideRequest<T>(path: string, body: { classId?: string; assignmentId?: string; library?: boolean } & object, signal: AbortSignal): Promise<T> {
   signal.throwIfAborted();
   if (!/^\/api\/slides(?:\/(?:check|image|revise))?$/u.test(path)) throw new Error("Invalid slide operation.");
+  if (!body.classId && !body.assignmentId) body = { ...body, library: true };
   const headers = { "Content-Type": "application/json", ...scopedClientAuthHeaders(body) };
   const deadline = Date.now() + JOB_TIMEOUT_MS;
   let jobId: string | undefined;
@@ -73,7 +74,7 @@ export async function postSlideRequest<T>(path: string, body: { classId?: string
     // Best effort on Cancel, context change, unmount, or exhausted polling. This
     // small request has its own signal so cancelling generation does not cancel it.
     void fetch("/api/slides/jobs", { method: "POST", headers, cache: "no-store", keepalive: true,
-      body: JSON.stringify({ classId: body.classId, assignmentId: body.assignmentId, jobId, operation: "cancel" }), signal: controller.signal })
+      body: JSON.stringify({ classId: body.classId, assignmentId: body.assignmentId, library: body.library, jobId, operation: "cancel" }), signal: controller.signal })
       .catch(() => {}).finally(() => clearTimeout(timer));
   };
   signal.addEventListener("abort", cancel, { once: true });
@@ -96,7 +97,7 @@ export async function postSlideRequest<T>(path: string, body: { classId?: string
       await waitForPoll(Math.min(pending.pollAfterMs, remaining), signal);
       if (Date.now() >= deadline) throw new SlideTransportError("This slide step took too long. Your current draft is retained. Retry the current step.");
       try {
-        response = await requestJson("/api/slides/jobs", { classId: body.classId, assignmentId: body.assignmentId, jobId }, signal,
+        response = await requestJson("/api/slides/jobs", { classId: body.classId, assignmentId: body.assignmentId, library: body.library, jobId }, signal,
           Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now()), headers);
       } catch (error) {
         if (!(error instanceof SlideTransportError) || !error.retryable || ++transientFailures > MAX_POLL_RETRIES) throw error;

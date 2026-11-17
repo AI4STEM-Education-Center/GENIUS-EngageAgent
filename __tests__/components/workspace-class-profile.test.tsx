@@ -281,13 +281,13 @@ it("isn't offered to students or in Gallery, and the profile isn't on student, l
 
   mocks.role = "teacher"; mocks.query = "view=gallery";
   render(<Workspace />);
-  await screen.findByRole("heading", { name: "Choose a class for your materials" });
+  await screen.findByText("Opening material library…");
   expect(screen.queryByRole("button", { name: "Add class" })).toBeNull();
   cleanup();
 
   mocks.query = "classId=ea-class-a&view=gallery";
   render(<Workspace />);
-  await screen.findByRole("heading", { name: "Choose a task for your materials" });
+  await screen.findByText("Opening material library…");
   expect(screen.queryByRole("region", { name: "Class profile" })).toBeNull();
   cleanup();
 

@@ -124,7 +124,7 @@ describe("teacher material library", () => {
     one.deck.draft.slides[0].title = "My changed title";
     expect((await (await get({ id })).json()).draft.slides[0].title).toBe(preview.draft.slides[0].title);
     expect((await get({ action: "asset", copyId: one.copyId, visualId: "evidence" })).status).toBe(200);
-    expect((await get({ action: "asset", copyId: one.copyId, visualId: "evidence" }, { ...scope, assignmentId: "ea-task-other" })).status).toBe(404);
+    expect((await get({ action: "asset", copyId: one.copyId, visualId: "evidence" }, { ...scope, assignmentId: "ea-task-other" })).status).toBe(200);
     mocks.session.mockResolvedValue(teacher);
     expect((await get({ action: "asset", copyId: one.copyId, visualId: "evidence" })).status).toBe(404);
   });
@@ -212,6 +212,26 @@ describe("private saved Gallery copies", () => {
   const uploadCopy = (copyId: string, saveId: string) => post({ action: "upload-copy-asset", copyId, saveId, visualId: "evidence", asset: { data: tinyImage, width: 1, height: 1 } });
   const commit = (copyId: string, saveId: string) => post({ action: "commit-save", copyId, saveId });
 
+  it("discovers legacy task copies without selecting their class and keeps editing the canonical revision", async () => {
+    const copy = await copied(); const first = await stage(copy, 0, "Legacy private material");
+    await uploadCopy(copy.copyId, first); await commit(copy.copyId, first);
+    const file = path.join(directory, "workspace.json");
+    const legacyPartition = `GALLERY_COPIES#${createHash("sha256").update(JSON.stringify([scope.classId, scope.assignmentId])).digest("hex")}`;
+    const rows = JSON.parse(await fs.readFile(file, "utf8"));
+    const legacy = rows.filter((row: { class_id: string }) => row.class_id !== legacyPartition).map((row: { class_id: string; value: { deliveryOnly?: boolean } }) => {
+      if (row.class_id.startsWith("GALLERY_LIBRARY#")) { row.class_id = legacyPartition; delete row.value.deliveryOnly; } return row;
+    });
+    await fs.writeFile(file, JSON.stringify(legacy));
+    const unscoped = { classId: "", assignmentId: "" };
+    const list = await (await get({ library: "true", action: "saved-copies" }, unscoped)).json();
+    expect(list.items).toEqual([expect.objectContaining({ copyId: copy.copyId, title: "Legacy private material" })]);
+    const next = await stage(copy, 1, "Edited from the library"); await uploadCopy(copy.copyId, next); await commit(copy.copyId, next);
+    const reopened = await (await get({ library: "true", action: "saved-copy", copyId: copy.copyId }, unscoped)).json();
+    expect(reopened).toMatchObject({ revision: 2, copy: { deck: { draft: { title: "Edited from the library" } } } });
+    mocks.session.mockResolvedValue({ ...teacher, geniusId: "someone-else" });
+    expect((await (await get({ library: "true", action: "saved-copies" }, unscoped)).json()).items).toEqual([]);
+  });
+
   it("counts distinct verified teachers only after durable saves, across retries and task scopes", async () => {
     const copy = await copied();
     const count = async () => (await (await get({ id: copy.id })).json()).material.teacherCount;
@@ -264,7 +284,7 @@ describe("private saved Gallery copies", () => {
     expect(rows.filter((r: { record_id: string }) => /CONTENT|PUBLISH/.test(r.record_id))).toEqual([]);
     const snapshot = rows.find((r: { record_id: string }) => r.record_id === `DRAFT#${saveId}`);
     expect(snapshot.expiresAt).toBeUndefined();
-    expect(snapshot.class_id).toMatch(/^GALLERY_COPIES#/);
+    expect(snapshot.class_id).toMatch(/^GALLERY_LIBRARY#/);
     expect((await post({ action: "unshare", id: copy.id })).status).toBe(200);
     expect((await get({ action: "saved-copy", copyId: copy.copyId })).status).toBe(200);
   });
@@ -288,15 +308,15 @@ describe("private saved Gallery copies", () => {
     expect(stale.status).toBe(409);
   });
 
-  it("rejects identity/focus forgery and isolates saves, lists, snapshots and assets by teacher and task", async () => {
+  it("rejects identity/focus forgery and isolates saves, lists, snapshots and assets by teacher while permitting reuse across their tasks", async () => {
     const copy = await copied();
     for (const patch of [{ lessonNumber: 2 }, { strategy: "analogy" }, { focus: { misconceptions: ["b"], coreIdeas: [] } }, { gallerySource: { ...copy.source, title: "Forged" } }]) {
       expect((await post({ action: "start-save", copyId: copy.copyId, expectedRevision: 0, deck: { ...copy.deck, ...patch } })).status).toBe(422);
     }
     const saveId = await stage(copy, 0, "Private"); await uploadCopy(copy.copyId, saveId); await commit(copy.copyId, saveId);
     const other = { ...scope, assignmentId: "ea-task-other" };
-    expect((await get({ action: "saved-copy", copyId: copy.copyId }, other)).status).toBe(404);
-    expect((await (await get({ action: "saved-copies" }, other)).json()).items).toEqual([]);
+    expect((await get({ action: "saved-copy", copyId: copy.copyId }, other)).status).toBe(200);
+    expect((await (await get({ action: "saved-copies" }, other)).json()).items).toHaveLength(1);
     mocks.session.mockResolvedValue({ ...teacher, geniusId: "other-teacher" });
     expect((await get({ action: "saved-copy", copyId: copy.copyId })).status).toBe(404);
     expect((await get({ action: "saved-asset", copyId: copy.copyId, revision: "1", visualId: "evidence" })).status).toBe(404);
@@ -356,13 +376,44 @@ describe("saved video reuse", () => {
     expect(reshared.status).toBe(200);
     expect((await reshared.json()).material.derivedFrom).toEqual({ templateId: template.id, revision: 1, title: metadata.title });
   });
+  it("keeps sent video versions immutable while preparing later edits, and renews global saved media", async () => {
+    let bytes = "first-video";
+    mocks.media.mockImplementation(async (_class, _task, _student, id, kind) => kind === "video" ? {
+      class_id: scope.classId, assignment_id: scope.assignmentId, student_id: "cohort", content_item_id: id,
+      media_type: "video", mime_type: "video/mp4", data_url: `data:video/mp4;base64,${Buffer.from(bytes).toString("base64")}`,
+    } : null);
+    const template = (await (await shareVideo()).json()).material;
+    const copy = await (await post({ action: "copy", id: template.id, mode: "adapt" })).json();
+    async function save(expectedRevision: number) {
+      const stage = await post({ action: "start-save", copyId: copy.copyId, expectedRevision, item: copy.item });
+      expect(stage.status).toBe(200);
+      expect((await post({ action: "commit-save", copyId: copy.copyId, saveId: (await stage.json()).saveId })).status).toBe(200);
+      return (await (await post({ action: "prepare-delivery", copyId: copy.copyId })).json()).contentItemId;
+    }
+    const first = await save(0);
+    const retry = (await (await post({ action: "prepare-delivery", copyId: copy.copyId })).json()).contentItemId;
+    expect(retry).toBe(first);
+    bytes = "second-video";
+    const second = await save(1); expect(second).not.toBe(first);
+    async function videoBytes(id: string) {
+      const urls = await resolveGalleryContentMedia(scope.classId, scope.assignmentId, id);
+      return Buffer.from(await (await mediaGET(new Request(`${origin}${urls!.video}`))).arrayBuffer()).toString();
+    }
+    expect(await videoBytes(first)).toBe("first-video"); expect(await videoBytes(second)).toBe("second-video");
+    expect(await resolveGalleryContentMedia(scope.classId, "other-task", first)).toBeUndefined();
+    const saved = await (await get({ library: "true", action: "saved-copy", copyId: copy.copyId }, { classId: "", assignmentId: "" })).json();
+    expect(saved.revision).toBe(2);
+    const globalVideo = await mediaGET(new Request(`${origin}${saved.copy.media.video}`));
+    expect(Buffer.from(await globalVideo.arrayBuffer()).toString()).toBe("second-video");
+    expect((await (await get({ library: "true", action: "saved-copies" }, { classId: "", assignmentId: "" })).json()).items).toHaveLength(1);
+  });
   it("rejects unsaved external videos without fetching caller-provided URLs", async () => {
     const fetch = vi.spyOn(globalThis, "fetch");
     mocks.media.mockResolvedValue({ class_id: scope.classId, assignment_id: scope.assignmentId, student_id: "cohort", content_item_id: item.id,
       mime_type: "video/mp4", data_url: "http://127.0.0.1/private" });
     expect((await shareVideo()).status).toBe(422); expect(fetch).not.toHaveBeenCalled(); fetch.mockRestore();
   });
-  it("renews an unpublished copy after expiry and withdrawal, only for its teacher and exact task", async () => {
+  it("renews an unpublished copy after expiry and withdrawal, only for its teacher, including another authorized task", async () => {
     mocks.media.mockImplementation(async (_class, _assignment, _student, id, kind) => id === item.id && kind === "video" ? {
       class_id: scope.classId, assignment_id: scope.assignmentId, student_id: "cohort", content_item_id: item.id,
       mime_type: "video/mp4", media_type: "video", data_url: "data:video/mp4;base64,dmlkZW8=",
@@ -378,7 +429,8 @@ describe("saved video reuse", () => {
     expect(renewed.video).not.toBe(copy.media.video);
     expect((await mediaGET(new Request(`${origin}${renewed.video}`))).status).toBe(200);
     mocks.media.mockClear();
-    expect((await get(fields, { ...scope, assignmentId: "ea-task-unrelated" })).status).toBe(404);
+    expect((await get(fields, { ...scope, assignmentId: "ea-task-unrelated" })).status).toBe(200);
+    mocks.media.mockClear();
     mocks.session.mockResolvedValue({ ...teacher, geniusId: "different-teacher" }); expect((await get(fields)).status).toBe(404);
     mocks.session.mockResolvedValue({ ...teacher, role: "student" }); expect((await get(fields)).status).toBe(403);
     mocks.session.mockResolvedValue(null); expect((await get(fields)).status).toBe(401);
@@ -430,5 +482,66 @@ describe("saved video reuse", () => {
     expect((await post({ action: "share-video", item: focused, lessonNumber: 3, metadata: { ...metadata, focus: { misconceptions: ["a", "b"], coreIdeas: [] } } })).status).toBe(422);
     expect((await post({ action: "share-video", item, lessonNumber: 3, metadata: { ...metadata, focus: { misconceptions: ["a"], coreIdeas: [] } } })).status).toBe(422);
     expect(mocks.media).not.toHaveBeenCalled();
+  });
+});
+
+describe("teacher library outside classes and strict Step 3 recommendations", () => {
+  const globalScope = { classId: "", assignmentId: "" };
+  const libraryGet = (fields: Record<string, string> = {}) => get({ library: "true", ...fields }, globalScope);
+  const libraryPost = (fields: Record<string, unknown>) => post({ library: true, ...fields }, globalScope);
+
+  it("allows an authenticated teacher to browse, copy, edit and save without creating a class", async () => {
+    const id = await share(); mocks.context.mockClear();
+    expect((await libraryGet()).status).toBe(200);
+    const copy = await (await libraryPost({ action: "copy", id, mode: "adapt" })).json();
+    const started = await libraryPost({ action: "start-save", copyId: copy.copyId, expectedRevision: 0,
+      deck: { ...copy.deck, draft: { ...copy.deck.draft, title: "My independent material" } }, assets: { evidence: { width: 1, height: 1, digest: hash } } });
+    expect(started.status).toBe(200); const { saveId } = await started.json();
+    expect((await libraryPost({ action: "upload-copy-asset", copyId: copy.copyId, saveId, visualId: "evidence", asset: { data: tinyImage, width: 1, height: 1 } })).status).toBe(200);
+    expect((await libraryPost({ action: "commit-save", copyId: copy.copyId, saveId })).status).toBe(200);
+    expect((await (await libraryGet({ action: "saved-copies" })).json()).items).toEqual([expect.objectContaining({ title: "My independent material", revision: 1 })]);
+    expect(mocks.context).not.toHaveBeenCalled();
+    expect((await libraryPost({ action: "prepare-delivery", copyId: copy.copyId })).status).toBe(400);
+    mocks.context.mockRejectedValueOnce(new WorkspaceError("Not your class", 403));
+    expect((await post({ action: "prepare-delivery", copyId: copy.copyId })).status).toBe(403);
+    expect((await post({ action: "prepare-delivery", copyId: copy.copyId })).status).toBe(200);
+    const disk = await fs.readFile(path.join(directory, "workspace.json"), "utf8");
+    expect(disk).not.toMatch(/"record_id":"(?:CONTENT|PUBLISH)/);
+    mocks.session.mockResolvedValue({ ...teacher, geniusId: "another-teacher" });
+    expect((await libraryGet({ action: "saved-copy", copyId: copy.copyId })).status).toBe(404);
+    expect((await post({ action: "prepare-delivery", copyId: copy.copyId })).status).toBe(404);
+  });
+
+  it("requires teacher identity and same-origin writes even when no class is selected", async () => {
+    expect((await get({}, globalScope)).status).toBe(400);
+    mocks.session.mockResolvedValue(null); expect((await libraryGet()).status).toBe(401);
+    mocks.session.mockResolvedValue({ ...teacher, role: "student" }); expect((await libraryGet()).status).toBe(403);
+    mocks.session.mockResolvedValue(teacher);
+    expect((await post({ library: true, action: "copy", id: "unused", mode: "use" }, globalScope, "https://evil.test")).status).toBe(403);
+    expect((await GET(new Request(`${origin}/api/material-gallery?library=true`, { headers: { Authorization: "Bearer invalid" } }))).status).toBe(401);
+  });
+
+  it("returns at most three relevant matches, preferring both selected focus items and excluding unrelated materials", async () => {
+    const exact = await share({ metadata: { ...metadata, title: "Both selected focuses", focus: { misconceptions: ["a", "b"], coreIdeas: [] } } });
+    for (let i = 0; i < 4; i++) await share({ metadata: { ...metadata, title: `One related focus ${i}`, focus: { misconceptions: ["a"], coreIdeas: [] } } });
+    await share({ lessonNumber: 2, metadata: { ...metadata, title: "Unrelated curriculum" } });
+    const fields = { recommendedOnly: "true", recommendLesson: "3", recommendStrategy: "cognitive conflict", format: "slides", recommendFocus: JSON.stringify({ misconceptions: ["a", "b"], coreIdeas: [] }), limit: "60" };
+    const result = await (await get(fields)).json();
+    expect(result.items).toHaveLength(3); expect(result.items[0].id).toBe(exact);
+    expect(result.nextCursor).toBeUndefined();
+    expect(result.items.every((item: { matchReasons: string[] }) => item.matchReasons.includes("Same focus"))).toBe(true);
+    expect((await (await get({ ...fields, format: "video" })).json()).items).toEqual([]);
+    expect((await (await get({ ...fields, recommendLesson: "1" })).json()).items).toEqual([]);
+    expect((await (await get({ ...fields, recommendStrategy: "analogy" })).json()).items).toEqual([]);
+    expect((await get({ recommendedOnly: "true" })).status).toBe(400);
+  });
+
+  it("supports reviewed keywords and grade filters without inventing tags or accepting unlimited text", async () => {
+    const id = await share({ metadata: { ...metadata, keywords: ["elasticity", "visual learning", "elasticity"] } });
+    const result = await (await libraryGet({ search: "visual learning", gradeBand: "6–8" })).json();
+    expect(result.items[0]).toMatchObject({ id, promptTags: { KEYWORDS: "elasticity, visual learning" } });
+    expect(result.facets.grades).toEqual(["6–8"]);
+    expect((await (await libraryGet({ gradeBand: "University" })).json()).items).toEqual([]);
+    expect((await post(startBody({ metadata: { ...metadata, keywords: Array(13).fill("tag") } }))).status).toBe(422);
   });
 });
