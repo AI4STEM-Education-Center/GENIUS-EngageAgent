@@ -33,6 +33,7 @@ export default function GalleryMaterialDetails(material: Props) {
   return <div className="mt-2 text-sm text-mute">
     <p>{creatorName ? `By ${creatorName}` : "Author not recorded"}
       {teacherCount !== undefined && <span title="Teachers who saved an editable copy. Each teacher is counted once; previews do not count."> · {teacherCount} {teacherCount === 1 ? "teacher has" : "teachers have"} saved a copy</span>}</p>
+    {result?.publishedTeacherCount !== undefined && <p className="mt-1 text-xs text-mute" title="Distinct teachers with a currently published classroom copy. Saving or previewing alone does not count.">{result.publishedTeacherCount} {result.publishedTeacherCount === 1 ? "teacher using" : "teachers using"} with students</p>}
     {matchTags && <p className="mt-2 text-xs font-semibold text-ok">{matchTags.filter(tag => tag.matched).length} of 7 match</p>}
     <ul aria-label="Material tags" className="mt-3 flex flex-wrap gap-1.5">
       {(compact ? tags.slice(0, 7) : tags).map(([label, value], i) => <li key={`${label}-${i}`} title={`${label}: ${value}`}

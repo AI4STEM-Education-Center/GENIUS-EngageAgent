@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, LoaderCircle, Plus, RefreshCw, Presentation } from "lucide-react";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import MaterialActivityView from "./MaterialActivityView";
@@ -9,6 +9,7 @@ import type { UserContext } from "@/lib/auth";
 import type { ContentItem, TextMode } from "@/lib/types";
 import type { StepProgress } from "@/lib/student-progress";
 import { stableContentMedia } from "@/lib/stable-media-urls";
+import { ratingMatchesPublication } from "@/lib/material-feedback-version";
 import {
   buildPublishedContentState,
   type MediaRecordResponse,
@@ -46,6 +47,20 @@ const getContentModeLabels = (item: ContentItem) => {
   return item.type ? [item.type] : [];
 };
 
+type QuestionMaterial = { contentItemId: string; publishedAt?: string; title?: string } | null;
+type SavedRating = { content_item_id: string; rating: number; published_at?: string; rated_at?: string };
+const materialVersion = (item: ContentItem) => JSON.stringify([item.id, item.publishedAt || ""]);
+const questionMaterial = (item?: ContentItem): QuestionMaterial => item
+  ? { contentItemId: item.id, publishedAt: item.publishedAt, title: item.title } : null;
+function mergeRatingRecords(current: SavedRating[], incoming: SavedRating[]) {
+  const rows = new Map(current.map(row => [JSON.stringify([row.content_item_id, row.published_at || ""]), row]));
+  for (const row of incoming) {
+    const key = JSON.stringify([row.content_item_id, row.published_at || ""]), previous = rows.get(key);
+    if (!previous || (row.rated_at || "") >= (previous.rated_at || "")) rows.set(key, row);
+  }
+  return [...rows.values()];
+}
+
 function ContentReview({
   user,
   onProgress,
@@ -63,9 +78,11 @@ function ContentReview({
   const [error, setError] = useState<string | null>(null);
 
   const [submittedQuestions, setSubmittedQuestions] = useState<string[] | null>(null);
+  const [submittedMaterials, setSubmittedMaterials] = useState<QuestionMaterial[]>([]);
   const [activeMaterialId, setActiveMaterialId] = useState("");
-  const [questionMaterialIds, setQuestionMaterialIds] = useState<string[]>([]);
+  const [questionMaterials, setQuestionMaterials] = useState<(QuestionMaterial | undefined)[]>([]);
   const activeMaterial = contentItems.find(item => item.id === activeMaterialId) || contentItems[0];
+  const readingPositions = useRef(new Map<string, number>());
   const [draftQuestions, setDraftQuestions] = useState<string[]>([""]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -78,7 +95,12 @@ function ContentReview({
   };
 
   const [ratings, setRatings] = useState<Record<string, number>>({});
-  const [savedRatings, setSavedRatings] = useState<Record<string, number>>({});
+  const [ratingRecords, setRatingRecords] = useState<SavedRating[]>([]);
+  const savedRatings = useMemo(() => Object.fromEntries(contentItems.flatMap(item => {
+    const row = ratingRecords.filter(rating => rating.content_item_id === item.id && ratingMatchesPublication(rating, item.publishedAt))
+      .sort((a, b) => (b.rated_at || "").localeCompare(a.rated_at || ""))[0];
+    return row ? [[item.id, row.rating]] : [];
+  })), [contentItems, ratingRecords]);
   const [ratingSubmitting, setRatingSubmitting] = useState(false);
   const [ratingError, setRatingError] = useState<string | null>(null);
 
@@ -172,10 +194,11 @@ function ContentReview({
         { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" },
       );
       if (!res.ok) return;
-      const data = (await res.json()) as { reviewQuestions?: { questions?: string[] }[] };
+      const data = (await res.json()) as { reviewQuestions?: { questions?: string[]; questionMaterials?: QuestionMaterial[] }[] };
       const existing = data.reviewQuestions?.[0]?.questions;
       if (existing && existing.length > 0) {
         setSubmittedQuestions(existing);
+        setSubmittedMaterials(data.reviewQuestions?.[0]?.questionMaterials || []);
       }
     } catch {
       // Best-effort — the write field below still works even if this fails.
@@ -191,13 +214,8 @@ function ContentReview({
         { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" },
       );
       if (!res.ok) return;
-      const data = (await res.json()) as { ratings?: { content_item_id: string; rating: number }[] };
-      const existing: Record<string, number> = {};
-      for (const r of data.ratings ?? []) {
-        existing[r.content_item_id] = r.rating;
-      }
-      setRatings((current) => ({ ...current, ...existing }));
-      setSavedRatings((current) => ({ ...current, ...existing }));
+      const data = (await res.json()) as { ratings?: SavedRating[] };
+      setRatingRecords(current => mergeRatingRecords(current, data.ratings || []));
     } catch {
       // Rating history is best-effort and should not block content rendering.
     }
@@ -267,16 +285,16 @@ function ContentReview({
 
   const updateDraftQuestion = (index: number, value: string) => {
     setDraftQuestions((prev) => prev.map((q, i) => (i === index ? value : q)));
-    setQuestionMaterialIds(prev => { const next = [...prev]; if (next[index] === undefined) next[index] = activeMaterial?.id || ""; return next; });
+    setQuestionMaterials(prev => { const next = [...prev]; if (next[index] === undefined) next[index] = questionMaterial(activeMaterial); return next; });
   };
 
   const addDraftQuestion = () => {
-    setQuestionMaterialIds(prev => [...Array.from({ length: draftQuestions.length }, (_, i) => prev[i] || ""), activeMaterial?.id || ""]);
+    setQuestionMaterials(prev => [...Array.from({ length: draftQuestions.length }, (_, i) => prev[i] === undefined ? questionMaterial(activeMaterial) : prev[i]), questionMaterial(activeMaterial)]);
     setDraftQuestions((prev) => [...prev, ""]);
   };
 
   const removeDraftQuestion = (index: number) => {
-    setQuestionMaterialIds(prev => prev.filter((_, i) => i !== index));
+    setQuestionMaterials(prev => prev.filter((_, i) => i !== index));
     setDraftQuestions((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
   };
 
@@ -286,6 +304,13 @@ function ContentReview({
     const cleaned = draftQuestions.map((q) => q.trim()).filter((q) => q.length > 0);
     if (cleaned.length === 0) {
       setSubmitError("Write at least one question before submitting.");
+      return;
+    }
+
+    const bindings = draftQuestions.flatMap((question, index) => question.trim()
+      ? [questionMaterials[index] === undefined ? questionMaterial(activeMaterial) : questionMaterials[index]!] : []);
+    if (bindings.some(binding => binding && !contentItems.some(item => item.id === binding.contentItemId && item.publishedAt === binding.publishedAt))) {
+      setSubmitError("A selected material has changed. Review it and choose its current version below; your questions are retained.");
       return;
     }
 
@@ -301,20 +326,19 @@ function ContentReview({
           assignmentId,
           studentId: user.userId,
           questions: cleaned,
-          ...(contentItems.some(item => item.publishedAt) ? { questionMaterials: draftQuestions.flatMap((question, index) => {
-            if (!question.trim()) return [];
-            const item = contentItems.find(item => item.id === questionMaterialIds[index]);
-            return [item?.publishedAt ? { contentItemId: item.id, publishedAt: item.publishedAt } : null];
-          }) } : {}),
+          ...(contentItems.some(item => item.publishedAt) ? { questionMaterials: bindings.map(binding =>
+            binding?.publishedAt ? { contentItemId: binding.contentItemId, publishedAt: binding.publishedAt } : null) } : {}),
         }),
       });
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        if (res.status === 409) void loadPublishedContent(true);
         throw new Error((data as Record<string, string>).error ?? "Failed to submit questions.");
       }
 
       setSubmittedQuestions(cleaned);
+      setSubmittedMaterials(bindings);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to submit.");
     } finally {
@@ -327,14 +351,15 @@ function ContentReview({
   // published, still-unrated materials can be picked after submitting.
   const selectRating = (contentItemId: string, rating: number) => {
     if (!ratingUnlocked || savedRatings[contentItemId] != null || ratingSubmitting) return;
-    setRatings((prev) => ({ ...prev, [contentItemId]: rating }));
+    const item = contentItems.find(item => item.id === contentItemId);
+    if (item) setRatings((prev) => ({ ...prev, [materialVersion(item)]: rating }));
   };
 
   const submitRatings = async () => {
     if (!classId || !assignmentId || !ratingUnlocked || ratingSubmitting) return;
 
     const pending = contentItems.filter((item) => savedRatings[item.id] == null);
-    if (pending.some((item) => ratings[item.id] == null)) {
+    if (pending.some((item) => ratings[materialVersion(item)] == null)) {
       setRatingError("Rate every material before submitting.");
       return;
     }
@@ -353,26 +378,24 @@ function ContentReview({
               assignmentId,
               studentId: user.userId,
               contentItemId: item.id,
-              rating: ratings[item.id],
+              rating: ratings[materialVersion(item)],
+              ...(item.publishedAt ? { publishedAt: item.publishedAt } : {}),
             }),
           });
-          return { id: item.id, ok: res.ok };
+          return { item, ok: res.ok, changed: res.status === 409 };
         } catch {
-          return { id: item.id, ok: false };
+          return { item, ok: false, changed: false };
         }
       }),
     );
 
     // Keep whatever did save, so a retry only resends the failed ones.
-    setSavedRatings((prev) => {
-      const next = { ...prev };
-      for (const r of results) {
-        if (r.ok) next[r.id] = ratings[r.id];
-      }
-      return next;
-    });
+    setRatingRecords(prev => mergeRatingRecords(prev, results.filter(result => result.ok).map(({ item }) => ({
+      content_item_id: item.id, rating: ratings[materialVersion(item)], published_at: item.publishedAt, rated_at: new Date().toISOString(),
+    }))));
     if (results.some((r) => !r.ok)) {
-      setRatingError("Some ratings didn't save. Please try submitting again.");
+      setRatingError(results.some(r => r.changed) ? "A material has changed. Read the current version before rating it." : "Some ratings didn't save. Please try submitting again.");
+      if (results.some(r => r.changed)) void loadPublishedContent(true);
     }
     setRatingSubmitting(false);
   };
@@ -411,7 +434,7 @@ function ContentReview({
   }
 
   const allRatingsSubmitted = contentItems.every((item) => savedRatings[item.id] != null);
-  const allRatingsSelected = contentItems.every((item) => ratings[item.id] != null);
+  const allRatingsSelected = contentItems.every((item) => savedRatings[item.id] != null || ratings[materialVersion(item)] != null);
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -434,7 +457,8 @@ function ContentReview({
         const itemMedia = media[item.id];
         return <article key={item.id} aria-label={item.title} className={`${cardStyle} ${item.slides ? "!p-4" : ""}`}>
           {item.slides ? (
-            <PublishedSlidesReader classId={classId} assignmentId={assignmentId} publicationId={item.slides.publicationId} audience="student" learnerId={user.geniusId} onQuestion={focusQuestions} />
+            <PublishedSlidesReader classId={classId} assignmentId={assignmentId} publicationId={item.slides.publicationId} audience="student" learnerId={user.geniusId} onQuestion={focusQuestions}
+              initialPosition={readingPositions.current.get(materialVersion(item))} onPositionChange={position => readingPositions.current.set(materialVersion(item), position)} />
           ) : <>
             <div className="flex flex-wrap gap-2">
               {getContentModeLabels(item).map((label) => <span key={`${item.id}-${label}`} className="rounded-full bg-line-2 px-2 py-0.5 text-xs font-semibold text-ink-2">{label}</span>)}
@@ -442,6 +466,7 @@ function ContentReview({
             <h3 className="mt-2 text-lg font-semibold text-ink">{item.title}</h3>
             {item.activity ? <MaterialActivityView activity={item.activity} media={itemMedia} questionInput={false}
               onVideoError={url => recoverVideo(item.id, url)}
+              initialPosition={readingPositions.current.get(materialVersion(item))} onPositionChange={position => readingPositions.current.set(materialVersion(item), position)}
               predictionKey={`engage:material-prediction:${JSON.stringify([user.geniusId, classId, assignmentId, item.id, ...(item.publishedAt ? [item.publishedAt] : [])])}`} /> : (
               <div className="mt-3 space-y-4">
                 {itemMedia?.image && <img src={itemMedia.image} alt={item.title} className="max-h-96 w-full rounded-lg border border-line object-contain" />}
@@ -459,14 +484,22 @@ function ContentReview({
           <>
             <p className="mt-2 flex items-center gap-1.5 text-sm font-medium text-ok" role="status"><Check size={16} aria-hidden="true" />Submitted</p>
             <ul className="mt-3 space-y-2">
-              {submittedQuestions.map((q, i) => <li key={i} className="break-words rounded-lg bg-canvas px-3 py-2.5 text-sm leading-relaxed text-ink-2">{q}</li>)}
+              {submittedQuestions.map((q, i) => {
+                const binding = submittedMaterials[i], item = contentItems.find(item => item.id === binding?.contentItemId);
+                return <li key={i} className="break-words rounded-lg bg-canvas px-3 py-2.5 text-sm leading-relaxed text-ink-2">
+                  {submittedMaterials.length > 0 && <p className="mb-1 text-xs text-mute">About: {binding ? item?.title || binding.title || "Previously shared material" : "Whole activity"}{binding && item && binding.publishedAt !== item.publishedAt ? " · Earlier version" : ""}</p>}{q}</li>;
+              })}
             </ul>
           </>
         ) : (
           <>
             <div className="mt-3 flex flex-col gap-3">
-              {draftQuestions.map((q, i) => <div key={i} className="flex flex-wrap items-start gap-2">
-                {contentItems.length > 1 && <label className="w-full text-xs text-mute">About<select aria-label={`Material for question ${i + 1}`} className="ml-2 rounded border border-line bg-white px-2 py-1" value={questionMaterialIds[i] ?? activeMaterial?.id ?? ""} onChange={event => setQuestionMaterialIds(prev => { const next = [...prev]; next[i] = event.target.value; return next; })}><option value="">Whole activity</option>{contentItems.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>}
+              {draftQuestions.map((q, i) => {
+                const binding = questionMaterials[i], current = contentItems.find(item => item.id === binding?.contentItemId);
+                const changed = !!binding && (!current || current.publishedAt !== binding.publishedAt);
+                return <div key={i} className="flex min-w-0 flex-wrap items-start gap-2">
+                {(contentItems.length > 1 || changed) && <label className="flex w-full min-w-0 flex-col gap-1 text-xs text-mute sm:flex-row sm:items-center sm:gap-2">About<select aria-label={`Material for question ${i + 1}`} disabled={submitting} className="min-w-0 max-w-full rounded border border-line bg-white px-2 py-1 sm:flex-1" value={binding === undefined ? activeMaterial?.id || "" : binding?.contentItemId || ""} onChange={event => setQuestionMaterials(prev => { const next = [...prev]; next[i] = questionMaterial(contentItems.find(item => item.id === event.target.value)); return next; })}><option value="">Whole activity</option>{binding && !current && <option value={binding.contentItemId}>{binding.title || "Previously shared material"} (unavailable)</option>}{contentItems.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>}
+                {changed && <p role="status" className="w-full rounded-lg bg-warn-light p-2 text-xs text-warn">This material changed after you started this question. {current ? <button type="button" disabled={submitting} className="font-semibold underline" onClick={() => { setActiveMaterialId(current.id); setQuestionMaterials(prev => { const next = [...prev]; next[i] = questionMaterial(current); return next; }); }}>Use current version</button> : "Choose another material or Whole activity."}</p>}
                 <textarea
                   ref={i === 0 ? firstQuestion : undefined}
                   aria-label={`Question ${i + 1}`}
@@ -479,7 +512,7 @@ function ContentReview({
                 />
                 {draftQuestions.length > 1 && <button type="button" onClick={() => removeDraftQuestion(i)} disabled={submitting}
                   aria-label={`Remove question ${i + 1}`} className="mt-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-mute hover:bg-canvas disabled:opacity-45">Remove</button>}
-              </div>)}
+              </div>; })}
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
               <button type="button" onClick={addDraftQuestion} disabled={submitting} className={secondaryButton}><Plus size={15} aria-hidden="true" />Add another question</button>
@@ -500,7 +533,7 @@ function ContentReview({
         </p>
         <div className="mt-3 space-y-4">
           {contentItems.map((item) => {
-            const currentRating = ratings[item.id];
+            const currentRating = ratings[materialVersion(item)];
             const saved = savedRatings[item.id];
             const locked = !ratingUnlocked || saved != null || ratingSubmitting;
             return <div key={item.id}>

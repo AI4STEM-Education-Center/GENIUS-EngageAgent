@@ -21,7 +21,7 @@ function request(path: string, bearer?: string, method = "GET", extra: Record<st
     method, headers: { origin: host, "content-type": "application/json", ...(bearer === undefined ? {} : {authorization: `Bearer ${bearer}`}) }, ...(method === "GET" ? {} : {body: JSON.stringify(fields)}),
   });
 }
-beforeEach(() => { vi.clearAllMocks(); vi.stubEnv("SSO_SECRET", "audit-secret"); mocks.session.mockResolvedValue(null); mocks.quiz.mockResolvedValue({status:"published", lesson_number:8}); mocks.statuses.mockResolvedValue({"content-review":"available","content-rating":"available"}); mocks.published.mockResolvedValue([{content_item_id:"deck-1"}]); mocks.list.mockResolvedValue([]); mocks.save.mockImplementation(async x=>x); });
+beforeEach(() => { vi.clearAllMocks(); vi.stubEnv("SSO_SECRET", "audit-secret"); mocks.session.mockResolvedValue(null); mocks.quiz.mockResolvedValue({status:"published", lesson_number:8}); mocks.statuses.mockResolvedValue({"content-review":"available","content-rating":"available"}); mocks.published.mockResolvedValue([{class_id:scope.classId,assignment_id:scope.assignmentId,content_item_id:"deck-1",published:true,published_at:"2026-11-17T12:00:00.000Z"}]); mocks.list.mockResolvedValue([]); mocks.save.mockImplementation(async x=>x); });
 afterEach(()=>vi.unstubAllEnvs());
 describe("GENIUS workflow authorization", () => {
   it("rejects anonymous rating, question and activity reads before storage", async()=>{

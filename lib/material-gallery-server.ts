@@ -12,7 +12,7 @@ import { resolveStrategyFocus } from "./strategy-focus";
 import { getMedia } from "./nosql";
 import { parseMaterialActivity } from "./material-activities";
 import { galleryLessonIdentity, galleryMatches, galleryPromptTags } from "./material-gallery-tags";
-import { isSlideAsset, type SlideDraft } from "./slides/model";
+import { draftVisibleVisualIds, isSlideStrategy, isSlideAsset, type SlideDraft } from "./slides/model";
 import type { ContentItem, TextMode } from "./types";
 import type { GalleryFilters, GalleryFocus, GalleryMaterial, GalleryMetadata, GalleryProvenance, GalleryScope, SavedGalleryCopySummary } from "./material-gallery";
 import { assertGalleryStorage, copyGalleryBlob, duplicateGalleryBlob, galleryBlobUrl, readGalleryBlob, storeGalleryBlob, type GalleryBlob } from "./material-gallery-storage";
@@ -794,10 +794,13 @@ export async function galleryGet(request: Request) {
   const feedbackCache = galleryFeedbackCache();
   return { items: await Promise.all(page.map(async row => {
     const source = await workspaceGet<Source>(PARTITION, sourceKey(row.id));
-    const firstVisual = Object.keys(source?.assets || {})[0];
+    const firstSlide = source?.format === "slides" ? source.draft?.slides[0] : undefined;
+    const firstVisual = source?.draft && isSlideStrategy(source.strategy)
+      ? draftVisibleVisualIds(source.draft, source.strategy, 0).find(id => source.assets[id]) : undefined;
     const image = source?.format === "video" ? source.videoMedia?.image
       : firstVisual ? await workspaceGet<GalleryBlob>(PARTITION, assetKey(row.id, firstVisual)) : null;
     return { ...row.material, isOwner: row.ownerId === context.userId, teacherCount: await teacherCount(row.id), feedback: await galleryFeedback(row.id, feedbackCache),
+      ...(firstSlide ? { previewSlide: { stage: firstSlide.stage, title: firstSlide.title, body: firstSlide.body, task: firstSlide.task } } : {}),
       ...(image ? { previewImage: await galleryBlobUrl(image) } : {}),
       ...(recommendLesson || recommendStrategy ? { matchReasons: rank(row).reasons, matchTags: rank(row).tags } : {}) };
   })),

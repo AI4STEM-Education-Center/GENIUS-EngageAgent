@@ -80,3 +80,15 @@ it("attributes multi-material questions only to their selected publication versi
     questionMaterials: [{ contentItemId: "slides-copy", publishedAt: since }, { contentItemId: "another", publishedAt: since }, { contentItemId: "slides-copy", publishedAt: "2026-11-15T00:00:00.000Z" }, null] }]);
   expect(await galleryFeedback("template")).toMatchObject({ questionCount: 1, questionAuthorCount: 1, attributableActivities: 1, firstPublicationAt: since, lastFeedbackAt: at });
 });
+
+it("counts distinct verified publishers of active copies separately from private saves", async () => {
+  for (const id of ["one", "two", "three", "withdrawn", "unknown"]) await indexGalleryUse("template", scope, id);
+  mocks.published.mockResolvedValue([
+    { ...publication("one"), published_by: "teacher-a" }, { ...publication("two"), published_by: "teacher-a" },
+    { ...publication("three"), published_by: "teacher-b" }, { ...publication("withdrawn"), published_by: "teacher-c", published: false }, publication("unknown"),
+  ]);
+  mocks.ratings.mockResolvedValue([{ ...rating("stale-version", 1, "one"), published_at: "2026-11-15T00:00:00.000Z" }, { ...rating("current", 5, "one"), published_at: since }]);
+  const result = await galleryFeedback("template");
+  expect(result).toMatchObject({ publishedTeacherCount: 2, ratingCount: 1, averageRating: 5 });
+  expect(JSON.stringify(result)).not.toMatch(/teacher-a|teacher-b|teacher-c/);
+});

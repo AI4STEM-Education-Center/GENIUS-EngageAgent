@@ -1,0 +1,56 @@
+# #179 / #181 / #196: strict follow-up audit — 2026-11-17
+
+Baseline production: `04467c18beb01a3dfb886c6cf6776a2e3691c90c`, Amplify 120. Sources were retrieved again from GitHub, not copied from an earlier completion summary. The supplied `EngageAgent-UI-v8.4-prototype_1 (1).html` was opened in the background in-app browser and compared with the production teacher and student flows.
+
+## Source precedence
+
+- [#179](https://github.com/AI4STEM-Education-Center/GENIUS-EngageAgent/issues/179) explicitly permits **one or two** misconceptions. Preserve this even though parts of the HTML are single-select.
+- The user's later instructions place **up to three** relevant recommendations at the **top of Step 3**, hide the section when none qualify, and keep the full material library outside classes. These supersede the HTML's lower-positioned, two-card example.
+- [#197](https://github.com/AI4STEM-Education-Center/GENIUS-EngageAgent/issues/197), closed, explicitly changes the navigation labels to Pre-knowledge assessment, Strategy recommendations and Material Generation. The difference from the older HTML labels is deliberate.
+- Prototype numbers, authors, example experiences and feedback are demonstration data. Production shows verified records, empty states or unrecorded fields, not fabricated matches or counts.
+
+## Requirement-by-requirement result
+
+“Present” means implemented in the baseline and examined through the code and relevant regression coverage. Browser evidence is identified separately; it does not imply every combination was manually repeated this time.
+
+| Source clause | HTML counterpart | Result and evidence |
+| --- | --- | --- |
+| #179: select a Gallery material instead of generating | Gallery Open; Step 3 Use as is | Present. Production preview did not make a copy or increment saves; Open created an independent editable copy and Save succeeded. **Fixed:** standalone Open incorrectly marked the unchanged copy as Adapted. It now records use/copy; automatic task adaptation remains a separate action. |
+| #179: change material for the teacher's needs | Slide thumbnails, text/task/notes, AI whole/single-page revision, undo | Present. Editor, per-page video links, presenter, save/reopen and targeted AI checks are implemented. Prior release browser evidence covers real AI revisions and repair/recheck; regression tests rerun this release. |
+| #179: class profile | Class profile modal; Step 3 profile card and Classroom context | Present. Local profile and task supplements are used by generation/revision; the accepted GENIUS snapshot is immutable. Production correctly shows disconnected rather than pretending to have upstream data. |
+| #179: experience check-in, upstream data pending | Step 2 reported experiences, counts, weak fit, AI suggestions and own example | Present, including scope/version handling, stable activity IDs and explicit acceptance. **Fixed:** waiting for AI fit suggestions blocked manual choices; manual entry and reported choices now stay usable, with timeout and retry. Synthetic provider ready/update/error/forbidden cases were browser-tested in the preceding release. |
+| #179: Cognitive Conflict and Engaged Critiquing misconceptions, 1–2 | Strategy-specific misconception controls | Present. Both strategies were opened in production; two misconceptions could be selected. No prototype single-select regression introduced. |
+| #179: Analogy and Experience Bridging core ideas | Core idea controls and familiar experience picker | Present. Production Analogy choice and saved experience were verified; all four strategies retain their own focus semantics in regression tests. |
+| #179: classroom-context summary participates in prompts | Four context cards and editable Classroom context | Present. Private generation receipts record the actual prompt, accepted context reference, strategy, focus, experience source and model options. Public tags expose only teacher-reviewed summaries. |
+| #179: matching Gallery suggestions | Matches from the Gallery, seven matching dimensions | Present. Production card showed four matching dimensions with reasons; unrelated lesson/strategy filters produced no recommendation. Top/max-three/empty-hide behavior is regression-tested. |
+| #179: use recommendation unchanged or AI-adjust to this task | Use as is; Adapt to my class | Present. Task copy carries context and focus; Adapt invokes real revision. Standalone library Open now avoids falsely claiming adaptation. Video adaptation edits teaching text, not an already rendered MP4. |
+| #179: share a generated material | Share to Gallery modal | Present. Inherited tags, teacher-note toggle, reviewed cleanup suggestions, original-private-copy preservation and independent sharing/delivery are implemented and tested. |
+| #179 + user: materials outside class | Top-level Gallery and private materials library | Present. New generated materials can be saved directly; editing/reopening is class-independent; sending requires an explicit class/task. |
+| #179 HTML editor: Check slides → issue → slide → Fix | Structured checklist and per-finding repair | Present. Fifteen criteria, locate-slide actions, repair history and recheck. The earlier production/local acceptance used real AI. This release reruns the applicable suites. |
+| #179 HTML editor: page Video link / presentation / download | Per-page video add/update/remove, presenter, export | Present. Student links are sanitized; PowerPoint exports links rather than embedding remote video bytes. Video player and related text remain separately editable. |
+| #196: creator attribution | Author on Gallery card and preview | Present. Verified sharing identity is recorded; owner-reviewed legacy repair is available. Unknown historical authors remain unrecorded until evidence/owner correction exists. |
+| #196: teachers using material | “used by N teachers” | **Improved:** previously only distinct private-copy savers were shown. Cards now separately show distinct verified teachers with currently published classroom copies. Multiple copies/classes by the same publisher count once; unpublished and unknown publishers do not count. |
+| #196: tags from prompt variables | Seven visible tags and detailed teaching tags | Present. Public reviewed metadata is separated from immutable private generation receipts. Model/options, strategy/focus, grade, quiz context, selected experience and other recorded parameters survive copy/save/share; missing historical inputs are not inferred. |
+| #196: lesson/strategy filters | Gallery filters | Present. Production combined lesson + strategy + search was exercised; no-result and matching-result states worked. Grade/type filters are also implemented. |
+| #196: preview | First-slide miniature and full preview | **Fixed:** the cover previously picked the first stored image, which could belong to a later slide. The card now shows actual slide-one text and its permitted visual. Legacy conflict decks keep the opening text-only, withholding result imagery. Full preview remains navigable. |
+| #181: “Change based on the new UI version” | Explore and ask: one material reader, prev/next/enlarge | Present. **Fixed:** switching away and back reset the reading position. Position now survives switching within this learner/task/publication; a new publication starts fresh. Browser verified slide 3 → other material → slide 3. |
+| #181 screenshot/HTML: predict before evidence and compare | Cognitive Conflict prediction and comparison | Present. Browser verified disabled Next until a prediction; later evidence is visible and the prediction survives switching/refresh. Video activities now use the same non-punctuation prediction requirement as slides. |
+| #181 screenshot/HTML: scientific questions | One/multiple questions, optional material attribution | Present. **Fixed:** a polling update could silently rebind a draft question to the newest material version. Drafts now keep the original binding, block stale submission, preserve text, and offer an explicit current-version choice. Submitted old-version questions are labeled accordingly. Server rejects stale/cross-task bindings. |
+| #181 screenshot/HTML: rate and complete | Question gate → rating → completed status | Present. **Fixed:** an old rating could keep a republished material locked and completed. Ratings now carry the exact publication version; stale submissions return 409, older ratings do not complete the new version, and legacy records use publication-time checks. |
+| User: student performance and ratings on Gallery | Extends HTML, not an original mastery display | Present. Rating counts/means/high-rating share, attributable questions and classification are shown with time and sample context. This release also excludes explicitly stale-version ratings even if submitted later. No learning-gain claim is made. |
+| User: simple layout and controls | Compact cards, optional advanced tools | Preserved. The question-material selector now fits narrow screens and long titles. No additional required workflow is added. |
+
+## Remaining integration/data boundaries
+
+1. The actual upstream GENIUS profile/check-in endpoint is **not enabled in production**. Contract, adapter, status/error/empty states, explicit acceptance, immutable snapshots and fallback are implemented and tested; activation still requires the real service and representative identity/scope checks. This is not claimed as a live sync.
+2. Historical missing authors and original prompts cannot be reconstructed reliably. Owner metadata repair is implemented; unrecoverable history stays visibly unrecorded.
+3. Student ratings/questions measure feedback, not knowledge gain. The supplied HTML does not specify a validated learning-gain measure.
+4. Pixel-for-pixel identity is not claimed: responsive layout, verified live data, #197 labels, two-focus support and the user's top-three recommendation rule deliberately differ from demo markup.
+
+## Validation and release evidence
+
+- Full suite: **3,009 passed, 38 skipped**, 200 passing files / 4 skipped. Two old authorization fixtures initially lacked real publication scope/flags; updated to realistic fixtures and the full suite rerun successfully.
+- TypeScript and production build passed. Changed-file ESLint: no errors, seven warnings (image rendering/previous unused variables).
+- Local background IAB: prediction gate, reading-position recovery, version-change warning retaining the question, explicit confirmation and saved questions/ratings; republishing reopened rating/completion, and rating the new version completed it again. A same-origin 390px iframe verified a 390px document with no horizontal overflow; the browser-wide viewport override did not take effect, so it is not counted as mobile-device emulation. A dev-server hot-reload storage snapshot required restarting the isolated server; the test then saved successfully. No production data or auth policy was altered to work around it.
+- Production baseline: Gallery combined filters/search/no-result, full preview, copy save, save-count deduplication, top recommendations and both misconception strategies checked in IAB.
+- New release production verification and screenshots are recorded in the evidence directory after deployment; source issue bodies and prototype digest are retained there.

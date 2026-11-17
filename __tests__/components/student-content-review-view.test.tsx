@@ -48,8 +48,7 @@ const ratingCard = async () => {
 };
 
 const ratingButtonsFor = (card: HTMLElement, title: string) => {
-  const row = within(card).getByText(title).parentElement as HTMLElement;
-  return within(row).getAllByRole("radio");
+  return within(within(card).getByRole("radiogroup", { name: `Engagement rating for ${title}` })).getAllByRole("radio");
 };
 
 it("shows the rating card below the questions, locked until questions are submitted", async () => {
@@ -506,4 +505,67 @@ it("replaces a failed URL on the next normal poll when no newer signature was ca
   fireEvent.focus(window);
   await screen.findByRole("heading", { name: "Waiting video 2" });
   expect(video.getAttribute("src")).toBe(url);
+});
+
+it("retains a question's original version across polling and requires an explicit current-version choice", async () => {
+  let publishedAt = "2026-11-17T12:00:00.000Z";
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => url.startsWith("/api/content-publish")
+    ? Promise.resolve({ ok: true, json: async () => ({ items: [{ ...publishedItems[0], published_at: publishedAt }] }) }) : original(url, init));
+  render(<StudentContentReviewView user={student} />);
+  fireEvent.change(await screen.findByRole("textbox", { name: "Question 1" }), { target: { value: "Why did the original ball flatten?" } });
+  publishedAt = "2026-11-17T13:00:00.000Z";
+  fireEvent.focus(window);
+  await screen.findByText(/This material changed after you started/);
+  fireEvent.click(screen.getByRole("button", { name: "Submit questions" }));
+  expect((await screen.findByRole("alert")).textContent).toMatch(/questions are retained/);
+  expect(fetchMock.mock.calls.some(([url, init]) => url.startsWith("/api/review-questions") && init?.method === "POST")).toBe(false);
+  expect(screen.getByRole("textbox", { name: "Question 1" })).toHaveProperty("value", "Why did the original ball flatten?");
+  fireEvent.click(screen.getByRole("button", { name: "Use current version" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit questions" }));
+  await screen.findByText("Submitted", { exact: true });
+  const call = fetchMock.mock.calls.find(([url, init]) => url.startsWith("/api/review-questions") && init?.method === "POST")!;
+  expect(JSON.parse(String(call[1]?.body)).questionMaterials).toEqual([{ contentItemId: "item-a", publishedAt }]);
+});
+
+it("reopens a republished material's rating and discards a choice made for the previous version", async () => {
+  let publishedAt = "2026-11-17T12:00:00.000Z";
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => url.startsWith("/api/content-publish")
+    ? Promise.resolve({ ok: true, json: async () => ({ items: [{ ...publishedItems[0], published_at: publishedAt }] }) }) : original(url, init));
+  const progress = vi.fn();
+  render(<StudentContentReviewView user={student} ratingUnlocked onRatingProgress={progress} />);
+  const card = await ratingCard();
+  fireEvent.click(ratingButtonsFor(card, "Material A")[3]);
+  publishedAt = "2026-11-17T13:00:00.000Z";
+  fireEvent.focus(window);
+  await waitFor(() => expect(within(card).getByRole("button", { name: "Submit rating" })).toHaveProperty("disabled", true));
+  fireEvent.click(ratingButtonsFor(card, "Material A")[2]);
+  fireEvent.click(within(card).getByRole("button", { name: "Submit rating" }));
+  await within(card).findByText("Thanks — you rated it 3 / 5.");
+  const call = fetchMock.mock.calls.find(([url, init]) => url.startsWith("/api/content-rating") && init?.method === "POST")!;
+  expect(JSON.parse(String(call[1]?.body)).publishedAt).toBe(publishedAt);
+  publishedAt = "2026-11-17T14:00:00.000Z";
+  fireEvent.focus(window);
+  await waitFor(() => expect(ratingButtonsFor(card, "Material A")).toHaveLength(5));
+  expect(progress).toHaveBeenLastCalledWith({ kind: "active" });
+});
+
+it("resumes inquiry reading when switching materials without carrying progress into a replacement", async () => {
+  let publishedAt = "2026-11-17T12:00:00.000Z";
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => url.startsWith("/api/content-publish")
+    ? Promise.resolve({ ok: true, json: async () => ({ items: [{ content_item_id: "item-a", published_at: publishedAt,
+      content_json: JSON.stringify({ title: "Material A", body: "Body A", strategy: "cognitive conflict", activity: conflictActivity }) }, publishedItems[1]] }) }) : original(url, init));
+  render(<StudentContentReviewView user={student} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+  fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "It stays round." } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByRole("button", { name: "2. Material B" }));
+  fireEvent.click(screen.getByRole("button", { name: "1. Material A" }));
+  expect(screen.getByText("Look at the contact")).toBeTruthy();
+  expect(screen.getByLabelText("Your prediction")).toHaveProperty("value", "It stays round.");
+  publishedAt = "2026-11-17T13:00:00.000Z";
+  fireEvent.focus(window);
+  await waitFor(() => expect(screen.queryByLabelText("Your prediction")).toBeNull());
 });

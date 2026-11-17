@@ -12,6 +12,8 @@ type Props = {
   /** Session-only key scoped by the caller to learner, class, task and material. */
   predictionKey?: string;
   onVideoError?: (url: string) => void;
+  initialPosition?: number;
+  onPositionChange?: (position: number) => void;
 };
 
 function readPrediction(key?: string): { draft: string; recorded: string } {
@@ -19,22 +21,24 @@ function readPrediction(key?: string): { draft: string; recorded: string } {
     const saved = key ? JSON.parse(sessionStorage.getItem(key) ?? "null") : null;
     return {
       draft: typeof saved?.draft === "string" && saved.draft.length <= 2000 ? saved.draft : "",
-      recorded: typeof saved?.recorded === "string" && saved.recorded.trim() && saved.recorded.length <= 2000 ? saved.recorded : "",
+      recorded: typeof saved?.recorded === "string" && /[\p{L}\p{N}]/u.test(saved.recorded) && saved.recorded.length <= 2000 ? saved.recorded : "",
     };
   } catch { return { draft: "", recorded: "" }; }
 }
 
-function ActivityReader({ activity, media, preview = false, questionInput = true, predictionKey, onVideoError }: Props) {
+function ActivityReader({ activity, media, preview = false, questionInput = true, predictionKey, onVideoError, initialPosition = 1, onPositionChange }: Props) {
   const storageKey = !preview && activity.stages.some(stage => stage.id === "prediction") ? predictionKey : undefined;
   const [initialPrediction] = useState(() => readPrediction(storageKey));
-  const [visibleCount, setVisibleCount] = useState(1);
+  const [visibleCount, setVisibleCount] = useState(Math.min(activity.stages.length, Math.max(1, Math.floor(initialPosition))));
   const [prediction, setPrediction] = useState(initialPrediction.draft);
   const [recordedPrediction, setRecordedPrediction] = useState(initialPrediction.recorded);
   const [question, setQuestion] = useState("");
   const fieldId = useId();
   const count = preview ? activity.stages.length : visibleCount;
   const currentStage = activity.stages[count - 1];
-  const canAdvance = currentStage.id !== "prediction" || (recordedPrediction || prediction).trim().length > 0;
+  const canAdvance = currentStage.id !== "prediction" || /[\p{L}\p{N}]/u.test(recordedPrediction || prediction);
+
+  useEffect(() => { if (!preview) onPositionChange?.(visibleCount); }, [visibleCount, preview, onPositionChange]);
 
   useEffect(() => {
     if (!storageKey) return;

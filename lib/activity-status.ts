@@ -10,6 +10,7 @@ import {
 
 import { getSurveyAvailability } from "./survey-response";
 import { pickTaskSurvey } from "./survey-schedule";
+import { ratingMatchesPublication } from "./material-feedback-version";
 
 export type ActivityId = "assessment" | "content-review" | "content-rating";
 export type ActivityStatus = "locked" | "available" | "completed";
@@ -64,9 +65,9 @@ export const computeActivityStatuses = async (
   const ratings = contentReview === "completed"
     ? await listContentRatings(classId, assignmentId, studentId)
     : [];
-  const ratedItemIds = new Set(ratings.map((r) => r.content_item_id));
   const allRated =
-    published.length > 0 && published.every((item) => ratedItemIds.has(item.content_item_id));
+    published.length > 0 && published.every((item) => ratings.some(rating =>
+      rating.content_item_id === item.content_item_id && ratingMatchesPublication(rating, item.published_at)));
 
   const contentRating: ActivityStatus =
     contentReview === "completed"

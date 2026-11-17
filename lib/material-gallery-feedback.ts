@@ -3,6 +3,7 @@ import { workspaceGet, workspacePut, workspaceQuery } from "./workspace-store";
 import { getTaskDoc, listContentRatings, listPublishedContent, listReviewQuestions } from "./nosql";
 import { collectQuestions, QUESTION_ANALYSIS_VERSION, questionsSourceKey, type QuestionAnalysis } from "./class-questions";
 import type { GalleryFeedback, GalleryScope } from "./material-gallery";
+import { ratingMatchesPublication } from "./material-feedback-version";
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const partition = (id: string) => `GALLERY_FEEDBACK#${id}`;
@@ -49,7 +50,7 @@ export async function galleryFeedback(templateId: string, cache = galleryFeedbac
   try {
     const uses = await workspaceQuery<Use>(partition(templateId), "USE#");
     const latestRatings = new Map<string, { rating: number; at: string }>();
-    const questions = new Set<string>(), authors = new Set<string>(), activities = new Set<string>();
+    const questions = new Set<string>(), authors = new Set<string>(), activities = new Set<string>(), publishers = new Set<string>();
     const types: Record<string, number> = { Investigable: 0, "Explanation-seeking": 0, Clarifying: 0, "Off-topic": 0 };
     let analyzed = 0, attributableActivities = 0;
     let firstPublicationAt: string | undefined, lastFeedbackAt: string | undefined;
@@ -61,12 +62,13 @@ export async function galleryFeedback(templateId: string, cache = galleryFeedbac
       const published = task.published.find(item => item.content_item_id === use.contentItemId);
       if (!published) continue;
       activities.add(key);
+      if (published.published_by) publishers.add(published.published_by);
       // Do not carry a replaced version's responses into a new publication.
       const since = Date.parse(published.published_at || "");
       if (Number.isFinite(since) && (!firstPublicationAt || published.published_at < firstPublicationAt)) firstPublicationAt = published.published_at;
       const current = (value: string) => Number.isFinite(since) && Date.parse(value) >= since;
       for (const row of task.ratings) {
-        if (row.content_item_id !== use.contentItemId || !row.student_id || !Number.isInteger(row.rating) || row.rating < 1 || row.rating > 5 || !current(row.rated_at)) continue;
+        if (row.content_item_id !== use.contentItemId || !row.student_id || !Number.isInteger(row.rating) || row.rating < 1 || row.rating > 5 || !ratingMatchesPublication(row, published.published_at)) continue;
         observe(row.rated_at);
         const previous = latestRatings.get(row.student_id);
         if (!previous || row.rated_at > previous.at) latestRatings.set(row.student_id, { rating: row.rating, at: row.rated_at });
@@ -93,7 +95,7 @@ export async function galleryFeedback(templateId: string, cache = galleryFeedbac
     return { status: "available", observedAt: new Date().toISOString(), ...(firstPublicationAt ? { firstPublicationAt } : {}), ...(lastFeedbackAt ? { lastFeedbackAt } : {}), ratingCount: ratings.length,
       averageRating: ratings.length ? Math.round(ratings.reduce((a, b) => a + b, 0) / ratings.length * 10) / 10 : null,
       highRatingPercent: ratings.length ? Math.round(ratings.filter(value => value >= 4).length / ratings.length * 100) : null,
-      activityCount: activities.size, questionCount: questions.size, questionAuthorCount: authors.size,
+      activityCount: activities.size, publishedTeacherCount: publishers.size, questionCount: questions.size, questionAuthorCount: authors.size,
       attributableActivities, analyzedQuestionCount: analyzed, questionTypes: types,
       scienceQuestionPercent: analyzed ? Math.round((types.Investigable + types["Explanation-seeking"]) / analyzed * 100) : null };
   } catch {
