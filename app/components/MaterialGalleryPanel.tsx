@@ -155,8 +155,8 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     {error && <div role="alert" className="mt-4 rounded-lg bg-bad-light p-3 text-sm text-bad">{error}<button type="button" className={`${button} ml-3`} onClick={() => setReload(value => value + 1)}>Try again</button></div>}
     {notice && <p role="status" className="mt-4 rounded-lg bg-ok-light p-3 text-sm text-ok">{notice}</p>}
     {!loading && !error && !items.length && <div className="py-8 text-center"><p className="font-semibold text-ink">No shared materials match yet</p><p className="mt-2 text-sm text-mute">{standalone ? "Try another filter or search. Materials shared by teachers will appear here." : "Try another filter, or generate a new material below. You can share it after reviewing."}</p></div>}
-    <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{(recommendationsOnly ? items.slice(0, 3) : items).map(material => <article key={material.id} className="flex min-w-0 flex-col rounded-xl border border-line bg-white p-4">
-      {material.previewImage && <div className="mb-3 aspect-video overflow-hidden rounded-lg bg-canvas"><img src={material.previewImage} alt="" loading="lazy" className="h-full w-full object-contain" /></div>}
+    <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4">{(recommendationsOnly ? items.slice(0, 3) : items).map(material => <article key={material.id} className="flex min-w-0 flex-col rounded-xl border border-line bg-white p-4">
+      {material.previewImage && <div className="mb-3 aspect-video max-h-40 overflow-hidden rounded-lg bg-canvas"><img src={material.previewImage} alt="" loading="lazy" className="h-full w-full object-contain" /></div>}
       <div className="flex justify-between gap-2 text-xs text-mute"><span>{material.format === "slides" ? `${material.slideCount ?? ""} slides` : "Animated video"}</span>{material.isOwner && <span className="font-semibold">Shared by you</span>}</div>
       <h4 className="mt-3 text-lg font-bold text-ink">{material.title}</h4>
       <GalleryMaterialDetails {...material} />
