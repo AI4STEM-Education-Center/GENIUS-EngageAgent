@@ -7,7 +7,7 @@ import type { GalleryCopy, GalleryScope } from "@/lib/material-gallery";
 import type { ContentItem } from "@/lib/types";
 
 /** The generated task draft stays in place; its durable library copy is separate. */
-export default function SaveVideoMaterial({ scope, item, disabled }: { scope: GalleryScope; item: ContentItem; disabled?: boolean }) {
+export default function SaveVideoMaterial({ scope, item, lessonNumber, disabled }: { scope: GalleryScope; item: ContentItem; lessonNumber?: number; disabled?: boolean }) {
   const request = useRef<AbortController | null>(null);
   const receipt = useRef<{ copy: Extract<GalleryCopy, { format: "video" }>; revision: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -21,8 +21,9 @@ export default function SaveVideoMaterial({ scope, item, disabled }: { scope: Ga
     setBusy(true); setError("");
     try {
       const previous = receipt.current;
-      const copy = previous ? { ...previous.copy, item: { ...item, id: previous.copy.item.id, gallerySource: previous.copy.source } }
-        : await createPrivateVideoCopy(scope, item, controller.signal);
+      const material = item.lessonNumber === undefined ? { ...item, lessonNumber } : item;
+      const copy = previous ? { ...previous.copy, item: { ...material, id: previous.copy.item.id, gallerySource: previous.copy.source } }
+        : await createPrivateVideoCopy(scope, material, controller.signal);
       controller.signal.throwIfAborted();
       receipt.current = { copy, revision: previous?.revision || 0 };
       setHasReceipt(true);

@@ -10,6 +10,16 @@ vi.mock("@/lib/workspace", async original => ({ ...await original<object>(), wor
 // Not about lessons: getLesson reads the lesson files here. See lesson-wiring.test.ts for the stored ones.
 vi.mock("@/lib/lesson-scope", () => ({ enterLessonScope: () => {}, loadTaskLessons: async () => new Map() }));
 vi.mock("@/lib/nosql", () => ({ getMedia: mocks.media }));
+// Local JSON silently removes undefined fields; DynamoDB rejects them. Exercise
+// the actual AWS serializer before local writes so cloud-only failures surface.
+vi.mock("@/lib/workspace-store", async original => {
+  const store = await original<typeof import("@/lib/workspace-store")>();
+  const { marshall } = await import("@aws-sdk/util-dynamodb");
+  return { ...store, workspacePut: async (records: Parameters<typeof store.workspacePut>[0]) => {
+    for (const row of records) if (!row.remove) marshall({ value: row.value });
+    return store.workspacePut(records);
+  } };
+});
 import { GET, POST } from "@/app/api/material-gallery/route";
 import { GET as mediaGET } from "@/app/api/material-gallery/media/route";
 import { resolveGalleryContentMedia } from "@/lib/material-gallery-server";

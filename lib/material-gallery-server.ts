@@ -363,7 +363,7 @@ async function startCopySave(body: Record<string, unknown>, context: LibraryCont
     snapshot.draft = draft;
     snapshot.assets = parseAssetDescriptions(body.assets, draft);
     snapshot.classroomContext = text(value.classroomContext, "Classroom context", 1200);
-    snapshot.teachingContext = teachingSettings(value.teachingContext);
+    snapshot.teachingContext = teachingSettings(value.teachingContext) ?? {};
     for (const [visualId, description] of Object.entries(snapshot.assets)) {
       const input = (body.assets as Record<string, Record<string, unknown>>)[visualId];
       if (input.sourcePrompt !== undefined) description.sourcePrompt = text(input.sourcePrompt, "Image source prompt", 50_000);
@@ -374,7 +374,7 @@ async function startCopySave(body: Record<string, unknown>, context: LibraryCont
     }
   } else {
     snapshot.item = videoItem(value, source.lessonNumber);
-    snapshot.teachingContext = teachingSettings(value.teachingContext);
+    snapshot.teachingContext = teachingSettings(value.teachingContext) ?? {};
     snapshot.classroomContext = text(value.classroomContext, "Classroom context", 1200);
     const video = await savedVideoMedia(context, snapshot.item, id, "video");
     const image = await savedVideoMedia(context, snapshot.item, id, "image");
@@ -511,7 +511,7 @@ async function copyMaterial(body: Record<string, unknown>, context: LibraryConte
     }
   }
   const copy: Copy = { id: randomUUID(), ownerId: context.userId, classId: context.classId, assignmentId: context.assignmentId, templateId: source.id,
-    focus: selectedFocus, classroomContext, teachingContext,
+    ...(selectedFocus ? { focus: selectedFocus } : {}), classroomContext, teachingContext: teachingContext ?? {},
     source: { templateId: source.id, revision: source.revision, title: source.metadata.title, mode: body.mode }, createdAt: new Date().toISOString() };
   await workspacePut([{ partition: libraryPartition(context.userId), key: `COPY#${copy.id}`, value: copy, createOnly: true },
     ...(context.classId && context.assignmentId ? [{ partition: legacyCopyPartition(context), key: `COPY#${copy.id}`, value: { ...copy, deliveryOnly: true }, createOnly: true }] : [])]);
@@ -580,11 +580,12 @@ export async function galleryPost(request: Request, body: Record<string, unknown
       let delivery = await workspaceGet<{ id: string }>(partition, key);
       if (!delivery) {
         delivery = { id: randomUUID() };
+        const videoMedia = snapshot.videoMedia || source.videoMedia;
         try { await workspacePut([
           { partition, key, value: delivery, createOnly: true },
           { partition, key: `COPY#${delivery.id}`, createOnly: true,
             value: { ...copy, id: delivery.id, classId: target.classId, assignmentId: target.assignmentId, deliveryOnly: true,
-              videoMedia: snapshot.videoMedia || source.videoMedia } },
+              ...(videoMedia ? { videoMedia } : {}) } },
         ]); } catch (error) {
           const existing = await workspaceGet<{ id: string }>(partition, key);
           if (!existing) throw error;

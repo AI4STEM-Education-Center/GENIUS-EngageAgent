@@ -80,6 +80,16 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+it("keeps one library-save control per video across classroom edits and media refreshes", async () => {
+  const saved = { ...activity, id: "saved-single-library-action", lessonNumber: 3 };
+  seedDraft([saved], { [saved.id]: { status: "ready", url: sourceImage } }, { [saved.id]: { status: "ready", url: "https://example.com/video.mp4" } });
+  await openMaterials();
+  for (const context of ["Use short sentences", "Compare the spring", "Ask for a drawing"]) {
+    fireEvent.change(screen.getByRole("textbox", { name: "Classroom context (optional)" }), { target: { value: context } });
+  }
+  expect(screen.getAllByRole("button", { name: "Save to my materials" })).toHaveLength(1);
+});
+
 it("explicit Video generation runs content, image, then one video with the native lesson and cohort context", async () => {
   let finishImage: (response: Response) => void = () => {};
   installApi(() => new Promise((resolve) => { finishImage = resolve; }));
