@@ -14,6 +14,6 @@ export default function ShareTagPreview({ lessonNumber, strategy, focus, grade, 
     <ul className="mt-2 flex flex-wrap gap-1.5">{[["Lesson", String(lessonNumber)], ["Strategy", getEngagementStrategyLabel(strategy)], ["Focus", focusText],
       ["Grade", grade], ["Prior quiz", quiz], ["Experience", experience], ["Format", format === "slides" ? "Slide deck" : "Video"]].map(([label, value]) =>
       <li key={label} className="rounded-md bg-white px-2 py-1 text-xs"><span className="text-mute">{label}: </span>{value || "Not supplied"}</li>)}</ul>
-    <p className="mt-2 text-xs text-mute">{generation ? "Original generation inputs are recorded. These reviewed tags describe the version you are sharing." : "Original generation inputs were not recorded for this material. These tags are your description."}</p>
+    <p className="mt-2 text-xs text-mute">{generation ? "An AI input record is available. These reviewed tags describe the version you are sharing." : "Original generation inputs were not recorded for this material. These tags are your description."}</p>
   </section>;
 }
