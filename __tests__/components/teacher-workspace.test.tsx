@@ -240,3 +240,42 @@ it("unlocks discussion questions after slides are published without a video", as
   await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/question-analysis"))).toBe(true));
   expect(screen.queryByText("Available after materials are sent in Step 3")).toBeNull();
 });
+
+it.each(["slides", "video"])("opens discussion directly after a Gallery %s publication while the draft format is video", async format => {
+  const scopedTeacher = { ...teacher, classId: `ea-class-gallery-${format}-discussion` };
+  localStorage.setItem(`engage-agent:draft:v3:${scopedTeacher.classId}:${scopedTeacher.assignmentId}`, JSON.stringify({
+    version: 2, classId: scopedTeacher.classId, assignmentId: scopedTeacher.assignmentId,
+    lessonNumber: 1, currentStep: 4, materialFormat: "video", plan: null, selectedStrategies: ["analogy"],
+    annotationDecision: null, annotationReason: "", annotationStatus: "idle", content: [],
+  }));
+  const publication = format === "slides" ? {
+    id: "published-slides", type: "Slides", title: "Saved library slides", body: "", strategy: "analogy",
+    slides: { publicationId: "4e96360b-17a4-4a54-84da-df0c5d2ef012", lessonNumber: 1, slideCount: 6 },
+  } : { id: "gallery-copy-video", type: "Video", title: "Saved library video", body: "Observe contact.", strategy: "analogy", galleryWorkspace: true };
+  const fetchMock = vi.mocked(fetch), defaultFetch = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (input, init) => {
+    if (String(input).startsWith("/api/content-publish")) return { ok: true, json: async () => ({ items: [{ content_item_id: publication.id, content_json: JSON.stringify(publication) }] }) } as Response;
+    if (String(input).startsWith("/api/question-analysis")) return { ok: true, json: async () => ({ lessonNumber: 1, total: 0, students: 0, groups: [] }) } as Response;
+    return defaultFetch(input, init);
+  });
+  render(<TeacherView user={scopedTeacher} initialStep={4} />);
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/question-analysis"))).toBe(true));
+  expect(screen.queryByText("Available after materials are sent in Step 3")).toBeNull();
+  expect(stepTab(/Material Generation/).textContent).toContain("Sent to students");
+  expect(stepTab(/Questions & discussion/).getAttribute("aria-current")).toBe("step");
+});
+
+it("uses saved publication progress when the local draft does not contain the sent material", async () => {
+  const fetchMock = vi.mocked(fetch), defaultFetch = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (input, init) => {
+    if (String(input).startsWith("/api/activity-progress")) return { ok: true, json: async () => ({ progress: {
+      assessment: "done", strategy: "done", materials: "done", discussion: "in-progress",
+    } }) } as Response;
+    if (String(input).startsWith("/api/question-analysis")) return { ok: true, json: async () => ({ lessonNumber: 1, total: 0, students: 0, groups: [] }) } as Response;
+    return defaultFetch(input, init);
+  });
+  render(<TeacherView user={{ ...teacher, classId: "ea-class-server-publication" }} initialStep={4} />);
+  await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/question-analysis"))).toBe(true));
+  expect(screen.queryByText("Available after materials are sent in Step 3")).toBeNull();
+  expect(stepTab(/Material Generation/).textContent).toContain("Sent to students");
+});

@@ -1036,7 +1036,9 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             if (typeof item.content_json !== "string") return null;
             try {
               const stored = JSON.parse(item.content_json);
-              if (isRecord(stored) && stored.galleryWorkspace === true) {
+              // Published slides have their own reader and are not a video
+              // draft, but must still unlock discussion after a reload.
+              if (isRecord(stored) && (stored.galleryWorkspace === true || isRecord(stored.slides))) {
                 galleryOnly = true;
                 return null;
               }
@@ -1881,20 +1883,20 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   // Matches the v8.3 prototype: "Rural · Honors", the supports, and an Edit link.
   const profileSummary = describeClassProfile(classProfile.profile);
   const classProfileCard = { name: "Class profile", title: `${profileSummary.location} · ${profileSummary.classType}`, detail: profileSummary.supports, edit: "Edit" };
+  const materialsSent = publishedContentIds.size > 0 || publishedSlideCount > 0 || galleryPublished || savedProgress?.materials === "done";
   const stepStatus = [
     quizStatus === "closed" ? "Closed" : !useOlderQuizStep && taskQuiz.view ? taskQuiz.view.stepStatus : quizStatus === "published" ? "Published" : selectedLesson ? "In progress" : "Not started",
     selectedStrategies.length ? getEngagementStrategyLabel(selectedStrategies[0])
       : studentAnswers.length ? `${studentAnswers.length} response${studentAnswers.length === 1 ? "" : "s"} in` : "Waiting for responses",
-    publishedContentIds.size || publishedSlideCount || galleryPublished ? "Sent to students" : content.length ? "Draft ready" : "Not started",
-    loadedDiscussionStatus ?? discussionStatus({ released: discussionDone ?? (savedProgress?.discussion === "done"), materialsSent: publishedContentIds.size > 0 || publishedSlideCount > 0 }),
+    materialsSent ? "Sent to students" : content.length ? "Draft ready" : "Not started",
+    loadedDiscussionStatus ?? discussionStatus({ released: discussionDone ?? (savedProgress?.discussion === "done"), materialsSent }),
   ];
-  const materialsSent = publishedContentIds.size > 0 || publishedSlideCount > 0 || galleryPublished;
   const progress = activityProgress({
     lessonChosen: Boolean(selectedLesson),
     assessmentPublished: quizStatus !== "draft" || savedProgress?.assessment === "done",
     strategyChosen: selectedStrategies.length > 0 || savedProgress?.strategy === "done",
     materialsDrafted: content.length > 0,
-    materialsSent: materialsSent || savedProgress?.materials === "done",
+    materialsSent,
     boardPublished: false,
     reportsReleased: discussionDone ?? savedProgress?.discussion === "done",
   });
@@ -2328,7 +2330,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           </div>
 
           {visibleStep === 4 && classId && assignmentId && (
-            <DiscussionStep classId={classId} assignmentId={assignmentId} materialsSent={publishedContentIds.size > 0 || publishedSlideCount > 0} onStatusChange={setDiscussionStatus} onDoneChange={setDiscussionDone} />
+            <DiscussionStep classId={classId} assignmentId={assignmentId} materialsSent={materialsSent} onStatusChange={setDiscussionStatus} onDoneChange={setDiscussionDone} />
           )}
           {showDashboard && <TeacherDashboardView user={user} embedded />}
 

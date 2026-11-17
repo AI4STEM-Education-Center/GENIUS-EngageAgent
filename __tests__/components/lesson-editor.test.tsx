@@ -456,8 +456,10 @@ describe("publishing", () => {
     await open();
     press("Publish version");
     await screen.findByText(/1 problem to fix/);
-    expect(scroll.mock.instances[0]).toBe(question("Q3").getByLabelText("Correct answer"));
-    expect(document.activeElement).toBe(question("Q3").getByLabelText("Correct answer"));
+    await waitFor(() => {
+      expect(scroll.mock.instances[0]).toBe(question("Q3").getByLabelText("Correct answer"));
+      expect(document.activeElement).toBe(question("Q3").getByLabelText("Correct answer"));
+    });
     // @ts-expect-error jsdom has no scrollIntoView of its own.
     delete Element.prototype.scrollIntoView;
   });
