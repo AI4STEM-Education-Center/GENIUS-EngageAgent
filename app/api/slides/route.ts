@@ -1,3 +1,4 @@
+import { parseTeachingContext, materialGenerationContext } from "@/lib/material-teaching-context";
 import { slideRevisionOutputFormat, slideRevisionPrompt, validSlideRevisionIndex } from "@/lib/slides/slide-revision";
 import { listTaskLessons } from "@/lib/lessons-store";
 import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
@@ -26,7 +27,9 @@ export async function POST(request: Request) {
     const authorized = await authorizeMaterialLibrary(request, body);
     enterLessonScope(await loadTaskLessons(authorized, body.lessonNumber));
     const { lesson, strategy } = slideContext(body);
-    const taskContext = requestClassroomContext(body.classroomContext);
+    let settings;
+    try { settings = parseTeachingContext(body.teachingContext); } catch { throw new SlideRequestError("Choose valid teaching settings.", 422); }
+    const taskContext = materialGenerationContext(requestClassroomContext(body.classroomContext), settings);
     const promptVersion = body.promptVersion === undefined ? "optimized" : body.promptVersion;
     if (!isSlidePromptVersion(promptVersion)) throw new SlideRequestError("Unknown slide prompt version.");
     const operation = body.operation ?? "generate";

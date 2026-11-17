@@ -66,9 +66,9 @@ it("passes the selected copy mode and metadata to the editor, with an independen
   const onUse = vi.fn(); render(<MaterialGalleryPanel {...props({ onUse })} />);
   fireEvent.click(within(await card()).getByRole("button", { name: "Adapt" }));
   await waitFor(() => expect(onUse).toHaveBeenCalledOnce());
-  expect(mocks.copy).toHaveBeenCalledWith(scope, material.id, "adapt", expect.any(AbortSignal));
+  expect(mocks.copy).toHaveBeenCalledWith(scope, material.id, "adapt", expect.any(AbortSignal), expect.objectContaining({ classroomContext: "", teachingContext: {} }));
   expect(onUse.mock.calls[0][0].deck.id).toBe("independent-copy"); expect(onUse.mock.calls[0][1]).toEqual(material);
-  expect(await screen.findByText(/Your own copy is ready below/)).toBeTruthy();
+  expect(await screen.findByText(/Adapting your copy using the current task settings/)).toBeTruthy();
 });
 
 it("cancels a pending copy and preview when the class changes, ignoring late results", async () => {
@@ -164,7 +164,7 @@ it("directs adapted video copies to the actual video editor", async () => {
   mocks.copy.mockResolvedValue({ format: "video", item: { id: "copied-video" }, media: { video: "/video" } });
   render(<MaterialGalleryPanel {...props({ format: "video" })} />);
   fireEvent.click(within(await card()).getByRole("button", { name: "Adapt" }));
-  expect(await screen.findByText(/Open Edit material to adapt/)).toBeTruthy();
+  expect(await screen.findByText(/Adapting your copy using the current task settings/)).toBeTruthy();
   expect(screen.queryByText(/Revise with AI/)).toBeNull();
 });
 

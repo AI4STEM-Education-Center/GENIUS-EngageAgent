@@ -19,6 +19,7 @@ import {
   MAX_FOCUS_ITEMS,
   type StrategyFocus,
 } from "@/lib/strategy-focus";
+import MaterialExperiencePicker from "./MaterialExperiencePicker";
 import type { TaskInterests } from "@/lib/task-interests";
 import type { StudentAnswer } from "@/lib/types";
 
@@ -45,6 +46,8 @@ type Props = {
   onUse: () => void;
   saveStatus: "idle" | "saving" | "saved" | "error";
   saveError: string | null;
+  experience?: string;
+  onExperienceChange?: (value: string) => void;
 };
 
 /** When each strategy fits, in the words of the recommendation rule. */
@@ -135,7 +138,7 @@ function QuizEvidence({ counts, lessonNumber }: { counts: ClassQuizCounts | null
 
 const RANKS = ["Most common", "Second most common"];
 
-function CheckInEvidence({ classId, assignmentId }: { classId: string; assignmentId: string }) {
+function CheckInEvidence({ classId, assignmentId, onLoaded }: { classId: string; assignmentId: string; onLoaded: (value: TaskInterests | null) => void }) {
   const [interests, setInterests] = useState<TaskInterests | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
@@ -146,13 +149,13 @@ function CheckInEvidence({ classId, assignmentId }: { classId: string; assignmen
       const res = await fetch(`/api/survey-analysis?${new URLSearchParams({ classId, assignmentId })}`, { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" });
       const data = (await res.json().catch(() => ({}))) as { interests?: TaskInterests | null; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Check-in responses could not be analyzed right now.");
-      setInterests(data.interests ?? null);
+      setInterests(data.interests ?? null); onLoaded(data.interests ?? null);
       setState("ready");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Check-in responses could not be analyzed right now.");
       setState("error");
     }
-  }, [classId, assignmentId]);
+  }, [classId, assignmentId, onLoaded]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -282,6 +285,12 @@ function FocusCard({ strategy, lessonNumber, focus, counts, onChange }: {
 // the existing recommendation rule on request, then the teacher's choice and focus.
 export default function StrategyStep(props: Props) {
   const { lessonNumber, answers, recommendation, pick, focus, onFocusChange } = props;
+  const experienceScope = `${props.classId}:${props.assignmentId}`;
+  const [experienceData, setExperienceData] = useState<Record<string, TaskInterests | null>>({});
+  const interests = experienceData[experienceScope] ?? null;
+  const onExperiencesLoaded = useCallback((value: TaskInterests | null) => {
+    setExperienceData(current => ({ ...current, [experienceScope]: value }));
+  }, [experienceScope]);
   const counts = useMemo(
     () => (lessonNumber ? classQuizCounts(lessonNumber, answers.map((answer) => answer.answers)) : null),
     [lessonNumber, answers],
@@ -324,7 +333,7 @@ export default function StrategyStep(props: Props) {
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <section aria-label="From the quiz" className={card}><QuizEvidence counts={counts} lessonNumber={lessonNumber} /></section>
         <section aria-label="From the experience check-in" className={card}>
-          <CheckInEvidence classId={props.classId} assignmentId={props.assignmentId} />
+          <CheckInEvidence key={experienceScope} classId={props.classId} assignmentId={props.assignmentId} onLoaded={onExperiencesLoaded} />
         </section>
       </div>
 
@@ -370,6 +379,8 @@ export default function StrategyStep(props: Props) {
       </div>
 
       {pick && <FocusCard strategy={pick} lessonNumber={lessonNumber} focus={focus} counts={counts} onChange={onFocusChange} />}
+
+      {props.onExperienceChange && (pick === "analogy" || pick === "experience bridging") && <MaterialExperiencePicker classId={props.classId} assignmentId={props.assignmentId} lessonNumber={lessonNumber} strategy={pick} focus={focus} interests={interests} value={props.experience || ""} onChange={props.onExperienceChange} disabled={props.busy} />}
 
       {differs && (
         <label className="mt-4 block text-sm font-semibold text-ink-2">

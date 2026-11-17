@@ -1,3 +1,4 @@
+import { slideVideo } from "./video";
 import type { SlideAsset, SlideDeck } from "./model";
 import { isSlideAsset } from "./model";
 import { exportErrors, slideElements, wrapElements, type MeasureText } from "./layout";
@@ -39,6 +40,8 @@ export async function buildPresentation(deck: SlideDeck, measure: MeasureText) {
         lineSpacing: element.fontSize * .75 * 1.26, paraSpaceAfter: 0, wrap: false,
       });
     }
+    const video = slideVideo(content.videoUrl);
+    if (video) slide.addText("▶ Open video", { x: 10.7, y: 0.15, w: 2.1, h: 0.35, fontSize: 14, color: "185B8C", margin: 0, hyperlink: { url: video.url } });
     slide.addNotes([...content.teacherNotes, ...(deck.draft.analogyPlan && index === analogyMappingIndex(deck.draft.analogyMethod) ? [`Analogy teaching design (private): ${JSON.stringify(deck.draft.analogyPlan)}`] : []), ...(deck.strategy === "analogy" ? [`Analogy story: ${resolveAnalogyMethod(deck.draft.analogyMethod)}. ${deck.draft.analogyMethod === "six-step" ? "The phenomenon and target precede the familiar analogue, which first appears on page 3. The question page comes last; a boundary page is included only when needed." : "Both target and familiar situations appear on the opening page (earlier method)."}`] : []), ...(deck.promptProvenance ? [`Prompt: ${PROMPT_LABELS[deck.promptProvenance.version]}; revision ${deck.promptProvenance.revision}; original reference SHA-256 ${deck.promptProvenance.sourceSha256}.`] : []), ...(hasTeacherDecision(deck) ? [`Teacher quality-review decision: ${deck.teacherDecision!.reason}`] : []), "Visuals: AI-generated illustrations, not experimental measurements.",
       ...(deck.classroomContext ? [`Classroom context: ${deck.classroomContext}`] : []),
       `Teaching method: ${deck.strategy}. References: team strategy texts, Teacher PD examples and Jongchan's storyboard.${deck.draft.analogyMethod === "six-step" ? " Latest analogy direction: Samaneh's six core slides, confirmed by Lehong; no analogue on the first two pages." : ""} ${deck.strategy === "experience bridging" ? "Recall and re-examine the experience before naming the scientific concept on page 3. The connection stage is optional; the learner's question comes last." : "The opening names the learning target; analogy boundaries are optional and used only to clarify."} Each method retains its own inquiry sequence.`].join("\n\n"));

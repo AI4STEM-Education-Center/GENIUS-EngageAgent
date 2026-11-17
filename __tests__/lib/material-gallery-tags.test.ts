@@ -25,8 +25,8 @@ it("uses the task's configured curriculum and selected focus, not a numbered-les
 
 it("does not recommend a different curriculum as the same lesson/focus just because local numbers and codes overlap", () => {
   const material = { lessonNumber: 3, strategy: "analogy", focus: { coreIdeas: [0], misconceptions: [] }, promptTags: { TOPIC: "Waves", LEARNING_OBJECTIVE: "Compare traveling waves" } } as unknown as GalleryMaterial;
-  expect(galleryMatches(material, 3, "analogy", material.focus, { TOPIC: "Collisions", LEARNING_OBJECTIVE: "Compare contact forces" })).toEqual({ score: 2, reasons: ["Same strategy"] });
-  expect(galleryMatches(material, 3, "analogy", material.focus, material.promptTags)).toEqual({ score: 14, reasons: ["Same lesson", "Same strategy", "Same focus"] });
+  expect(galleryMatches(material, 3, "analogy", material.focus, { TOPIC: "Collisions", LEARNING_OBJECTIVE: "Compare contact forces" })).toMatchObject({ score: 10, reasons: ["Same strategy"] });
+  expect(galleryMatches(material, 3, "analogy", material.focus, material.promptTags)).toMatchObject({ score: 30, reasons: ["Same lesson", "Same strategy", "Same focus"] });
 });
 
 

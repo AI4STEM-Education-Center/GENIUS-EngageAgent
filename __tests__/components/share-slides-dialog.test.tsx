@@ -18,6 +18,22 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
+it("inherits generation tags and can exclude every teacher note without changing the private deck", async () => {
+  const deck = deckFixture("cognitive conflict");
+  deck.teachingContext = { gradeBand: "Middle school", experienceContext: "Soccer", quizPattern: "55–70% correct" };
+  deck.draft.slides[0].teacherNotes = ["PRIVATE TEACHER NOTE"];
+  render(<ShareSlidesDialog deck={deck} scope={scope} onClose={vi.fn()} onShared={vi.fn()} />);
+  expect(screen.getByLabelText("Grade band (optional)")).toHaveProperty("value", "Middle school");
+  expect(screen.getByLabelText("Experience context (optional)")).toHaveProperty("value", "Soccer");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Include teacher notes" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed the shared text/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Share to Gallery" }));
+  await waitFor(() => expect(mocks.share).toHaveBeenCalledOnce());
+  expect(mocks.share.mock.calls[0][1].draft.slides.every((slide: { teacherNotes: string[] }) => slide.teacherNotes.length === 0)).toBe(true);
+  expect(mocks.share.mock.calls[0][2]).toMatchObject(deck.teachingContext);
+  expect(deck.draft.slides[0].teacherNotes).toEqual(["PRIVATE TEACHER NOTE"]);
+});
+
 it("shares a teacher-reviewed independent copy without class context or changing the class draft", async () => {
   const deck = sixStepDeck(true);
   deck.classroomContext = "Private class notes and names";
@@ -37,7 +53,7 @@ it("shares a teacher-reviewed independent copy without class context or changing
   expect(screen.getByLabelText("Teaching context (optional)")).toHaveProperty("value", "");
   fireEvent.change(screen.getByLabelText("Teaching context (optional)"), { target: { value: "Safe, reusable context" } });
   fireEvent.change(screen.getByLabelText("Class profile summary (optional)"), { target: { value: "Introductory physics" } });
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed the shared text/ }));
   expect(share.disabled).toBe(false);
   fireEvent.click(share);
   await waitFor(() => expect(onShared).toHaveBeenCalledWith(material));
@@ -59,11 +75,11 @@ it("shares a teacher-reviewed independent copy without class context or changing
 it("requires reconfirmation after any shared text is edited", () => {
   render(<ShareSlidesDialog deck={deckFixture("cognitive conflict")} scope={scope} onClose={vi.fn()} onShared={vi.fn()} />);
   const share = screen.getByRole("button", { name: "Share to Gallery" }) as HTMLButtonElement;
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed the shared text/ }));
   expect(share.disabled).toBe(false);
   fireEvent.change(screen.getByLabelText("Shared slide 1 title"), { target: { value: "A revised shared title" } });
   expect(share.disabled).toBe(true);
-  expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  expect((screen.getByRole("checkbox", { name: /I reviewed the shared text/ }) as HTMLInputElement).checked).toBe(false);
   expect(mocks.share).not.toHaveBeenCalled();
 });
 
@@ -72,7 +88,7 @@ it("retains edited sharing text when upload fails and allows an explicit retry",
   const onShared = vi.fn();
   render(<ShareSlidesDialog deck={deckFixture("cognitive conflict")} scope={scope} onClose={vi.fn()} onShared={onShared} />);
   fireEvent.change(screen.getByLabelText("Gallery title"), { target: { value: "Retained title" } });
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed the shared text/ }));
   fireEvent.click(screen.getByRole("button", { name: "Share to Gallery" }));
   expect(await screen.findByRole("alert")).toHaveProperty("textContent", "The material library is temporarily unavailable.");
   expect((screen.getByLabelText("Gallery title") as HTMLInputElement).value).toBe("Retained title");

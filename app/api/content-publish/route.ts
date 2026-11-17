@@ -27,12 +27,17 @@ const sanitizePublishedItem = (item: Record<string, unknown>) => {
       : {}),
   };
 
-  const { media: _media, ...rest } = item;
+  const rest = Object.fromEntries(Object.entries(item).filter(([key]) => !["media", "classroomContext", "teachingContext", "teacherNotes"].includes(key)));
   return {
     ...rest,
     ...(Object.keys(sanitizedMedia).length > 0 ? { media: sanitizedMedia } : {}),
   };
 };
+
+function studentContentJson(raw: string) {
+  try { return JSON.stringify(sanitizePublishedItem(JSON.parse(raw))); }
+  catch { return "{}"; }
+}
 
 const extractEmbeddedMedia = (contentJson: string): SharedContentMedia | undefined => {
   try {
@@ -109,6 +114,7 @@ export async function GET(request: Request) {
 
       return {
         ...item,
+        content_json: studentContentJson(item.content_json),
         ...(Object.keys(mergedMedia).length > 0 ? { media: mergedMedia } : {}),
       };
     })),

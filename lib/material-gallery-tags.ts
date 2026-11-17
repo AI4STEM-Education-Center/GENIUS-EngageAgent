@@ -46,16 +46,27 @@ export function galleryPromptTags(lessonNumber: number, strategy: string, format
 
 export function galleryMatches(material: GalleryMaterial, lesson: number, strategy: string, focus?: { misconceptions: string[]; coreIdeas: number[] }, contextTags?: Record<string, string>) {
   const reasons: string[] = [];
-  // Lesson numbers and focus codes are task-local. New tagged materials must
-  // also agree with this task's curriculum snapshot before calling it a match.
   const sameLesson = material.lessonNumber === lesson && (!material.promptTags || !contextTags
     || ["TOPIC", "LEARNING_OBJECTIVE"].every(key => material.promptTags?.[key] === contextTags[key]));
-  if (sameLesson) reasons.push("Same lesson");
-  if (material.strategy === strategy) reasons.push("Same strategy");
-  if (sameLesson && material.focus && focus &&
-    (material.focus.misconceptions.some(id => focus.misconceptions.includes(id)) || material.focus.coreIdeas.some(id => focus.coreIdeas.includes(id)))) reasons.push("Same focus");
+  const sameStrategy = material.strategy === strategy;
   const overlappingFocus = sameLesson && material.focus && focus
     ? material.focus.misconceptions.filter(id => focus.misconceptions.includes(id)).length + material.focus.coreIdeas.filter(id => focus.coreIdeas.includes(id)).length : 0;
-  return { score: (reasons.includes("Same lesson") ? 4 : 0) + (reasons.includes("Same strategy") ? 2 : 0)
-    + (reasons.includes("Same focus") ? 8 + Math.max(0, overlappingFocus - 1) * 2 : 0), reasons };
+  const normalize = (value?: string) => value?.trim().toLocaleLowerCase().replace(/[–—]/gu, "-").replace(/\s+/gu, " ") || "";
+  const equal = (a?: string, b?: string) => Boolean(normalize(a) && normalize(b) && !/^(not |unknown)/u.test(normalize(a)) && normalize(a) === normalize(b));
+  const tags = [
+    { label: "Lesson", value: `Lesson ${material.lessonNumber}`, matched: sameLesson },
+    { label: "Strategy", value: getEngagementStrategyLabel(material.strategy), matched: sameStrategy },
+    { label: "Focus", value: material.promptTags?.FOCUS_ITEMS || (material.focus ? [...material.focus.misconceptions.map(id => `Target ${id}`), ...material.focus.coreIdeas.map(i => `Core idea ${i + 1}`)].join(" · ") : "Not recorded"), matched: overlappingFocus > 0 },
+    { label: "Grade", value: material.gradeBand || "Not provided", matched: equal(material.gradeBand, contextTags?.GRADE_LEVEL) },
+    { label: "Prior quiz", value: material.quizPattern || "Not recorded", matched: equal(material.quizPattern, contextTags?.CURRENT_UNDERSTANDING) },
+    { label: "Experience", value: material.experienceContext || "Not provided", matched: equal(material.experienceContext, contextTags?.EXPERIENCE_CONTEXT) },
+    { label: "Format", value: material.format === "video" ? "Animated video" : "Slide deck", matched: equal(material.format, contextTags?.FORMAT) },
+  ];
+  if (sameLesson) reasons.push("Same lesson");
+  if (sameStrategy) reasons.push("Same strategy");
+  if (overlappingFocus) reasons.push("Same focus");
+  for (const tag of tags.slice(3)) if (tag.matched) reasons.push(`Same ${tag.label.toLowerCase()}`);
+  // Each known matching dimension has equal weight, like the prototype.
+  // Two shared focus items break ties without outweighing another dimension.
+  return { score: tags.filter(tag => tag.matched).length * 10 + Math.max(0, overlappingFocus - 1), reasons, tags };
 }

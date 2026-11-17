@@ -1,3 +1,4 @@
+import { parseTeachingContext } from "../material-teaching-context";
 import { isSlideAsset, parseDraft, type SlideCheck, type SlideDeck, type SlideDraft, type SlideStrategy } from "./model";
 import { isSlidePromptVersion, type SlidePromptProvenance } from "./prompt-versions";
 import { isAnalogyMethod } from "./analogy-methods";
@@ -77,6 +78,8 @@ export function restoreSlideDraft(value: unknown, scope: SlideDraftScope): Slide
     return [[visual.id, asset]];
   }));
   const deck: SlideDeck = { id: saved.id, lessonNumber: scope.lessonNumber, strategy: scope.strategy, draft, assets };
+  if (Number.isSafeInteger(saved.libraryRevision) && Number(saved.libraryRevision) >= 0) deck.libraryRevision = Number(saved.libraryRevision);
+  if (saved.teachingContext !== undefined) deck.teachingContext = parseTeachingContext(saved.teachingContext);
   if (saved.focus !== undefined && saved.focus !== null) {
     resolveStrategyFocus(scope.lessonNumber, scope.strategy, saved.focus);
     deck.focus = saved.focus as Partial<StrategyFocus>;
@@ -86,7 +89,7 @@ export function restoreSlideDraft(value: unknown, scope: SlideDraftScope): Slide
     if (!record(source) || !shortText(source.templateId, 160) || !source.templateId
       || !Number.isSafeInteger(source.revision) || Number(source.revision) < 1
       || !shortText(source.title, 240) || (source.mode !== "use" && source.mode !== "adapt")) throw new Error("Saved Gallery source is invalid.");
-    deck.gallerySource = { templateId: source.templateId, revision: Number(source.revision), title: source.title, mode: source.mode };
+    deck.gallerySource = { templateId: source.templateId, revision: Number(source.revision), title: source.title, mode: source.mode, ...(source.private === true ? { private: true } : {}) };
   }
   if (saved.classroomContext !== undefined) {
     if (!shortText(saved.classroomContext, 1200)) throw new Error("Saved classroom context is invalid.");

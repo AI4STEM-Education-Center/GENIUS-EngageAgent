@@ -48,7 +48,7 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
     }
   }
   return <>
-    <button type="button" className={`${button} mt-3`} disabled={disabled || busy} onClick={() => { setDraft(structuredClone(item)); setConfirmed(false); setError(""); dialog.current?.showModal(); }}><LayoutGrid size={16} />{shared ? "Share updated copy" : "Share to Gallery"}</button>
+    <button type="button" className={`${button} mt-3`} disabled={disabled || busy} onClick={() => { setDraft(structuredClone(item)); setGrade(item.teachingContext?.gradeBand || ""); setExperienceContext(item.teachingContext?.experienceContext || ""); setQuizPattern(item.teachingContext?.quizPattern || ""); setConfirmed(false); setError(""); dialog.current?.showModal(); }}><LayoutGrid size={16} />{shared ? "Share updated copy" : "Share to Gallery"}</button>
     {shared && <p role="status" className="mt-2 text-sm text-ok">Shared with teachers. Sending to students is a separate action.</p>}
     <dialog ref={dialog} aria-label="Share video to Gallery" onCancel={event => { if (busy) event.preventDefault(); }} className="fixed inset-0 m-auto max-h-[90vh] w-[94vw] max-w-2xl overflow-auto rounded-2xl border border-line bg-white p-6 backdrop:bg-ink/50">
       <div className="flex items-center justify-between gap-3"><h3 className="text-xl font-bold">Share with other teachers</h3><button type="button" className={button} aria-label="Close video sharing" disabled={busy} onClick={() => dialog.current?.close()}><X size={18} /></button></div>

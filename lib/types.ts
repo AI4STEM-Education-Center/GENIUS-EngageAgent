@@ -21,6 +21,9 @@ export type ContentItem = {
   lessonNumber?: number;
   focus?: Partial<import("./strategy-focus").StrategyFocus>;
   gallerySource?: import("./material-gallery").GalleryProvenance;
+  /** Private generation choices; projected out of student and public payloads. */
+  teachingContext?: import("./material-teaching-context").MaterialTeachingContext;
+  classroomContext?: string;
   type: string;
   title: string;
   body: string;

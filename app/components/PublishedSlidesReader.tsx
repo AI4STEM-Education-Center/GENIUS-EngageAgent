@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Expand, RefreshCw, X } from "lucide-react";
 import type { SlideElement } from "@/lib/slides/layout";
 import { isPublishedSlideResponse, type PublishedSlideResponse } from "@/lib/slides/publication";
 import SlideCanvas from "./SlideCanvas";
+import SlideVideo from "./SlideVideo";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import { GENIUS_LAUNCH_UPGRADE_CODE, GENIUS_LAUNCH_UPGRADE_MESSAGE } from "@/lib/slides/access-errors";
 
@@ -166,8 +167,9 @@ function Reader({ classId, assignmentId, publicationId, audience, onQuestion, le
     {isStudent && page.stage === "compare" && recordedPrediction && <section aria-label="Your recorded prediction" className="mb-4 rounded-md border border-teal-200 bg-teal-50 p-4 text-slate-800">
       <h4 className="font-semibold">Your prediction</h4><p className="mt-1 whitespace-pre-wrap break-words">{recordedPrediction}</p>
     </section>}
-    <div className="overflow-hidden rounded-[10px] border border-line">
+    <div className="relative overflow-hidden rounded-[10px] border border-line">
       <SlideCanvas elements={elements} title={page.title} index={index} ariaHidden onImageError={imageFailed} />
+      {page.videoUrl && <SlideVideo key={page.videoUrl} url={page.videoUrl} elements={elements} />}
     </div>
     <SlideText elements={elements} />
     {needsPrediction && <div className="mt-4">

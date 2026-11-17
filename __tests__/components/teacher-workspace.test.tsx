@@ -115,9 +115,9 @@ it("shows the header with the top menu and four teacher steps (#172, #182, #208)
   expect(screen.queryByText("Assignment summary")).toBeNull();
 });
 
-it("keeps Gallery out of Step 3 and opens a separate editor from a direct Gallery entry", async () => {
+it("hides unmatched Step 3 recommendations and opens a separate editor from a direct Gallery entry", async () => {
   const view = render(<TeacherView user={{ ...teacher, classId: "ea-class-native" }} initialStep={3} />);
-  expect(await screen.findByRole("heading", { name: "Material Generation" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "Engagement materials" })).toBeTruthy();
   expect(screen.queryByRole("region", { name: "Materials Gallery" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Open Gallery" })).toBeNull();
   view.unmount();

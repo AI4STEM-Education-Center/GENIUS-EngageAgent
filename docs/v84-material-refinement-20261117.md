@@ -1,0 +1,38 @@
+# Material workflow refinement — 17 November 2026
+
+References: #179, #181, #196 and the supplied `EngageAgent-UI-v8.4-prototype_1 (1).html`.
+The user's latest rules take precedence over the prototype: at most three suitable recommendations at the top of Step 3; materials remain independent of classes; one or two strategy focus items.
+
+| Requirement / prototype area | Result |
+| --- | --- |
+| Step 2: experience selection | Reported activities with actual counts, focus-specific AI suggestions and good/weak-fit explanations, and a custom experience. Changing task/strategy/focus isolates the selection. Suggestions are explicitly distinguished from survey results. |
+| Step 3: classroom context | Lesson, strategy, class profile and chosen experience summaries; material format and grade beside task context; generation and review anchors. Teaching choices travel through slide/video generation, revision, private saving and sharing defaults. |
+| Step 3: Gallery matches | Seven dimensions: lesson, strategy, focus, grade, prior quiz, experience, format. Known matches receive equal weight; extra focus overlap breaks ties. Same lesson/strategy and overlapping focus are required for recommendations. Unknown values earn no match; incompatible curriculum identities cannot match merely by lesson number. At most three, hidden when none qualify. |
+| Adapt to my class | An explicit Adapt action copies the material and starts one AI adaptation using the current task focus, grade, selected experience and authorized class context. Ordinary Open/Use does not generate. Slide revisions support undo. Video adaptation edits activity language and questions while preserving the existing scene, evidence, stage order and media. |
+| Independent materials | Newly generated slides and videos can be saved directly to My saved materials. Private staging does not publish to Gallery. Existing revision-conflict, ownership, media and cross-class delivery protections apply. |
+| Slide editor: video | Add/update/remove YouTube, Vimeo or public HTTPS media links per slide. The teacher and student reader play the video. PowerPoint exports an external video hyperlink. AI text revision preserves teacher-selected video links. |
+| Check slides | Findings identify a slide or image when grounded in its identifier. Go to slide navigates there; Fix with AI targets that slide or image. Other findings retain whole-deck refinement. Image correction and text revision can be undone. |
+| Share to Gallery | Grade, experience and prior-quiz tags inherit from the material. Include teacher notes controls the shared snapshot without removing the teacher's original notes. Raw classroom context stays private. |
+| Gallery information | Seven compact matching tags on recommendations, richer teaching metadata and truthful engagement/question metrics in Gallery; author details collapse in the editor to keep editing actions prominent. |
+| Student view | Per-slide video works in regular and enlarged reading. Published video JSON excludes private classroom context, teaching settings and notes, including legacy records. Existing question, prediction, rating and completion flow remains in place. |
+
+## Verification
+
+Automated checks on Node 22: full suite 2,965 passed / 38 opt-in tests skipped; production build and TypeScript passed. Changed files lint with no errors (existing image-element warnings). After the final image-correction/undo guard, the affected editor suites passed all 62 tests, including its new regression.
+
+Background in-app browser acceptance with isolated synthetic accounts:
+
+- Requested real AI experience suggestions and selected a spring comparison for Analogy.
+- Generated a real six-slide deck with three images; AI review completed.
+- Added a test video, saved to the private library, reopened it independently of its class and exported PPTX. The archive contains six slides and the video hyperlink.
+- Sent the saved version to a second test class. The student reader loaded the media successfully, accepted two questions and a rating, and restored completed status after reload.
+- Removed the technical test video from the private teaching copy; the previously sent student version remained unchanged.
+- Shared without teacher notes; grade and experience were prefilled.
+- Verified the new recommendation at the top of Step 3 with six of seven known tags matched (no quiz data was invented).
+- Changed grade and classroom context, selected Adapt, and observed a real automatic revision: shorter sentences and a new “Draw Two Ball Outlines” slide matching the request. Saved the adapted independent copy.
+
+## External data boundaries
+
+GENIUS automatic class-profile / experience-check-in synchronization is not claimed complete. #179 explicitly identifies the experience service as pending upstream; the current GENIUS Class contract does not expose the prototype's full profile fields. Available local profiles and actual task survey data are used now. Missing historical authors/tags are not reconstructed from guesses. Engagement ratings and question counts are feedback metrics, not evidence of knowledge gain.
+
+Production deployment and acceptance evidence is recorded separately so local verification is never confused with deployed verification.

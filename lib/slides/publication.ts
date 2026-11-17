@@ -1,10 +1,11 @@
+import { slideVideo } from "./video";
 import { isSafeMaterialUrl } from "../material-url";
 import { slideElements, type Frame, type ImageElement, type TextElement } from "./layout";
 import { isSlideStrategy, parseDraft, type SlideDeck, type SlideStrategy } from "./model";
 
 export type PublishedSlideReference = { publicationId: string; slideCount: number; lessonNumber: number };
 export type PublicSlideElement = Omit<TextElement, "renderedLines"> | (Omit<ImageElement, "data"> & { assetId: string });
-export type PublishedSlidePage = { stage: string; title: string; elements: PublicSlideElement[] };
+export type PublishedSlidePage = { stage: string; title: string; videoUrl?: string; elements: PublicSlideElement[] };
 export type PublishedSlideManifest = { version: 1; title: string; lessonNumber: number; strategy: SlideStrategy; pages: PublishedSlidePage[] };
 export type StudentSlideManifest = PublishedSlideManifest;
 export type PublishedSlideResponse = { publicationId: string; manifest: PublishedSlideManifest; assets: Record<string, { url: string; width: number; height: number }> };
@@ -59,7 +60,7 @@ function validStages(strategy: SlideStrategy, stages: string[]) {
 export function isPublishedSlideManifest(value: unknown): value is PublishedSlideManifest {
   if (!record(value) || !keys(value, ["version", "title", "lessonNumber", "strategy", "pages"]) || value.version !== 1 || !string(value.title, 80)
     || !lesson(value.lessonNumber) || !isSlideStrategy(value.strategy) || !Array.isArray(value.pages) || value.pages.length < 4 || value.pages.length > 7) return false;
-  if (!value.pages.every(page => record(page) && keys(page, ["stage", "title", "elements"]) && string(page.stage, 24) && string(page.title, 64)
+  if (!value.pages.every(page => record(page) && keys(page, ["stage", "title", "elements", "videoUrl"]) && (page.videoUrl === undefined || !!slideVideo(page.videoUrl)) && string(page.stage, 24) && string(page.title, 64)
     && Array.isArray(page.elements) && page.elements.length >= 1 && page.elements.length <= 18 && page.elements.every(isElement)
     && new Set(page.elements.map(element => element.id)).size === page.elements.length)) return false;
   return validStages(value.strategy, value.pages.map(page => page.stage));
@@ -84,7 +85,7 @@ export function projectPublishedSlides(deck: SlideDeck): PublishedSlideManifest 
   // Pedagogical findings inform optional refinement; they do not prevent a
   // teacher from sharing a structurally valid, generated material.
   const manifest: PublishedSlideManifest = { version: 1, title: deck.draft.title, lessonNumber: deck.lessonNumber, strategy: deck.strategy,
-    pages: deck.draft.slides.map((page, index) => ({ stage: page.stage, title: page.title, elements: slideElements(deck, index).map(element => {
+    pages: deck.draft.slides.map((page, index) => ({ stage: page.stage, title: page.title, ...(page.videoUrl ? { videoUrl: page.videoUrl } : {}), elements: slideElements(deck, index).map(element => {
       const frame = { left: element.frame.left, top: element.frame.top, width: element.frame.width, height: element.frame.height };
       return element.kind === "text" ? { id: element.id, kind: "text", role: element.role, text: element.text, fontSize: element.fontSize,
         bold: element.bold, color: element.color, frame, autoFit: "none" } : { id: element.id, kind: "image", frame, fit: "contain", alt: element.alt, assetId: element.id.replace(/^image-/u, "") };
