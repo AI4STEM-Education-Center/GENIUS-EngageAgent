@@ -32,11 +32,11 @@ export function methodVisualIds(strategy: SlideStrategy, method?: AnalogyMethod)
 export type TeachingSlide = { stage: string; title: string; body: string; task: string; teacherNotes: string[]; videoUrl?: string };
 export type SlideVisual = { id: string; prompt: string; caption: string; alt: string };
 export type SlideDraft = { title: string; slides: TeachingSlide[]; visuals: SlideVisual[]; analogyPlan?: AnalogyPlan; analogyMethod?: AnalogyMethod };
-export type SlideAsset = { data: string; width: number; height: number; model?: string; sourcePrompt?: string; referenceData?: string };
-export type SlideCheck = { key: string; issues: string[]; model?: string; imageData?: string };
+export type SlideAsset = { generation?: import("../generation-record").GenerationRecord; data: string; width: number; height: number; model?: string; sourcePrompt?: string; referenceData?: string };
+export type SlideCheck = { findings?: import("./review-rubric").ReviewFinding[]; rubric?: import("./review-rubric").RubricResult[]; key: string; issues: string[]; model?: string; imageData?: string };
 export type SlideChecks = { text?: SlideCheck; images: Record<string, SlideCheck> };
 export type GalleryProvenance = { private?: true; templateId: string; revision: number; title: string; mode: "use" | "adapt" };
-export type SlideDeck = { libraryRevision?: number; teachingContext?: MaterialTeachingContext; id: string; lessonNumber: number; strategy: SlideStrategy; focus?: Partial<StrategyFocus>; gallerySource?: GalleryProvenance; classroomContext?: string; draft: SlideDraft; assets: Record<string, SlideAsset>; modelSelection?: SlideModelSelection; textModel?: string; promptProvenance?: SlidePromptProvenance; checks?: SlideChecks; teacherDecision?: { reason: string; draftKey: string; checks: SlideChecks; assets: Record<string, SlideAsset> } };
+export type SlideDeck = { generation?: import("../generation-record").GenerationRecord; libraryRevision?: number; teachingContext?: MaterialTeachingContext; id: string; lessonNumber: number; strategy: SlideStrategy; focus?: Partial<StrategyFocus>; gallerySource?: GalleryProvenance; classroomContext?: string; draft: SlideDraft; assets: Record<string, SlideAsset>; modelSelection?: SlideModelSelection; textModel?: string; promptProvenance?: SlidePromptProvenance; checks?: SlideChecks; teacherDecision?: { reason: string; draftKey: string; checks: SlideChecks; assets: Record<string, SlideAsset> } };
 export type SlideLesson = { lessonNumber: number; lessonTitle: string; learningObjective: string };
 
 export function isSlideStrategy(value: unknown): value is SlideStrategy {

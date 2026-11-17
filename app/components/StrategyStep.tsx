@@ -20,6 +20,7 @@ import {
   type StrategyFocus,
 } from "@/lib/strategy-focus";
 import MaterialExperiencePicker from "./MaterialExperiencePicker";
+import { contextSourceLabel, type ContextSource } from "@/lib/classroom-context";
 import type { TaskInterests } from "@/lib/task-interests";
 import type { StudentAnswer } from "@/lib/types";
 
@@ -46,8 +47,11 @@ type Props = {
   onUse: () => void;
   saveStatus: "idle" | "saving" | "saved" | "error";
   saveError: string | null;
+  contextSnapshot?: import("@/lib/classroom-context").ClassroomContextSnapshot;
+  onRefreshContext?: () => void;
   experience?: string;
-  onExperienceChange?: (value: string) => void;
+  missingExperience?: boolean;
+  onExperienceChange?: (value: string, source?: "reported" | "ai_suggested" | "teacher_entered") => void;
 };
 
 /** When each strategy fits, in the words of the recommendation rule. */
@@ -138,24 +142,26 @@ function QuizEvidence({ counts, lessonNumber }: { counts: ClassQuizCounts | null
 
 const RANKS = ["Most common", "Second most common"];
 
-function CheckInEvidence({ classId, assignmentId, onLoaded }: { classId: string; assignmentId: string; onLoaded: (value: TaskInterests | null) => void }) {
+function CheckInEvidence({ classId, assignmentId, onLoaded, snapshot, onRefresh }: { classId: string; assignmentId: string; onLoaded: (value: TaskInterests | null) => void; snapshot?: import("@/lib/classroom-context").ClassroomContextSnapshot; onRefresh?: () => void }) {
   const [interests, setInterests] = useState<TaskInterests | null>(null);
+  const [source, setSource] = useState<ContextSource<TaskInterests> | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     setState("loading");
+    if (snapshot) { setSource(snapshot.experiences); setInterests(snapshot.experiences.value || null); onLoaded(snapshot.experiences.value || null); setState("ready"); return; }
     try {
       const res = await fetch(`/api/survey-analysis?${new URLSearchParams({ classId, assignmentId })}`, { headers: scopedClientAuthHeaders({ classId, assignmentId }), cache: "no-store" });
-      const data = (await res.json().catch(() => ({}))) as { interests?: TaskInterests | null; error?: string };
+      const data = (await res.json().catch(() => ({}))) as { interests?: TaskInterests | null; source?: ContextSource<TaskInterests>; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Check-in responses could not be analyzed right now.");
-      setInterests(data.interests ?? null); onLoaded(data.interests ?? null);
+      setSource(data.source || null); setInterests(data.interests ?? null); onLoaded(data.interests ?? null);
       setState("ready");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Check-in responses could not be analyzed right now.");
       setState("error");
     }
-  }, [classId, assignmentId, onLoaded]);
+  }, [classId, assignmentId, onLoaded, snapshot]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -163,13 +169,16 @@ function CheckInEvidence({ classId, assignmentId, onLoaded }: { classId: string;
   if (state === "loading") return <>{title}<p role="status" className="mt-2 text-sm text-mute">Loading check-in responses…</p></>;
   if (state === "error") {
     return <>{title}<p role="alert" className="mt-2 text-sm text-bad">{error}</p>
-      <button type="button" onClick={() => void load()} className="mt-2 text-sm font-semibold text-ink-2 underline">Try again</button></>;
+      <button type="button" onClick={() => snapshot && onRefresh ? onRefresh() : void load()} className="mt-2 text-sm font-semibold text-ink-2 underline">Try again</button></>;
   }
+  if (source && ["error", "forbidden"].includes(source.status)) return <>{title}<p role="alert" className="mt-2 text-sm text-mute">{contextSourceLabel(source)}</p><button type="button" onClick={() => snapshot && onRefresh ? onRefresh() : void load()} className="mt-2 text-sm text-brand">Refresh</button></>;
   if (!interests || interests.responseCount === 0) return <>{title}<p className="mt-2 text-sm text-mute">No responses yet</p></>;
   const others = interests.activities.filter((a) => !interests.top.includes(a) && !interests.top.some((t) => t.activity === a.activity));
   return (
     <>
       <div className="flex items-center gap-2">{title}<span className={`ml-auto ${pill}`}>{plural(interests.responseCount, "response")}</span></div>
+      <p className="mt-2 text-xs text-mute">{source ? contextSourceLabel(source) : "From EngageAgent"} · Updated {new Date(interests.analyzedAt).toLocaleString()}</p>
+      {interests.stale && <p role="status" className="mt-2 text-sm text-warn">New responses are available, but analysis could not update. These are the last available results.</p>}
       {!interests.enoughResponses && <p className="mt-2 text-sm text-mute">Common experiences appear after 3 responses.</p>}
       {interests.top.map((activity, rank) => (
         <div key={activity.activity} className="mt-3 rounded-lg border border-line-2 p-3.5">
@@ -333,7 +342,7 @@ export default function StrategyStep(props: Props) {
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <section aria-label="From the quiz" className={card}><QuizEvidence counts={counts} lessonNumber={lessonNumber} /></section>
         <section aria-label="From the experience check-in" className={card}>
-          <CheckInEvidence key={experienceScope} classId={props.classId} assignmentId={props.assignmentId} onLoaded={onExperiencesLoaded} />
+          <CheckInEvidence key={experienceScope} classId={props.classId} assignmentId={props.assignmentId} onLoaded={onExperiencesLoaded} snapshot={props.contextSnapshot} onRefresh={props.onRefreshContext} />
         </section>
       </div>
 
@@ -380,7 +389,7 @@ export default function StrategyStep(props: Props) {
 
       {pick && <FocusCard strategy={pick} lessonNumber={lessonNumber} focus={focus} counts={counts} onChange={onFocusChange} />}
 
-      {props.onExperienceChange && (pick === "analogy" || pick === "experience bridging") && <MaterialExperiencePicker classId={props.classId} assignmentId={props.assignmentId} lessonNumber={lessonNumber} strategy={pick} focus={focus} interests={interests} value={props.experience || ""} onChange={props.onExperienceChange} disabled={props.busy} />}
+      {props.onExperienceChange && (pick === "analogy" || pick === "experience bridging") && <MaterialExperiencePicker classId={props.classId} assignmentId={props.assignmentId} lessonNumber={lessonNumber} strategy={pick} focus={focus} interests={interests} contextRef={props.contextSnapshot?.id} value={props.experience || ""} missingSelection={props.missingExperience} onChange={props.onExperienceChange} disabled={props.busy} />}
 
       {differs && (
         <label className="mt-4 block text-sm font-semibold text-ink-2">

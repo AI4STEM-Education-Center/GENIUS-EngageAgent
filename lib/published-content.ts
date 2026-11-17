@@ -8,6 +8,7 @@ export type SharedContentMedia = {
 };
 
 export type PublishedItemResponse = {
+  published_at?: string;
   content_item_id: string;
   content_json: string;
   media?: SharedContentMedia;
@@ -160,7 +161,7 @@ export const buildPublishedContentState = (
     };
 
     return {
-      contentItem,
+      contentItem: { ...contentItem, ...(item.published_at ? { publishedAt: item.published_at } : {}) },
       media:
         Object.keys(mergedMedia).length > 0 ? mergedMedia : undefined,
     };

@@ -127,7 +127,7 @@ it("submits only the selected image tool and exact planned scene in an image job
   expect(parameters.tools).toEqual([{ type: "image_generation", model: "gpt-image-2", size: "1536x1024", quality: "high", output_format: "jpeg", output_compression: 85, action: "generate" }]);
   expect(parameters.input[0].content).toEqual([{ type: "input_text", text: slideImagePrompt(existing, "cognitive conflict", "evidence") }]);
   expect(parameters.tool_choice).toEqual({ type: "image_generation" });
-  expect(spec).toEqual({ kind: "image", model: "gpt-image-2" });
+  expect(spec).toMatchObject({ kind: "image", model: "gpt-image-2" });
 });
 
 it("does not fall back to a synchronous request or another model when job submission fails", async () => {

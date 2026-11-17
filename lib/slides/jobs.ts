@@ -1,3 +1,4 @@
+import type { GenerationRecord } from "../generation-record";
 import { parseSlideRevision, validSlideRevisionIndex } from "./slide-revision";
 import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
@@ -7,15 +8,16 @@ import type { AnalogyMethod } from "./analogy-methods";
 import type { SlidePromptProvenance } from "./prompt-versions";
 import { SIX_STEP_CONTEXT_FIELDS } from "./analogy";
 import { existingGenerationKey } from "./model-config";
-import { parseTextFindings } from "./review";
+import { parseRubric } from "./review-rubric";
+import { structuredTextFindings, parseTextFindings } from "./review";
 import { authorizeMaterialLibrary, requestDraft, slideJson, SlideRequestError, type AuthorizedSlideContext } from "./server";
 
 export type SlideJobSpec =
-  | { kind: "draft"; model: string; strategy: SlideStrategy; analogyMethod?: AnalogyMethod; requireOpeningPhenomenon?: true; promptProvenance: SlidePromptProvenance }
-  | { kind: "slide-revision"; model: string; strategy: SlideStrategy; lessonNumber: number; slideIndex: number; draft: SlideDraft }
+  | { kind: "draft"; generation?: GenerationRecord; model: string; strategy: SlideStrategy; analogyMethod?: AnalogyMethod; requireOpeningPhenomenon?: true; promptProvenance: SlidePromptProvenance }
+  | { kind: "slide-revision"; generation?: GenerationRecord; model: string; strategy: SlideStrategy; lessonNumber: number; slideIndex: number; draft: SlideDraft }
   | { kind: "text-check"; model: string; strategy: SlideStrategy; draft: SlideDraft }
   | { kind: "image-check"; model: string }
-  | { kind: "image"; model: string };
+  | { kind: "image"; model: string; generation?: GenerationRecord };
 type Context = { classId: string; assignmentId: string };
 type SlideJob = Context & { ownerId: string; providerResponseId: string; expiresAt: number; spec: SlideJobSpec; cancelled?: boolean };
 
@@ -33,7 +35,7 @@ const client = () => new OpenAI({ apiKey: existingGenerationKey(), timeout: 20_0
 function boundedSpec(spec: SlideJobSpec): SlideJobSpec {
   let value: SlideJobSpec;
   switch (spec.kind) {
-    case "draft": value = { kind: spec.kind, model: spec.model, strategy: spec.strategy,
+    case "draft": value = { kind: spec.kind, model: spec.model, strategy: spec.strategy, ...(spec.generation ? { generation: spec.generation } : {}),
       ...(spec.strategy === "cognitive conflict" && spec.requireOpeningPhenomenon === true ? { requireOpeningPhenomenon: true } : {}),
       ...(spec.analogyMethod ? { analogyMethod: spec.analogyMethod } : {}), promptProvenance: {
         version: spec.promptProvenance.version, revision: spec.promptProvenance.revision,
@@ -43,12 +45,12 @@ function boundedSpec(spec: SlideJobSpec): SlideJobSpec {
     case "slide-revision": {
       const draft = requestDraft(spec.draft, spec.strategy, true, spec.draft.analogyMethod);
       if (!validSlideRevisionIndex(draft, spec.slideIndex) || !Number.isInteger(spec.lessonNumber) || spec.lessonNumber < 1) throw new SlideRequestError("Choose one valid slide to revise.");
-      value = { kind: spec.kind, model: spec.model, strategy: spec.strategy, lessonNumber: spec.lessonNumber, slideIndex: spec.slideIndex, draft };
+      value = { kind: spec.kind, model: spec.model, strategy: spec.strategy, lessonNumber: spec.lessonNumber, slideIndex: spec.slideIndex, draft, ...(spec.generation ? { generation: spec.generation } : {}) };
       break;
     }
     case "text-check": value = { kind: spec.kind, model: spec.model, strategy: spec.strategy,
       draft: requestDraft(spec.draft, spec.strategy, true, spec.draft.analogyMethod) }; break;
-    default: value = { kind: spec.kind, model: spec.model };
+    default: value = { kind: spec.kind, model: spec.model, ...(spec.kind === "image" && spec.generation ? { generation: spec.generation } : {}) };
   }
   const serialized = JSON.stringify(value);
   if (Buffer.byteLength(serialized, "utf8") > MAX_METADATA_BYTES) throw new SlideRequestError(`The slide draft is too large to ${spec.kind === "slide-revision" ? "revise" : "check"}. Shorten the draft and retry.`, 413);
@@ -119,14 +121,14 @@ export function finishSlideJob(response: OpenAI.Responses.Response, spec: SlideJ
     if (!base64 || base64.length > 4_500_000 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(base64)) throw new SlideRequestError("The model returned an invalid or oversized slide image. Please try again.", 502);
     const bytes = Buffer.from(base64, "base64");
     if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) throw new SlideRequestError("The model returned an unsupported slide image. Please try again.", 502);
-    return { asset: { data: `data:image/jpeg;base64,${base64}`, width: 1536, height: 1024, model: spec.model } };
+    return { asset: { data: `data:image/jpeg;base64,${base64}`, width: 1536, height: 1024, model: spec.model, ...(spec.generation ? { generation: spec.generation } : {}) } };
   }
   const content = response.output_text || output.flatMap(item => item.type === "message" ? item.content.filter(part => part.type === "output_text").map(part => part.text) : []).join("");
   let parsed: unknown;
   try { parsed = JSON.parse(content); }
   catch { throw new SlideRequestError("The model returned an unreadable slide result. Please try again.", 502); }
   if (spec.kind === "slide-revision") {
-    try { return { slide: parseSlideRevision(parsed, spec.draft, spec.strategy, spec.slideIndex, spec.lessonNumber), slideIndex: spec.slideIndex, model: spec.model }; }
+    try { return { slide: parseSlideRevision(parsed, spec.draft, spec.strategy, spec.slideIndex, spec.lessonNumber), slideIndex: spec.slideIndex, model: spec.model, ...(spec.generation ? { generation: spec.generation } : {}) }; }
     catch { throw new SlideRequestError("The revised slide did not meet its content requirements. Your original draft is unchanged. Retry revising this slide.", 502); }
   }
   if (spec.kind === "draft") {
@@ -138,11 +140,11 @@ export function finishSlideJob(response: OpenAI.Responses.Response, spec: SlideJ
     if (spec.strategy === "cognitive conflict" && spec.requireOpeningPhenomenon && !draft.visuals.some(visual => visual.id === "phenomenon")) throw new SlideRequestError("The opening phenomenon image plan is missing. Please retry generation.", 502);
     if (spec.strategy === "analogy" && !draft.analogyPlan) throw new SlideRequestError("The analogy design is incomplete. Please retry generation.", 502);
     if (spec.analogyMethod === "six-step" && (SIX_STEP_CONTEXT_FIELDS.some(field => !draft.analogyPlan?.[field]?.trim()) || draft.analogyPlan?.mappingHint !== "")) throw new SlideRequestError("The teacher-led analogy design is incomplete. Please retry generation.", 502);
-    return { draft, model: spec.model, promptProvenance: spec.promptProvenance };
+    return { draft, model: spec.model, promptProvenance: spec.promptProvenance, ...(spec.generation ? { generation: spec.generation } : {}) };
   }
   const issues = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).issues : undefined;
   if (spec.kind === "text-check") {
-    try { return { issues: parseTextFindings(issues, spec.draft), model: spec.model }; }
+    try { return { issues: parseTextFindings(issues, spec.draft), findings: structuredTextFindings(issues, spec.draft), rubric: parseRubric((parsed as Record<string, unknown>).rubric), model: spec.model }; }
     catch { throw new SlideRequestError("Content review was not grounded in the current draft. Retry checking; your draft is unchanged.", 502); }
   }
   if (!Array.isArray(issues) || issues.length > 5 || issues.some(issue => typeof issue !== "string" || !issue.trim() || issue.length > 800)) throw new SlideRequestError("The model returned an invalid image review. Please retry checking.", 502);

@@ -3,6 +3,8 @@
 References: #179, #181, #196 and the supplied `EngageAgent-UI-v8.4-prototype_1 (1).html`.
 The user's latest rules take precedence over the prototype: at most three suitable recommendations at the top of Step 3; materials remain independent of classes; one or two strategy focus items.
 
+This is an implementation summary, not a complete requirements sign-off. The subsequent [one-to-one requirements audit](v84-requirement-audit-20261117.md) identifies remaining UI and data-provenance gaps. Upstream service availability does not block implementing the [integration state and adapter design](v84-genius-readiness-design-20261117.md); that readiness work remains separate from successful local/production feature checks.
+
 | Requirement / prototype area | Result |
 | --- | --- |
 | Step 2: experience selection | Reported activities with actual counts, focus-specific AI suggestions and good/weak-fit explanations, and a custom experience. Changing task/strategy/focus isolates the selection. Suggestions are explicitly distinguished from survey results. |

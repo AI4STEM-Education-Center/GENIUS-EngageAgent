@@ -47,7 +47,7 @@ it("previews real media and shares only the edited copy while the class material
   fireEvent.change(screen.getByLabelText("Video scene description"), { target: { value: "A ball contacts the floor." } });
   fireEvent.change(screen.getByLabelText("Image panel 1 caption"), { target: { value: "Before contact" } });
   fireEvent.change(screen.getByLabelText("Teaching context (optional)"), { target: { value: "Reusable video setting" } });
-  fireEvent.change(screen.getByLabelText("Quiz pattern (optional)"), { target: { value: "Contact forces" } });
+  fireEvent.change(screen.getByLabelText("Quiz pattern (optional)"), { target: { value: "55–70% correct" } });
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.click(share);
   await waitFor(() => expect(onShared).toHaveBeenCalledOnce());
@@ -60,7 +60,7 @@ it("previews real media and shares only the edited copy while the class material
   expect(copy.activity.stages[0]).toMatchObject({ id: "phenomenon", title: "A familiar collision", text: "What do you notice?" });
   expect(copy.visualBrief).toBe("A ball contacts the floor.");
   expect(lesson).toBe(1);
-  expect(metadata).toMatchObject({ title: "A reusable video", focus: { misconceptions: ["a"], coreIdeas: [] }, teachingContext: "Reusable video setting", quizPattern: "Contact forces", sharingConfirmed: true });
+  expect(metadata).toMatchObject({ title: "A reusable video", focus: { misconceptions: ["a"], coreIdeas: [] }, teachingContext: "Reusable video setting", quizPattern: "55–70% correct", sharingConfirmed: true });
   expect(signal).toBeInstanceOf(AbortSignal);
   expect(item).toEqual(original);
   expect(screen.queryByRole("dialog")).toBeNull();

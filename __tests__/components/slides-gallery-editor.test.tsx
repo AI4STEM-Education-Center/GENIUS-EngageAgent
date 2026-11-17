@@ -6,7 +6,8 @@ import { deckFixture } from "../fixtures/slides";
 import { INITIAL_MODEL_CATALOG } from "@/lib/slides/models";
 import type { SlideDeck } from "@/lib/slides/model";
 
-const mocks = vi.hoisted(() => ({ load: vi.fn(), cache: vi.fn(), publish: vi.fn(), download: vi.fn(), fetch: vi.fn() }));
+const mocks = vi.hoisted(() => ({ load: vi.fn(), cache: vi.fn(), publish: vi.fn(), download: vi.fn(), fetch: vi.fn(), privateCopy: vi.fn(), librarySave: vi.fn() }));
+vi.mock("@/lib/material-gallery-client", async original => ({ ...await original<object>(), createPrivateSlideCopy: mocks.privateCopy, saveGalleryCopy: mocks.librarySave }));
 vi.mock("@/lib/slides/draft-storage", async original => ({ ...await original<object>(), loadSlideDraft: mocks.load, saveSlideDraft: mocks.cache }));
 vi.mock("@/lib/slides/export", () => ({ downloadPresentation: mocks.download }));
 vi.mock("@/lib/slides/publish-client", () => ({ publishSlideDeck: mocks.publish }));
@@ -34,6 +35,23 @@ beforeEach(() => {
   });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it("saves a compact Step 3 draft to the independent library and protects unsaved edits without a Gallery callback", async () => {
+  const original = deckFixture(context.strategy);
+  const saved = { ...original, id: "private-copy", gallerySource: { templateId: "private-source", revision: 1, title: original.draft.title, mode: "use" as const, private: true }, libraryRevision: 0 };
+  mocks.privateCopy.mockResolvedValue({ format: "slides", source: saved.gallerySource, deck: saved });
+  mocks.librarySave.mockResolvedValue({ revision: 1 });
+  render(<SlidesWorkspace user={user} embeddedContext={context} incomingDeck={original} incomingDeckSaved={false} compactEditor />);
+  await screen.findByLabelText("Slide title");
+  const leave = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(leave);
+  expect(leave.defaultPrevented).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Save to my materials" }));
+  await screen.findByText("Saved to My saved materials. You can reopen it from Gallery in any class.");
+  expect(mocks.privateCopy).toHaveBeenCalledOnce();
+  expect(mocks.librarySave.mock.calls[0][1].deck.id).toBe("private-copy");
+  expect(screen.getByText("Saved changes")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+});
 
 it("automatically adapts only the explicitly requested copy with its current task settings, and supports undo", async () => {
   const original = copy();

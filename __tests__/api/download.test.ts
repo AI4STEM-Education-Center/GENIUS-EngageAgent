@@ -2,10 +2,11 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { NextRequest } from "next/server";
-const mocks = vi.hoisted(() => ({ lookup: vi.fn(), request: vi.fn(), local: vi.fn() }));
+const mocks = vi.hoisted(() => ({ lookup: vi.fn(), request: vi.fn(), local: vi.fn(), gallery: vi.fn() }));
 vi.mock("node:dns", () => ({ lookup: mocks.lookup }));
 vi.mock("node:https", () => ({ request: mocks.request }));
 vi.mock("@/lib/local-material-storage", () => ({ readLocalMaterial: mocks.local }));
+vi.mock("@/lib/material-gallery-storage", () => ({ readGalleryMediaTicket: mocks.gallery }));
 import { GET } from "@/app/api/download/route";
 
 type Upstream = { status?: number; headers?: Record<string, string>; body?: string };
@@ -120,4 +121,14 @@ it("keeps signed local development downloads on their verifier without fetching 
   expect(mocks.local).toHaveBeenCalledOnce(); expect(mocks.request).not.toHaveBeenCalled();
   vi.stubEnv("NODE_ENV", "production");
   expect((await download("/api/local-material-assets?ticket=header.payload.signature")).status).toBe(400);
+});
+
+it("downloads a signed local Gallery video through its verifier without a network request", async () => {
+  mocks.gallery.mockResolvedValue({ bytes: Buffer.from("video-bytes"), mime: "video/mp4" });
+  const response = await download("/api/material-gallery/media?ticket=header.payload.signature", "activity.mp4");
+  expect(response.status).toBe(200); expect(await response.text()).toBe("video-bytes");
+  expect(response.headers.get("Content-Disposition")).toContain("attachment;");
+  expect(mocks.gallery).toHaveBeenCalledOnce(); expect(mocks.request).not.toHaveBeenCalled();
+  mocks.gallery.mockRejectedValue(new Error("Expired"));
+  expect((await download("/api/material-gallery/media?ticket=header.payload.signature")).status).toBe(502);
 });

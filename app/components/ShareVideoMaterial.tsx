@@ -1,4 +1,7 @@
 "use client";
+import SharingPrivacyReview from "./SharingPrivacyReview";
+import ShareTagPreview, { shareContextDefault } from "./ShareTagPreview";
+import { GRADE_BANDS, QUIZ_BANDS, canonicalGrade } from "@/lib/material-teaching-context";
 
 import { useEffect, useRef, useState } from "react";
 import { LayoutGrid, LoaderCircle, X } from "lucide-react";
@@ -18,6 +21,7 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
   const [confirmed, setConfirmed] = useState(false);
   const [grade, setGrade] = useState("");
   const [description, setDescription] = useState("");
+  const [topic, setTopic] = useState(item.generation?.tags.TOPIC || "");
   const [experienceContext, setExperienceContext] = useState("");
   const [quizPattern, setQuizPattern] = useState("");
   const [teachingContext, setTeachingContext] = useState("");
@@ -26,7 +30,7 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
   const [busy, setBusy] = useState(false);
   const [shared, setShared] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => setConfirmed(false), [draft, grade, description, focus, videoUrl, imageUrl, experienceContext, quizPattern, teachingContext, classProfile, keywords]);
+  useEffect(() => setConfirmed(false), [draft, grade, description, topic, focus, videoUrl, imageUrl, experienceContext, quizPattern, teachingContext, classProfile, keywords]);
   useEffect(() => () => request.current?.abort(), []);
   async function share() {
     if (!confirmed || busy || request.current || !draft.title.trim()) return;
@@ -35,7 +39,7 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
     try {
       const selected = focus ? focusForStrategy(focus, item.strategy) : undefined;
       await shareVideoMaterial(scope, { ...draft, id: item.id, title: draft.title.trim() }, lessonNumber, {
-        title: draft.title.trim(), description: description.trim(), gradeBand: grade.trim(),
+        title: draft.title.trim(), topic: topic.trim(), description: description.trim(), gradeBand: grade.trim(),
         experienceContext: experienceContext.trim(), quizPattern: quizPattern.trim(), teachingContext: teachingContext.trim(), classProfile: classProfile.trim(), keywords: keywords.split(",").map(tag => tag.trim()).filter(Boolean),
         ...(selected ? { focus: { misconceptions: selected.misconceptions ?? [], coreIdeas: selected.coreIdeas ?? [] } } : {}), sharingConfirmed: true,
       }, controller.signal);
@@ -48,7 +52,7 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
     }
   }
   return <>
-    <button type="button" className={`${button} mt-3`} disabled={disabled || busy} onClick={() => { setDraft(structuredClone(item)); setGrade(item.teachingContext?.gradeBand || ""); setExperienceContext(item.teachingContext?.experienceContext || ""); setQuizPattern(item.teachingContext?.quizPattern || ""); setConfirmed(false); setError(""); dialog.current?.showModal(); }}><LayoutGrid size={16} />{shared ? "Share updated copy" : "Share to Gallery"}</button>
+    <button type="button" className={`${button} mt-3`} disabled={disabled || busy} onClick={() => { setDraft(structuredClone(item)); setTopic(item.generation?.tags.TOPIC || ""); setGrade(canonicalGrade(item.teachingContext?.gradeBand || "")); setTeachingContext(shareContextDefault(item.strategy, item.teachingContext?.experienceContext)); setClassProfile(item.teachingContext?.gradeBand || ""); setExperienceContext(item.teachingContext?.experienceContext || ""); setQuizPattern(item.teachingContext?.quizPattern || ""); setConfirmed(false); setError(""); dialog.current?.showModal(); }}><LayoutGrid size={16} />{shared ? "Share updated copy" : "Share to Gallery"}</button>
     {shared && <p role="status" className="mt-2 text-sm text-ok">Shared with teachers. Sending to students is a separate action.</p>}
     <dialog ref={dialog} aria-label="Share video to Gallery" onCancel={event => { if (busy) event.preventDefault(); }} className="fixed inset-0 m-auto max-h-[90vh] w-[94vw] max-w-2xl overflow-auto rounded-2xl border border-line bg-white p-6 backdrop:bg-ink/50">
       <div className="flex items-center justify-between gap-3"><h3 className="text-xl font-bold">Share with other teachers</h3><button type="button" className={button} aria-label="Close video sharing" disabled={busy} onClick={() => dialog.current?.close()}><X size={18} /></button></div>
@@ -62,13 +66,15 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
           <p className="mt-3 text-xs leading-relaxed text-mute">Editing the text below does not change the video or image. If either contains private details, close this dialog and replace that media before sharing.</p>
         </div>
         <label className="text-sm font-semibold">Shared title<input className={input} value={draft.title} maxLength={160} onChange={event => setDraft(value => ({ ...value, title: event.target.value }))} /></label>
+        <label className="text-sm font-semibold">Topic<input className={input} value={topic} maxLength={160} onChange={event => setTopic(event.target.value)} /></label>
         <label className="text-sm font-semibold">Description<textarea className={input} value={description} maxLength={1000} onChange={event => setDescription(event.target.value)} /></label>
-        <label className="text-sm font-semibold">Grade band (optional)<input className={input} value={grade} maxLength={80} onChange={event => setGrade(event.target.value)} placeholder="e.g. Grades 6–8" /></label>
+        <label className="text-sm font-semibold">Grade band (optional)<select className={input} value={grade} onChange={event => setGrade(event.target.value)}><option value="">Not supplied</option>{grade && !(GRADE_BANDS as readonly string[]).includes(grade) && <option>{grade}</option>}{GRADE_BANDS.map(value => <option key={value}>{value}</option>)}</select></label>
+        <ShareTagPreview lessonNumber={lessonNumber} strategy={item.strategy} focus={focus} grade={grade} quiz={quizPattern} experience={experienceContext} format="video" generation={item.generation} />
         <details className="rounded-lg border border-line p-3"><summary className="cursor-pointer text-sm font-semibold">Teaching tags</summary>
           <p className="mt-2 text-xs text-mute">Lesson, objective, strategy, focus and format are included. Add shareable summaries to help teachers find this material; keep student details out.</p>
           <div className="mt-3 grid gap-3">
             <label className="text-sm font-semibold">Experience context (optional)<input className={input} value={experienceContext} maxLength={200} onChange={event => setExperienceContext(event.target.value)} /></label>
-            <label className="text-sm font-semibold">Quiz pattern (optional)<input className={input} value={quizPattern} maxLength={200} onChange={event => setQuizPattern(event.target.value)} /></label>
+            <label className="text-sm font-semibold">Quiz pattern (optional)<select className={input} value={quizPattern} onChange={event => setQuizPattern(event.target.value)}><option value="">Not supplied</option>{quizPattern && !(QUIZ_BANDS as readonly string[]).includes(quizPattern) && <option>{quizPattern}</option>}{QUIZ_BANDS.map(value => <option key={value}>{value}</option>)}</select></label>
             <label className="text-sm font-semibold">Keywords (optional)<input className={input} value={keywords} maxLength={490} placeholder="e.g. collisions, soccer, visual learning" onChange={event => { setKeywords(event.target.value); setConfirmed(false); }} /><span className="mt-1 block text-xs font-normal text-mute">Separate with commas. Up to 12 keywords.</span></label>
           <label className="text-sm font-semibold">Teaching context (optional)<textarea className={input} value={teachingContext} maxLength={400} onChange={event => setTeachingContext(event.target.value)} /></label>
             <label className="text-sm font-semibold">Class profile summary (optional)<input className={input} value={classProfile} maxLength={200} onChange={event => setClassProfile(event.target.value)} /></label>
@@ -90,6 +96,7 @@ export default function ShareVideoMaterial({ scope, item, lessonNumber, focus, v
             {draft.activity.analogyMapping.correspondences.map((pair, n) => <div key={n} className="grid gap-2">{(["targetPart", "analoguePart", "relationship"] as const).map(field => <label key={field} className="text-sm">{field === "targetPart" ? "Concept part" : field === "analoguePart" ? "Comparison part" : "Relationship"}<textarea aria-label={`Mapping ${n + 1} ${field}`} className={input} value={pair[field]} onChange={event => setDraft(value => ({ ...value, activity: value.activity && { ...value.activity, analogyMapping: value.activity.analogyMapping && { ...value.activity.analogyMapping, correspondences: value.activity.analogyMapping.correspondences.map((entry, i) => i === n ? { ...entry, [field]: event.target.value } : entry) } } }))} /></label>)}</div>)}
           </fieldset>}
         </div></details>}
+        <SharingPrivacyReview scope={scope} disabled={busy} value={{ title: draft.title, body: draft.body, activity: draft.activity, visualBrief: draft.visualBrief, description, experienceContext, teachingContext, classProfile }} onApply={next => { setDraft(value => ({ ...value, title: next.title, body: next.body, activity: next.activity, visualBrief: next.visualBrief })); setDescription(next.description); setExperienceContext(next.experienceContext); setTeachingContext(next.teachingContext); setClassProfile(next.classProfile); setConfirmed(false); }} />
         <label className="flex items-start gap-3 rounded-lg bg-canvas p-3 text-sm"><input className="mt-1 accent-brand" type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />I reviewed the shared text and video and removed private class details. Other teachers may view and copy it.</label>
       </fieldset>
       {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}

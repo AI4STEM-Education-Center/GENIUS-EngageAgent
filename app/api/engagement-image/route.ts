@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { recordGeneration } from "@/lib/generation-record-server";
+import { workspaceRequestUser } from "@/lib/workspace-access";
 import OpenAI, { toFile } from "openai";
 import { buildMaterialImageInstructions } from "@/lib/material-prompts";
 import { DEFAULT_IMAGE_MODEL, RETIRED_IMAGE_MODEL_MESSAGE } from "@/lib/slides/models";
@@ -12,6 +15,8 @@ import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import { getMedia, upsertMedia } from "@/lib/nosql";
 
 type ContentItem = {
+  generation?: import("@/lib/generation-record").GenerationRecord;
+  teachingContext?: import("@/lib/material-teaching-context").MaterialTeachingContext;
   id?: string;
   type: string;
   strategy: string;
@@ -171,6 +176,12 @@ export async function POST(request: Request) {
       );
     }
 
+    const teacher = await workspaceRequestUser(request);
+    const capture = async (prompt: string, quality: string) => {
+      if (!teacher || teacher.role !== "teacher" || !classId || !assignmentId || typeof lessonNumber !== "number") return;
+      await recordGeneration({ userId: teacher.geniusId, classId, assignmentId }, { lessonNumber, strategy: item.strategy, format: "video", operation: isRefine ? "image-revision" : "image", model, prompt: { system: "", user: prompt }, settings: item.teachingContext, parentId: item.generation?.id,
+        parameters: { contentItemId: item.id, size: item.activity ? "1536x1024" : "1024x1024", quality, output_format: "webp", ...(previousImageUrl ? { referenceSha256: createHash("sha256").update(previousImageUrl).digest("hex") } : {}), ...(annotatedImageUrl ? { selectionSha256: createHash("sha256").update(annotatedImageUrl).digest("hex"), instructionModel: process.env.OPENAI_VLM_MODEL ?? "gpt-4o", instructionSystem: VLM_SYSTEM_PROMPT, instruction: trimmedRefine } : {}) } });
+    };
     let result;
     if (isRefine) {
       const [editPrompt, imageInput] = await Promise.all([
@@ -180,6 +191,7 @@ export async function POST(request: Request) {
         prepareImageInput(previousImageUrl),
       ]);
 
+      await capture(editPrompt, "low");
       result = await client.images.edit({
         model,
         image: imageInput,
@@ -190,6 +202,7 @@ export async function POST(request: Request) {
       });
     } else {
       const prompt = buildPrompt(item, lessonNumber as number);
+      await capture(prompt, item.activity ? materialImageQuality() : "low");
       result = await client.images.generate({
         model,
         prompt,

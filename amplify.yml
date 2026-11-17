@@ -9,6 +9,7 @@ frontend:
     build:
       commands:
         - npm run check:production-config
+        - node scripts/write-provider-runtime-env.mjs
         - echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> .env.production
         - echo "GROK_API_KEY=$GROK_API_KEY" >> .env.production
         - echo "SSO_SECRET=$SSO_SECRET" >> .env.production

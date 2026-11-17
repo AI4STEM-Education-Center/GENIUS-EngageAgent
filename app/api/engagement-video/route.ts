@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { recordGeneration } from "@/lib/generation-record-server";
 import { NextResponse } from "next/server";
 import type { ContentItem } from "@/lib/types";
 import { buildMaterialVideoInstructions } from "@/lib/material-video";
@@ -61,6 +63,9 @@ export async function POST(request: Request) {
     }
 
     const animationPrompt = buildMaterialVideoInstructions(item) || buildAnimationPrompt();
+
+    if (typeof item.lessonNumber === "number") await recordGeneration({ userId: user.geniusId, classId, assignmentId }, { lessonNumber: item.lessonNumber, strategy: item.strategy, format: "video", operation: "video", model: "grok-imagine-video", prompt: { system: "", user: animationPrompt }, settings: item.teachingContext, parentId: item.generation?.id,
+      parameters: { contentItemId: item.id, duration: 4, aspect_ratio: "1:1", resolution: "480p", referenceSha256: createHash("sha256").update(imageUrl).digest("hex") } });
 
     const res = await fetch(`${XAI_VIDEO_BASE}/generations`, {
       method: "POST",

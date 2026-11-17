@@ -6,6 +6,7 @@ import type { IncomingMessage } from "node:http";
 import { NextRequest } from "next/server";
 import { isSafeMaterialUrl } from "@/lib/material-url";
 import { readLocalMaterial } from "@/lib/local-material-storage";
+import { readGalleryMediaTicket } from "@/lib/material-gallery-storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -107,6 +108,11 @@ export async function GET(request: NextRequest) {
     const disposition = attachment(request.nextUrl.searchParams.get("filename") ?? "download");
     const headers = { "Content-Disposition": disposition, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" };
     // Local signed assets are read through their verifier, never through loopback HTTP.
+    if (/^\/api\/material-gallery\/media\?ticket=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(url)) {
+      const asset = await readGalleryMediaTicket(new Request(new URL(url, request.nextUrl.origin)));
+      if (asset.bytes.length > MAX_FILE_BYTES) throw new DownloadError("File is too large", 413);
+      return new Response(new Uint8Array(asset.bytes), { headers: { ...headers, "Content-Type": asset.mime } });
+    }
     if (url.startsWith("/") && isSafeMaterialUrl(url)) {
       const asset = await readLocalMaterial(new Request(new URL(url, request.nextUrl.origin)));
       return new Response(new Uint8Array(asset.bytes), { headers: { ...headers, "Content-Type": asset.mime } });

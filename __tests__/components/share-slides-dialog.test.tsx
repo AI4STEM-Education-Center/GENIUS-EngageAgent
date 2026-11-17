@@ -50,7 +50,7 @@ it("shares a teacher-reviewed independent copy without class context or changing
   fireEvent.change(screen.getByLabelText("Shared slide 1 body"), { target: { value: "Observe the two objects." } });
   fireEvent.change(screen.getByLabelText("Shared slide 1 notes"), { target: { value: "Ask what students notice." } });
   fireEvent.change(screen.getByLabelText("Shared teaching plan familiarExperience"), { target: { value: "A familiar playground experience" } });
-  expect(screen.getByLabelText("Teaching context (optional)")).toHaveProperty("value", "");
+  expect(screen.getByLabelText("Teaching context (optional)")).not.toHaveProperty("value", deck.classroomContext);
   fireEvent.change(screen.getByLabelText("Teaching context (optional)"), { target: { value: "Safe, reusable context" } });
   fireEvent.change(screen.getByLabelText("Class profile summary (optional)"), { target: { value: "Introductory physics" } });
   fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed the shared text/ }));

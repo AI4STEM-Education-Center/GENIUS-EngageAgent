@@ -639,3 +639,34 @@ it("saves generated video privately, adapts its text with authorized context and
   expect((await adaptVideo(request())).status).toBe(403);
   expect(mocks.complete).toHaveBeenCalledOnce();
 });
+
+it("keeps captured inputs distinct from reviewed labels and rejects forged format provenance", async () => {
+  const { recordGeneration } = await import("@/lib/generation-record-server");
+  const generation = await recordGeneration({ ...scope, userId: teacher.geniusId }, { lessonNumber: 3, strategy: "cognitive conflict", format: "slides", operation: "generate", model: "test-model", prompt: { system: "contract", user: "PRIVATE_CLASS_PROMPT" }, variables: { TOPIC: "Original topic", LEARNING_OBJECTIVE: "Observe contact" }, settings: { experienceContext: "PRIVATE_CHECK_IN", gradeBand: "Middle school" } });
+  const id = await share({ generation: { ...generation, model: "forged" }, metadata: { ...metadata, topic: "Reviewed topic", experienceContext: "Ball games" } });
+  const result = await (await get({ id })).json();
+  expect(result.material).toMatchObject({ metadataOrigin: "captured", promptTags: { TOPIC: "Reviewed topic", EXPERIENCE_CONTEXT: "Ball games" }, generation: { id: generation.id, model: "test-model", tags: { TOPIC: "Original topic" } } });
+  expect(JSON.stringify(result)).not.toContain("PRIVATE_");
+  const copy = await (await post({ action: "copy", id, mode: "use" })).json();
+  expect(copy.deck.generation.id).toBe(generation.id);
+  const videoGeneration = await recordGeneration({ ...scope, userId: teacher.geniusId }, { lessonNumber: 3, strategy: "cognitive conflict", format: "video", operation: "generate", model: "test", prompt: { system: "", user: "video" } });
+  expect((await post(startBody({ generation: videoGeneration }))).status).toBe(422);
+});
+
+it("lets the owner correct historical labels once per revision without changing material contents", async () => {
+  const id = await share();
+  const original = await (await get({ id })).json();
+  const body = { action: "update-metadata", id, expectedMetadataRevision: 0, metadata: { ...metadata, gradeBand: "Grades 7–8", topic: "Collisions", keywords: ["motion"] } };
+  const updated = await post(body);
+  expect(updated.status).toBe(200);
+  const value = await (await get({ id })).json();
+  expect(value.material).toMatchObject({ metadataRevision: 1, metadataOrigin: "teacher_confirmed", gradeBand: "Middle school", promptTags: { TOPIC: "Collisions", KEYWORDS: "motion" } });
+  expect(value.draft).toEqual(original.draft);
+  expect(value.material.generation).toBeUndefined();
+  expect(value.material.lessonIdentity).toEqual({ topic: original.material.promptTags.TOPIC, learningObjective: original.material.promptTags.LEARNING_OBJECTIVE });
+  const recommended = await (await get({ recommendedOnly: "true", recommendLesson: "3", recommendStrategy: "cognitive conflict", format: "slides" })).json();
+  expect(recommended.items.map((item: { id: string }) => item.id)).toContain(id);
+  expect((await post(body)).status).toBe(409);
+  mocks.session.mockResolvedValue({ ...teacher, geniusId: "intruder" });
+  expect((await post({ ...body, expectedMetadataRevision: 1 })).status).toBe(404);
+});

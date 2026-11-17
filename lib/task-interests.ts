@@ -28,6 +28,7 @@ import { pickTaskSurvey } from "./survey-schedule";
  */
 
 export type InterestActivity = {
+  activityId?: string;
   /** Specific activity, e.g. "Soccer". */
   activity: string;
   /** Broad category, e.g. "Sports". */
