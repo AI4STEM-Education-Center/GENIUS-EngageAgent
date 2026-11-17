@@ -35,6 +35,7 @@ type SlidesWorkspaceProps = {
   incomingDeckSaved?: boolean;
   draftNamespace?: string;
   onSaveDraft?: (deck: SlideDeck) => Promise<void>;
+  onRequestSend?: (deck: SlideDeck) => void;
   onDraftChange?: (deck: SlideDeck) => void;
   compactEditor?: boolean;
   onBusyChange?: (strategy: SlideStrategy, busy: boolean) => void;
@@ -43,7 +44,7 @@ type SlidesWorkspaceProps = {
   onGalleryShared?: () => void;
 };
 
-const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceProps>(function SlidesWorkspaceEditor({ user, embeddedContext, incomingDeck, incomingDeckSaved = true, draftNamespace, onSaveDraft, onDraftChange, compactEditor = false, onBusyChange, onReadyChange, onPublished, onGalleryShared }, ref) {
+const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceProps>(function SlidesWorkspaceEditor({ user, embeddedContext, incomingDeck, incomingDeckSaved = true, draftNamespace, onSaveDraft, onRequestSend, onDraftChange, compactEditor = false, onBusyChange, onReadyChange, onPublished, onGalleryShared }, ref) {
   const [lessons, setLessons] = useState<SlideLesson[]>([]);
   const [standaloneLesson, setLessonNumber] = useState(1);
   const [standaloneStrategy, setStrategy] = useState<SlideStrategy>("analogy");
@@ -104,7 +105,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   useEffect(() => {
     const controller = new AbortController();
     setCatalogLoaded(false);
-    fetch(`/api/slides?${new URLSearchParams({ classId: classId || "", assignmentId: assignmentId || "" })}`, { headers: scopedClientAuthHeaders({ classId, assignmentId }), signal: controller.signal, cache: "no-store" })
+    fetch(`/api/slides?${new URLSearchParams({ classId: classId || "", assignmentId: assignmentId || "", ...(!classId && !assignmentId ? { library: "true" } : {}) })}`, { headers: scopedClientAuthHeaders({ classId, assignmentId }), signal: controller.signal, cache: "no-store" })
       .then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error || "Unable to load lessons."); return data as { lessons: SlideLesson[]; models?: SlideModelCatalog }; })
       .then(value => { if (!controller.signal.aborted) { setLessons(value.lessons); setModels(value.models || INITIAL_MODEL_CATALOG); if (!embedded && !importedDeckId.current) setLessonNumber(value.lessons[0]?.lessonNumber ?? 1); setCatalogLoaded(true); setError(""); } })
       .catch(err => { if (!controller.signal.aborted) setError(err.message); });
@@ -614,8 +615,8 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           {(compactEditor || onSaveDraft) && <button type="button" className={button} disabled={busy} onClick={saveChanges}>Save changes</button>}
           {(!compactEditor || advancedOpen) && <button type="button" className={button} disabled={!ready || busy || reviewed} onClick={() => setReviewed(true)}><ScanEye size={16} />{reviewed ? "Review confirmed" : "Confirm review"}</button>}
           <button type="button" className={button} disabled={busy || !ready} onClick={download}><Download size={17} />Download PPTX</button>
-          {(!compactEditor || advancedOpen) && <button type="button" className={button} disabled={busy || !ready || !classId || !assignmentId} onClick={() => setShareOpen(true)}><LayoutGrid size={17} />{sharedDeck === deck ? "In Gallery · share another version" : "Share to Gallery"}</button>}
-          <button type="button" className={primaryButton} disabled={busy || !ready || !classId || !assignmentId || published} onClick={publish}><Send size={17} />{published ? "Published" : "Send to students"}</button>
+          {(!compactEditor || advancedOpen) && <button type="button" className={button} disabled={busy || !ready} onClick={() => setShareOpen(true)}><LayoutGrid size={17} />{sharedDeck === deck ? "In Gallery · share another version" : "Share to Gallery"}</button>}
+          <button type="button" className={primaryButton} disabled={busy || !ready || (!onRequestSend && (!classId || !assignmentId || published))} onClick={() => onRequestSend ? onRequestSend(deck) : void publish()}><Send size={17} />{published ? "Published" : "Send to students"}</button>
           {preparedDownload?.deck === deck && !busy && ready && <a className={button} href={preparedDownload.httpUrl || preparedDownload.dataUri || preparedDownload.url} download={preparedDownload.fileName}>Save PPTX file</a>}
         </div>
         {preparedDownload?.deck === deck && !busy && ready && preparedDownload.httpUrl && <p className="mt-2 text-xs text-gray-500">Save link expires in 10 minutes. Select Download PPTX again to refresh it.</p>}
@@ -629,7 +630,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           <button className={button} disabled={busy || !!issues.length || !!visual.needsReference} onClick={() => retryImage(visual.id)}><ImagePlus size={16} />Regenerate {visual.id} image</button>
         </li>)}</ul>
       </section>}
-      {shareOpen && classId && assignmentId && <ShareSlidesDialog deck={deck} scope={{ classId, assignmentId }} onClose={() => setShareOpen(false)} onShared={() => { setSharedDeck(deck); setShareOpen(false); setStatus("Shared to Gallery. Send to students separately when you are ready."); onGalleryShared?.(); }} />}
+      {shareOpen && <ShareSlidesDialog deck={deck} scope={{ classId: classId || "", assignmentId: assignmentId || "" }} onClose={() => setShareOpen(false)} onShared={() => { setSharedDeck(deck); setShareOpen(false); setStatus("Shared to Gallery. Send to students separately when you are ready."); onGalleryShared?.(); }} />}
       <dialog ref={dialog} className="fixed inset-0 m-auto w-[96vw] max-w-7xl max-h-[96vh] overflow-auto border border-gray-300 bg-gray-50 p-3 backdrop:bg-black/70">
         <div className="mb-3 flex items-center justify-between gap-2"><button className={icon} aria-label="Previous enlarged slide" disabled={index === 0} onClick={() => setIndex(n => n - 1)}><ChevronLeft size={19} /></button><span className="text-sm">{index + 1} / {deck.draft.slides.length}</span><button className={icon} aria-label="Next enlarged slide" disabled={index === deck.draft.slides.length - 1} onClick={() => setIndex(n => n + 1)}><ChevronRight size={19} /></button><button className={icon} aria-label="Close preview" title="Close preview" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
         <div className="mx-auto w-full" style={{ maxWidth: "calc((96vh - 90px) * 16 / 9)" }}><SlidePreview deck={deck} index={index} /></div>

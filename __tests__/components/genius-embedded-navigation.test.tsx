@@ -106,7 +106,7 @@ it.each(["teacher", "student"] as const)("preserves the %s app header and lesson
   const header = within(await screen.findByRole("banner"));
   expect(header.getByRole("navigation", { name: "EngageAgent" })).toBeTruthy();
   expect(header.getByRole("button", { name: "Sign out of EngageAgent" })).toBeTruthy();
-  expect(header.getByRole(role === "teacher" ? "button" : "link", { name: role === "teacher" ? "Gallery" : "My classes" })).toBeTruthy();
+  expect(header.getByRole("link", { name: role === "teacher" ? "Gallery" : "My classes" })).toBeTruthy();
   const steps = within(screen.getByRole("navigation", { name: role === "teacher" ? "Teacher steps" : "Student steps" }));
   expect(steps.getAllByRole("button")).toHaveLength(4);
   expect(screen.queryAllByRole("button", { name: "Ask EngageAgent" })).toHaveLength(role === "teacher" ? 1 : 0);

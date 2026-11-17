@@ -6,6 +6,15 @@ import type { GalleryCopy, GalleryFacets, GalleryFilters, GalleryMaterial, Galle
 
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const invalid = () => new Error("The material library returned incomplete data. Please retry.");
+function validFeedback(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!record(value)) return false;
+  if (value.status === "unavailable") return true;
+  if (value.status !== "available" || !["ratingCount", "activityCount", "questionCount", "questionAuthorCount", "attributableActivities", "analyzedQuestionCount"].every(key => Number.isSafeInteger(value[key]) && Number(value[key]) >= 0)) return false;
+  return (value.averageRating === null || typeof value.averageRating === "number" && value.averageRating >= 1 && value.averageRating <= 5)
+    && ["highRatingPercent", "scienceQuestionPercent"].every(key => value[key] === null || typeof value[key] === "number" && Number(value[key]) >= 0 && Number(value[key]) <= 100)
+    && record(value.questionTypes) && Object.values(value.questionTypes).every(n => Number.isSafeInteger(n) && Number(n) >= 0);
+}
 function isMaterial(value: unknown): value is GalleryMaterial {
   return record(value) && typeof value.id === "string" && !!value.id && Number.isInteger(value.revision) && Number(value.revision) > 0
     && typeof value.title === "string" && typeof value.strategy === "string" && Number.isInteger(value.lessonNumber)
@@ -14,6 +23,7 @@ function isMaterial(value: unknown): value is GalleryMaterial {
     && (value.creatorName === undefined || typeof value.creatorName === "string")
     && (value.teacherCount === undefined || (Number.isSafeInteger(value.teacherCount) && Number(value.teacherCount) >= 0))
     && (value.promptTags === undefined || (record(value.promptTags) && Object.values(value.promptTags).every(v => typeof v === "string")))
+    && validFeedback(value.feedback)
     && (value.matchReasons === undefined || (Array.isArray(value.matchReasons) && value.matchReasons.every(v => typeof v === "string")))
     && (value.focus === undefined || (record(value.focus) && Array.isArray(value.focus.misconceptions) && value.focus.misconceptions.every(v => typeof v === "string")
       && Array.isArray(value.focus.coreIdeas) && value.focus.coreIdeas.every(Number.isInteger)));
@@ -29,11 +39,11 @@ async function json<T>(scope: GalleryScope, fields: Record<string, unknown>, met
   const abort = () => controller.abort(signal?.reason);
   signal?.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(() => controller.abort(), 55_000);
-  const query = new URLSearchParams(Object.entries({ ...scope, ...fields }).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]));
+  const query = new URLSearchParams(Object.entries({ ...(!scope.classId && !scope.assignmentId ? { library: true } : {}), ...scope, ...fields }).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]));
   try {
     const response = await fetch(`/api/material-gallery${method === "GET" ? `?${query}` : ""}`, {
       method, headers: { ...scopedClientAuthHeaders(scope), ...(method === "POST" ? { "Content-Type": "application/json" } : {}) },
-      ...(method === "POST" ? { body: JSON.stringify({ ...scope, ...fields }) } : {}), signal: controller.signal, cache: "no-store",
+      ...(method === "POST" ? { body: JSON.stringify({ ...(!scope.classId && !scope.assignmentId ? { library: true } : {}), ...scope, ...fields }) } : {}), signal: controller.signal, cache: "no-store",
     });
     const data = await response.json().catch(() => null);
     if (!response.ok) throw new Error(typeof data?.error === "string" ? data.error : `The material library could not complete this request (HTTP ${response.status}).`);
@@ -78,8 +88,8 @@ export async function listMaterialGallery(scope: GalleryScope, filters: GalleryF
   return data;
 }
 export async function galleryCopyAttribution(scope: GalleryScope, copyId: string, signal?: AbortSignal) {
-  const value = await json<Pick<GalleryMaterial, "creatorName" | "teacherCount" | "promptTags">>(scope, { action: "copy-attribution", copyId }, "GET", signal);
-  if (!Number.isSafeInteger(value.teacherCount) || Number(value.teacherCount) < 0
+  const value = await json<Pick<GalleryMaterial, "creatorName" | "teacherCount" | "promptTags" | "feedback" | "lessonNumber" | "strategy" | "format" | "focus" | "gradeBand" | "quizPattern" | "experienceContext">>(scope, { action: "copy-attribution", copyId }, "GET", signal);
+  if (!validFeedback(value.feedback) || !Number.isSafeInteger(value.teacherCount) || Number(value.teacherCount) < 0
     || (value.creatorName !== undefined && typeof value.creatorName !== "string")
     || (value.promptTags !== undefined && (!record(value.promptTags) || !Object.values(value.promptTags).every(v => typeof v === "string")))) throw invalid();
   return value;
@@ -209,4 +219,10 @@ export async function loadSavedGalleryCopy(scope: GalleryScope, copyId: string, 
     copy.deck.assets = assets;
   } else throw invalid();
   return { copy, revision: result.revision, savedAt: result.savedAt };
+}
+
+export async function prepareGalleryDelivery(scope: GalleryScope, copyId: string, signal?: AbortSignal) {
+  const result = await json<{ ready: boolean; contentItemId: string }>(scope, { action: "prepare-delivery", copyId }, "POST", signal);
+  if (result.ready !== true || !/^gallery-copy-[0-9a-f-]{36}$/iu.test(result.contentItemId)) throw invalid();
+  return result.contentItemId;
 }

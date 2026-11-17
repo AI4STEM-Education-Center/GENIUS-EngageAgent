@@ -2,12 +2,12 @@ import type { SlideDeck, SlideDraft, SlideStrategy } from "./slides/model";
 import type { ContentItem } from "./types";
 
 export const GALLERY_TAG_LABELS: Record<string, string> = {
-  GRADE_LEVEL: "Grade level", SUBJECT: "Subject", TOPIC: "Topic", LEARNING_OBJECTIVE: "Learning objective",
+  FOCUS_ITEMS: "Selected focus", GRADE_LEVEL: "Grade level", SUBJECT: "Subject", TOPIC: "Topic", LEARNING_OBJECTIVE: "Learning objective",
   TARGET_CONCEPT: "Target concept", CURRENT_UNDERSTANDING: "Prior understanding / quiz pattern",
   MISCONCEPTION_OR_GAP: "Misconception or gap", KNOWLEDGE_GAP: "Knowledge gap", TARGET_UNDERSTANDING: "Target understanding",
   SELECTED_STRATEGY: "Strategy", LEARNER_CONTEXT: "Teaching context", CLASS_PROFILE: "Class profile",
   EXPERIENCE_CONTEXT: "Experience context", PREFERRED_MEDIA_TYPE: "Material type", VISUAL_STYLE: "Visual style",
-  DURATION: "Duration", ANALOGY_METHOD: "Analogy method", TEXT_MODES: "Text modes",
+  KEYWORDS: "Keywords", DURATION: "Duration", ANALOGY_METHOD: "Analogy method", TEXT_MODES: "Text modes",
 };
 
 export type GalleryScope = { classId: string; assignmentId: string };
@@ -22,10 +22,17 @@ export type GalleryMetadata = {
   /** Teacher-reviewed, shareable summaries; never populated from raw class data. */
   teachingContext?: string;
   classProfile?: string;
+  keywords?: string[];
   focus?: GalleryFocus;
   /** The teacher reviewed all text, notes and images for sharing with other teachers. */
   sharingConfirmed: true;
 };
+export type GalleryFeedback = { status: "unavailable" } | {
+  status: "available"; ratingCount: number; averageRating: number | null; highRatingPercent: number | null;
+  activityCount: number; questionCount: number; questionAuthorCount: number; attributableActivities: number;
+  analyzedQuestionCount: number; questionTypes: Record<string, number>; scienceQuestionPercent: number | null;
+};
+
 export type GalleryMaterial = {
   id: string;
   revision: number;
@@ -41,16 +48,18 @@ export type GalleryMaterial = {
   createdAt: string;
   isOwner: boolean;
   slideCount?: number;
+  previewImage?: string;
   derivedFrom?: Pick<GalleryProvenance, "templateId" | "revision" | "title">;
   creatorName?: string;
   /** Distinct teachers who completed a private-copy save, not previews/opens. */
   teacherCount?: number;
   promptTags?: Record<string, string>;
   matchReasons?: string[];
+  feedback?: GalleryFeedback;
 };
 export type GalleryFilters = { lessonNumber?: number; strategy?: string; format?: "slides" | "video"; search?: string; cursor?: string; limit?: number; mine?: boolean;
-  recommendLesson?: number; recommendStrategy?: string; recommendFocus?: string };
-export type GalleryFacets = { lessons: number[]; strategies: string[] };
+  recommendedOnly?: boolean; gradeBand?: string; recommendLesson?: number; recommendStrategy?: string; recommendFocus?: string };
+export type GalleryFacets = { lessons: number[]; strategies: string[]; grades?: string[] };
 export type GallerySlideSource = { material: GalleryMaterial; draft: SlideDraft; strategy: SlideStrategy; lessonNumber: number; visualIds: string[] };
 export type GalleryPreviewSource = {
   material: GalleryMaterial; strategy: string; lessonNumber: number;

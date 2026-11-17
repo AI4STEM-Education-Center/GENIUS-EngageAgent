@@ -310,7 +310,7 @@ it("waits for its catalog and generates with the parent lesson and strategy thro
   expect(requests.filter(body => body.operation === "generate")).toHaveLength(1);
   for (const body of requests) expect(body).toMatchObject({ classId: user.classId, assignmentId: user.assignmentId, lessonNumber: 3, strategy: "cognitive conflict" });
   expect(onBusyChange).toHaveBeenCalledWith("cognitive conflict", true);
-  expect(onBusyChange).toHaveBeenLastCalledWith("cognitive conflict", false);
+  await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith("cognitive conflict", false));
 });
 
 it("preserves an embedded draft and settings while hidden without generating or reloading", async () => {

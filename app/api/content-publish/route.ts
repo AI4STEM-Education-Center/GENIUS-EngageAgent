@@ -1,3 +1,4 @@
+import { indexPublishedGalleryUse } from "@/lib/material-gallery-feedback";
 import { NextResponse } from "next/server";
 import { upsertContentPublish, listMedia, listPublishedContent } from "@/lib/nosql";
 import { resolveGalleryContentMedia } from "@/lib/material-gallery-server";
@@ -118,7 +119,7 @@ export async function POST(request: Request) {
   const denied = await guardWorkspaceRequest(request);
   if (denied) return denied;
   const body = await request.json();
-  const { classId, assignmentId, contentItems, publishedBy } = body;
+  const { classId, assignmentId, contentItems } = body;
 
   if (!classId || !assignmentId || !Array.isArray(contentItems) || contentItems.length === 0) {
     return NextResponse.json(
@@ -127,6 +128,8 @@ export async function POST(request: Request) {
     );
   }
 
+  const publisher = await workspaceRequestUser(request);
+  if (!publisher || publisher.role !== "teacher" || !publisher.geniusId) return NextResponse.json({ error: "Teacher sign-in required." }, { status: 401 });
   const publishedAt = new Date().toISOString();
   const results = [];
 
@@ -140,6 +143,7 @@ export async function POST(request: Request) {
   for (const item of contentItems) {
     if (!item || typeof item !== "object" || !("id" in item) || !item.id) continue;
     const sanitizedItem = sanitizePublishedItem(item as Record<string, unknown>);
+    await indexPublishedGalleryUse({ classId, assignmentId }, publisher.geniusId, String(item.id));
     const record = await upsertContentPublish({
       class_id: classId,
       assignment_id: assignmentId,
@@ -147,11 +151,11 @@ export async function POST(request: Request) {
       content_json: JSON.stringify(sanitizedItem),
       published: true,
       published_at: publishedAt,
-      published_by: publishedBy ?? "unknown",
+      published_by: publisher.geniusId,
     });
     results.push(record);
   }
 
   return NextResponse.json({ published: results }, { status: 201 });
 }
-import { guardWorkspaceRequest } from "@/lib/workspace-access";
+import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";

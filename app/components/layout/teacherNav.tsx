@@ -20,7 +20,7 @@ export const teacherNavLinks = (classId?: string | null) => {
     tasks: own ? `${TEACHER_HOME}?${classQuery}` : undefined,
     lessons: "/teacher/lessons",
     dashboard: own ? `${TEACHER_HOME}?${classQuery}&view=dashboard` : undefined,
-    gallery: `${TEACHER_HOME}?${classQuery ? `${classQuery}&` : ""}view=gallery`,
+    gallery: "/teacher/materials",
   };
 };
 

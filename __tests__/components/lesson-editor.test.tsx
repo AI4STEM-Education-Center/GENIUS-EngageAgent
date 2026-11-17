@@ -775,7 +775,7 @@ describe("leaving with unsaved changes", () => {
     expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeTruthy();
     expect(assign).not.toHaveBeenCalled();
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Leave without saving" }));
-    expect(assign).toHaveBeenCalledWith("/teacher/classes?view=gallery");
+    expect(assign).toHaveBeenCalledWith("/teacher/materials");
   });
 });
 

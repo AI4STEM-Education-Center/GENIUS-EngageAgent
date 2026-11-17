@@ -8,7 +8,7 @@ import { slideCheckFormat, slideCheckPrompt, sourceAdaptation } from "@/lib/slid
 import { loadSlideSource } from "@/lib/slides/source-prompts";
 import { textReviewFormat } from "@/lib/slides/review";
 import { existingGenerationKey, resolveSlideModel, slideTextRequestLimits, slideTextSettings } from "@/lib/slides/model-config";
-import { authorizeSlides, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, requestFocus, slideContext, slideDiagnosticContext, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
+import { authorizeMaterialLibrary, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, requestFocus, slideContext, slideDiagnosticContext, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
 
 export const runtime = "nodejs";
 // Submit a background job; generation and polling use separate short requests.
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     // Six-step target review includes the phenomenon, familiar and target pictures.
     // Keep all images inline and bounded; never fetch external image URLs.
     const body = await readSlideBody(request, 8_000_000);
-    const authorized = await authorizeSlides(request, body);
+    const authorized = await authorizeMaterialLibrary(request, body);
     enterLessonScope(await loadTaskLessons(authorized, body.lessonNumber));
     const { lesson, strategy } = slideContext(body);
     const taskContext = requestClassroomContext(body.classroomContext);

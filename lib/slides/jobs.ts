@@ -8,7 +8,7 @@ import type { SlidePromptProvenance } from "./prompt-versions";
 import { SIX_STEP_CONTEXT_FIELDS } from "./analogy";
 import { existingGenerationKey } from "./model-config";
 import { parseTextFindings } from "./review";
-import { authorizeSlides, requestDraft, slideJson, SlideRequestError, type AuthorizedSlideContext } from "./server";
+import { authorizeMaterialLibrary, requestDraft, slideJson, SlideRequestError, type AuthorizedSlideContext } from "./server";
 
 export type SlideJobSpec =
   | { kind: "draft"; model: string; strategy: SlideStrategy; analogyMethod?: AnalogyMethod; requireOpeningPhenomenon?: true; promptProvenance: SlidePromptProvenance }
@@ -150,7 +150,7 @@ export function finishSlideJob(response: OpenAI.Responses.Response, spec: SlideJ
 }
 
 export async function pollSlideJob(request: Request, body: Record<string, unknown>) {
-  const context = await authorizeSlides(request, body);
+  const context = await authorizeMaterialLibrary(request, body);
   if (typeof body.jobId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(body.jobId)) throw new SlideRequestError("Choose a valid slide generation job.");
   if (body.operation !== undefined && body.operation !== "cancel") throw new SlideRequestError("Unsupported slide job operation.");
   const stored = await workspaceGet<SlideJob>(partition(context.userId), jobKey(body.jobId));

@@ -576,3 +576,17 @@ describe("Step 2 focus in slide generation (#178)", () => {
     expect(mocks.complete).not.toHaveBeenCalled();
   });
 });
+
+
+it("allows library editing without reading a class, while rejecting anonymous/student/cross-origin requests", async () => {
+  const library = { library: true, lessonNumber: 3, strategy: "cognitive conflict", focus: { misconceptions: ["a"] } };
+  expect((await POST(req(library))).status).toBe(200);
+  expect(mocks.context).not.toHaveBeenCalled(); expect(mocks.answers).not.toHaveBeenCalled();
+  mocks.complete.mockClear();
+  expect((await POST(req(library, "https://other.test"))).status).toBe(403);
+  mocks.session.mockResolvedValue({ role: "student", geniusId: "student-test" });
+  expect((await POST(req(library))).status).toBe(403);
+  mocks.session.mockResolvedValue(null);
+  expect((await POST(req(library))).status).toBe(401);
+  expect(mocks.complete).not.toHaveBeenCalled();
+});

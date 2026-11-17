@@ -3,6 +3,7 @@ import { getClassProfile } from "./nosql";
 
 /** Call only after authorizing this class/task. Never trust a profile supplied by a client. */
 export async function materialClassroomContext(classId: string, taskContext = ""): Promise<string> {
+  if (!classId) return taskContext.trim();
   let profile;
   try {
     profile = await getClassProfile(classId);

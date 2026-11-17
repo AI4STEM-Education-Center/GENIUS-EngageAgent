@@ -94,7 +94,7 @@ it("shows the header with the top menu and four teacher steps (#172, #182, #208)
   const header = within(screen.getByRole("banner"));
   expect(header.getByText("Physics · Period 3")).toBeTruthy();
   expect(header.getByText("Collisions")).toBeTruthy();
-  expect(header.getByRole("button", { name: "Gallery" })).toBeTruthy();
+  expect(header.getByRole("link", { name: "Gallery" }).getAttribute("href")).toBe("/teacher/materials");
   expect((header.getByRole("button", { name: "Class profile" }) as HTMLButtonElement).disabled).toBe(false);
   // Ask EngageAgent is the floating icon, not a header action (#198).
   expect(header.queryByRole("button", { name: "Ask EngageAgent" })).toBeNull();
@@ -108,12 +108,7 @@ it("shows the header with the top menu and four teacher steps (#172, #182, #208)
   expect(header.getByRole("link", { name: "Tasks" }).getAttribute("href")).toBe("/teacher/classes?classId=ea-class-native");
   // Dashboard opens the class dashboard (#207).
   expect(header.getByRole("link", { name: "Dashboard" }).getAttribute("href")).toBe("/teacher/classes?classId=ea-class-native&view=dashboard");
-  fireEvent.click(header.getByRole("button", { name: "Gallery" }));
-  expect(await screen.findByRole("heading", { name: /^Gallery$/ })).toBeTruthy();
-  expect(screen.queryByRole("navigation", { name: "Teacher steps" })).toBeNull();
-  expect(screen.queryByRole("heading", { name: "Material Generation" })).toBeNull();
-  expect(await screen.findByRole("textbox", { name: "Search shared materials" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Back to task" }));
+  // Gallery now navigates to the independent library, as asserted above.
   // Step 4 is the questions page.
   fireEvent.click(stepTab(/Questions & discussion/));
   expect(await screen.findByRole("heading", { name: "Questions & discussion" })).toBeTruthy();

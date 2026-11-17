@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // Route behavior below assumes an authorized request. Signed native/GENIUS
 // access and role isolation are exercised in workspace-access and embedded-workflow-access.
-vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null), workspaceRequestUser: vi.fn(async () => ({ role: "teacher" })) }));
+vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null), workspaceRequestUser: vi.fn(async () => ({ role: "teacher", geniusId: "teacher-1" })) }));
 vi.mock("@/lib/material-gallery-server", () => ({ resolveGalleryContentMedia: vi.fn(async () => undefined) }));
 import { resolveGalleryContentMedia } from "@/lib/material-gallery-server";
 import { guardWorkspaceRequest } from "@/lib/workspace-access";
