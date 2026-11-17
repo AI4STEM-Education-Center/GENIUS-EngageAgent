@@ -2081,7 +2081,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                   { name: "Lesson", title: selectedLessonData?.lesson_title || "Choose in Step 1", detail: selectedLessonData ? `${selectedLessonData.core_ideas?.length ?? 0} core ideas` : "" },
                   { name: "Strategy", title: selectedStrategies[0] ? getStrategyLabel(selectedStrategies[0]) : "Choose in Step 2", detail: selectedFocusKind ? `${selectedFocus[selectedFocusKind].length} selected ${selectedFocusKind === "misconceptions" ? "misconceptions" : "core ideas"}` : "" },
                   classProfileCard,
-                  { name: "Students’ experiences", title: selectedExperience || "Choose an experience in Step 2", detail: selectedExperience ? "Selected for this focus" : "No experience selected" },
+                  { name: "Students’ experiences", title: selectedExperience || (["analogy", "experience bridging"].includes(selectedStrategies[0] ?? "") ? "Choose an experience in Step 2" : "Add familiar examples in classroom context"), detail: selectedExperience ? "Selected for this focus" : "No experience selected" },
                 ].map((card: { name: string; title: string; detail: string; edit?: string }) => (
                   <div key={card.name} className="rounded-xl bg-canvas p-4">
                     <p className="text-xs font-bold uppercase tracking-wider text-faint">{card.name}</p>
@@ -2320,7 +2320,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                               </div>}
                             {materialFormat === "video" && <VideoMaterialEditor item={item} videoUrl={videos[item.id]?.url} imageUrl={images[item.id]?.url}
                               disabled={isPublished || generationBusy || publishingContent} onChange={updated => setContent(previous => previous.map(value => value.id === updated.id ? updated : value))} />}
-                            {materialFormat === "video" && <SaveVideoMaterial key={item.id} scope={{ classId, assignmentId }} item={item} disabled={videos[item.id]?.status !== "ready" || generationBusy || publishingContent} />}
+                            {materialFormat === "video" && <SaveVideoMaterial key={`library-save:${item.id}`} scope={{ classId, assignmentId }} item={item} lessonNumber={selectedLesson ?? undefined} disabled={videos[item.id]?.status !== "ready" || generationBusy || publishingContent} />}
                             {materialFormat === "video" && selectedLesson && <ShareVideoMaterial scope={{ classId, assignmentId }} item={item} lessonNumber={item.lessonNumber ?? selectedLesson} focus={item.focus ? { misconceptions: item.focus.misconceptions ?? [], coreIdeas: item.focus.coreIdeas ?? [] } : undefined} videoUrl={videos[item.id]?.url} imageUrl={images[item.id]?.url}
                               disabled={videos[item.id]?.status !== "ready" || generationBusy} onShared={() => {}} />}
                             {item.activity ? <MaterialActivityView key={item.id} activity={item.activity} preview media={{ image: images[item.id]?.url, video: materialFormat === "video" ? videos[item.id]?.url : undefined }} /> : <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-600">{item.body}</p>}

@@ -18,7 +18,7 @@ The user's latest rules take precedence over the prototype: at most three suitab
 
 ## Verification
 
-Automated checks on Node 22: full suite 2,965 passed / 38 opt-in tests skipped; production build and TypeScript passed. Changed files lint with no errors (existing image-element warnings). After the final image-correction/undo guard, the affected editor suites passed all 62 tests, including its new regression.
+Automated checks on Node 22 after the production-acceptance corrections: full suite 2,970 passed / 38 opt-in tests skipped; production build and TypeScript passed. Changed files lint with no errors (existing image-element warnings). Coverage includes targeted image-correction undo, stable video controls, legacy video saves and actual DynamoDB marshalling of Gallery writes.
 
 Background in-app browser acceptance with isolated synthetic accounts:
 
@@ -36,3 +36,12 @@ Background in-app browser acceptance with isolated synthetic accounts:
 GENIUS automatic class-profile / experience-check-in synchronization is not claimed complete. #179 explicitly identifies the experience service as pending upstream; the current GENIUS Class contract does not expose the prototype's full profile fields. Available local profiles and actual task survey data are used now. Missing historical authors/tags are not reconstructed from guesses. Engagement ratings and question counts are feedback metrics, not evidence of knowledge gain.
 
 Production deployment and acceptance evidence is recorded separately so local verification is never confused with deployed verification.
+
+## Production acceptance corrections
+
+Deployment 116 (PR #220, `35cdebaf7bf47bddf5d60518dd2e98f4c9d76f1d`) completed successfully. Real video text adaptation worked in production. Acceptance then exposed two failures, addressed by the follow-up change:
+
+- A duplicate sibling React key caused the video library-save button to accumulate after rerenders. The save control now has its own identity, with a regression that edits classroom context repeatedly.
+- Old copies without teaching settings failed DynamoDB marshalling on save. Optional focus/media fields are now omitted and missing teaching settings use an empty object. Gallery API tests exercise the real AWS marshaller before local writes; this reproduced nine failures before correction and passes all 30 API cases afterward.
+
+Manual video adaptation leaves its result and Undo visible. Legacy generated videos can use their task's lesson when no lesson was recorded, while an explicitly recorded material lesson remains authoritative. No cloud permissions were broadened for these fixes.

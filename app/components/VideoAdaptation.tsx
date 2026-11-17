@@ -41,7 +41,7 @@ export default function VideoAdaptation({ scope, item, adaptation, disabled, onC
     const timer = setTimeout(() => { started.current.add(adaptation.requestId); void adapt(); }, 0);
     return () => clearTimeout(timer);
   }, [adaptation]);
-  return <details open={!!adaptation || busy || !!error} className="my-4 rounded-lg border border-line p-3">
+  return <details open={!!adaptation || busy || !!error || !!undo} className="my-4 rounded-lg border border-line p-3">
     <summary className="cursor-pointer text-sm font-semibold">Adapt with AI</summary>
     <p className="my-3 text-sm text-mute">Adjust the language and questions to your class. The video stays the same; review it alongside the adapted text.</p>
     <div className="flex flex-wrap gap-3"><button type="button" disabled={disabled || busy} onClick={() => void adapt()} className="min-h-10 rounded-lg border border-line px-3 text-sm font-semibold disabled:opacity-50">{busy ? "Adapting activity text…" : "Adapt activity text"}</button>
