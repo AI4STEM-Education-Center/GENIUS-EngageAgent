@@ -1,4 +1,5 @@
 import type { SlideDeck, SlideDraft, SlideStrategy } from "./slides/model";
+import type { MaterialAdaptation, MaterialTeachingContext } from "./material-teaching-context";
 import type { ContentItem } from "./types";
 
 export const GALLERY_TAG_LABELS: Record<string, string> = {
@@ -12,7 +13,7 @@ export const GALLERY_TAG_LABELS: Record<string, string> = {
 
 export type GalleryScope = { classId: string; assignmentId: string };
 export type GalleryFocus = { misconceptions: string[]; coreIdeas: number[] };
-export type GalleryProvenance = { templateId: string; revision: number; title: string; mode: "use" | "adapt" };
+export type GalleryProvenance = { private?: true; templateId: string; revision: number; title: string; mode: "use" | "adapt" };
 export type GalleryMetadata = {
   title: string;
   description?: string;
@@ -55,19 +56,21 @@ export type GalleryMaterial = {
   teacherCount?: number;
   promptTags?: Record<string, string>;
   matchReasons?: string[];
+  matchTags?: { label: string; value: string; matched: boolean }[];
   feedback?: GalleryFeedback;
 };
 export type GalleryFilters = { lessonNumber?: number; strategy?: string; format?: "slides" | "video"; search?: string; cursor?: string; limit?: number; mine?: boolean;
-  recommendedOnly?: boolean; gradeBand?: string; recommendLesson?: number; recommendStrategy?: string; recommendFocus?: string };
+  recommendedOnly?: boolean; gradeBand?: string; recommendLesson?: number; recommendStrategy?: string; recommendFocus?: string;
+  recommendGrade?: string; recommendQuiz?: string; recommendExperience?: string };
 export type GalleryFacets = { lessons: number[]; strategies: string[]; grades?: string[] };
 export type GallerySlideSource = { material: GalleryMaterial; draft: SlideDraft; strategy: SlideStrategy; lessonNumber: number; visualIds: string[] };
 export type GalleryPreviewSource = {
   material: GalleryMaterial; strategy: string; lessonNumber: number;
   draft?: SlideDraft; visualIds?: string[]; item?: ContentItem; media?: { video: string; image?: string };
 };
-export type GalleryCopy =
+export type GalleryCopy = (
   | { format: "slides"; deck: SlideDeck & { gallerySource: GalleryProvenance }; source: GalleryProvenance }
-  | { format: "video"; item: ContentItem & { gallerySource: GalleryProvenance }; media: { video: string; image?: string }; source: GalleryProvenance };
+  | { format: "video"; item: ContentItem & { gallerySource: GalleryProvenance }; media: { video: string; image?: string }; source: GalleryProvenance }) & { adaptation?: MaterialAdaptation; teachingContext?: MaterialTeachingContext };
 
 export type SavedGalleryCopySummary = {
   copyId: string; revision: number; savedAt: string; title: string;

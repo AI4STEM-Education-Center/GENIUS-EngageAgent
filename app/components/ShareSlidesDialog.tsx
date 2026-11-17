@@ -18,9 +18,10 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
   const [draft, setDraft] = useState(() => structuredClone(deck.draft));
   const [title, setTitle] = useState(deck.draft.title);
   const [description, setDescription] = useState("");
-  const [gradeBand, setGradeBand] = useState("");
-  const [experienceContext, setExperienceContext] = useState("");
-  const [quizPattern, setQuizPattern] = useState("");
+  const [gradeBand, setGradeBand] = useState(deck.teachingContext?.gradeBand || "");
+  const [experienceContext, setExperienceContext] = useState(deck.teachingContext?.experienceContext || "");
+  const [quizPattern, setQuizPattern] = useState(deck.teachingContext?.quizPattern || "");
+  const [includeNotes, setIncludeNotes] = useState(true);
   const [teachingContext, setTeachingContext] = useState("");
   const [classProfile, setClassProfile] = useState("");
   const [keywords, setKeywords] = useState("");
@@ -46,7 +47,7 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
       // Context, review findings and provider prompts belong to the class draft.
       // The reusable source contains only the teacher-reviewed deck and assets.
       const source: SlideDeck = { id: deck.id, lessonNumber: deck.lessonNumber, strategy: deck.strategy,
-        draft: { ...draft, title: title.trim() }, assets: deck.assets, focus: deck.focus, ...(deck.gallerySource ? { gallerySource: deck.gallerySource } : {}) };
+        draft: { ...draft, title: title.trim(), slides: draft.slides.map(slide => includeNotes ? slide : { ...slide, teacherNotes: [] }) }, assets: deck.assets, focus: deck.focus, ...(deck.gallerySource ? { gallerySource: deck.gallerySource } : {}) };
       const material = await shareSlideMaterial(scope, source, {
         title: title.trim(), description: description.trim(), gradeBand: gradeBand.trim(),
         experienceContext: experienceContext.trim(), quizPattern: quizPattern.trim(),
@@ -86,6 +87,7 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
           <label className="text-sm font-semibold">Class profile summary (optional)<input className={input} maxLength={200} placeholder="e.g. Introductory physics; visual and language supports" value={classProfile} onChange={event => { setClassProfile(event.target.value); setConfirmed(false); }} /></label>
         </div>
       </details>
+      <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={includeNotes} onChange={event => { setIncludeNotes(event.target.checked); setConfirmed(false); }} />Include teacher notes</label>
       <div className="rounded-lg border border-amber-200 bg-warn-light p-3 text-sm leading-relaxed text-warn">
         Classroom context is excluded. Review the slides, notes and images below and remove student names, counts, survey quotes and other class details. Changes here apply only to the Gallery copy.
       </div>
@@ -95,7 +97,7 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
           <label className="block text-xs font-semibold text-ink-2">Title<input aria-label={`Shared slide ${i + 1} title`} className={input} value={slide.title} onChange={event => editSlide(i, "title", event.target.value)} /></label>
           <label className="block text-xs font-semibold text-ink-2">Body<textarea aria-label={`Shared slide ${i + 1} body`} className={input} rows={2} value={slide.body} onChange={event => editSlide(i, "body", event.target.value)} /></label>
           <label className="block text-xs font-semibold text-ink-2">Thinking task<input aria-label={`Shared slide ${i + 1} task`} className={input} value={slide.task} onChange={event => editSlide(i, "task", event.target.value)} /></label>
-          <label className="block text-xs font-semibold text-ink-2">Teacher notes<textarea aria-label={`Shared slide ${i + 1} notes`} className={input} rows={3} value={slide.teacherNotes.join("\n\n")} onChange={event => editSlide(i, "teacherNotes", event.target.value.split(/\n\s*\n/u).filter(Boolean))} /></label>
+          {includeNotes && <label className="block text-xs font-semibold text-ink-2">Teacher notes<textarea aria-label={`Shared slide ${i + 1} notes`} className={input} rows={3} value={slide.teacherNotes.join("\n\n")} onChange={event => editSlide(i, "teacherNotes", event.target.value.split(/\n\s*\n/u).filter(Boolean))} /></label>}
         </div>
       </details>)}
       {draft.analogyPlan && <details className="rounded-lg border border-line p-3">

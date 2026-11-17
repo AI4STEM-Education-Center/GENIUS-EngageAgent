@@ -179,7 +179,7 @@ it("generates the selected slide strategy with inherited context and retains its
   await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
   expect(mocks.generate.mock.calls.map(([context]) => context)).toEqual([{
-    lessonNumber: 8, strategy, classroomContext: "", focus: { coreIdeas: [0] }, classId: user.classId, assignmentId: user.assignmentId,
+    lessonNumber: 8, strategy, classroomContext: "", teachingContext: { gradeBand: "", experienceContext: "", quizPattern: "" }, focus: { coreIdeas: [0] }, classId: user.classId, assignmentId: user.assignmentId,
   }]);
   fireEvent.change(screen.getByRole("textbox", { name: `Draft for ${strategy}` }), { target: { value: `Teacher edit: ${strategy}` } });
   fireEvent.click(screen.getByRole("radio", { name: "Video" }));
@@ -650,7 +650,7 @@ it("uses the existing material selector, slide editor and publication list for a
   const generate = screen.getByRole("button", { name: /Generate new (slide deck|animated video)/ });
   await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
-  expect(mocks.generate).toHaveBeenCalledWith({ lessonNumber: 8, strategy: "analogy", classroomContext: "Grade 8 GENIUS class", focus: { coreIdeas: [0] }, classId: host.classId, assignmentId: host.assignmentId });
+  expect(mocks.generate).toHaveBeenCalledWith({ lessonNumber: 8, strategy: "analogy", classroomContext: "Grade 8 GENIUS class", teachingContext: { gradeBand: "", experienceContext: "", quizPattern: "" }, focus: { coreIdeas: [0] }, classId: host.classId, assignmentId: host.assignmentId });
   expect(screen.getByRole("textbox", { name: "Draft for analogy" })).toHaveValue("Generated analogy draft");
 });
 

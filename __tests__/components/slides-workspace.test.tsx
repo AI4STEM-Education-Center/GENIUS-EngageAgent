@@ -759,6 +759,32 @@ it("repairs layout before spending requests on images and retains an unresolved 
   expect(screen.queryByText("5 slides ready to send.")).toBeNull();
 });
 
+it("targets an image finding, preserves the other slides and images, and can undo the correction", async () => {
+  const original = deckFixture("analogy");
+  original.checks!.images.target.issues = ["Image target: correct the spring geometry."];
+  const replacement = { ...original.assets.target, data: "data:image/png;base64,aW1hZ2U=" };
+  const changed = vi.fn();
+  mocks.fetch.mockImplementation(async (path: string) => path.startsWith("/api/slides?") ? lessons
+    : path.endsWith("/image") ? reply({ asset: replacement }) : reply({ issues: [], model: "test-review-model" }));
+  render(<SlidesWorkspace user={user} incomingDeck={original} onDraftChange={changed} />);
+  await screen.findByText("Image target: correct the spring geometry.");
+  const finding = within(screen.getByRole("region", { name: "AI review suggestions" }));
+  fireEvent.click(screen.getByRole("button", { name: `Edit slide 5: ${original.draft.slides[4].title}` }));
+  fireEvent.click(finding.getByRole("button", { name: "Go to slide 1" }));
+  expect((screen.getByLabelText("Slide title") as HTMLTextAreaElement).value).toBe(original.draft.slides[0].title);
+  fireEvent.click(finding.getByRole("button", { name: "Fix with AI" }));
+  await screen.findByText("Image updated. Review the correction or undo it.");
+  const corrected = changed.mock.calls.at(-1)![0];
+  expect(corrected.draft).toEqual(original.draft);
+  expect(corrected.assets.analogue).toEqual(original.assets.analogue);
+  expect(corrected.assets.variation).toEqual(original.assets.variation);
+  expect(corrected.assets.target.data).toBe(replacement.data);
+  const imageCall = mocks.fetch.mock.calls.find(([path]) => path === "/api/slides/image")!;
+  expect(JSON.parse(imageCall[1].body)).toMatchObject({ visualId: "target", feedback: "Image target: correct the spring geometry." });
+  fireEvent.click(screen.getByRole("button", { name: "Undo revision" }));
+  await waitFor(() => expect(changed.mock.calls.at(-1)![0].assets).toEqual(original.assets));
+});
+
 it("shows image-review suggestions but permits direct download without confirmation or a written reason", async () => {
   mocks.fetch.mockImplementation(async (path: string, init?: RequestInit) => path.startsWith("/api/slides?") ? lessons : path.endsWith("/check") ? reply({ issues: JSON.parse(String(init?.body)).visualId === "target" ? ["Image target: compressed spring is longer; correct the geometry."] : [] }) : path.endsWith("/image") ? reply({ asset }) : reply({ draft: slideFixture("analogy") }));
   render(<SlidesWorkspace user={user} />); await screen.findByRole("option", { name: "8. Energy" });

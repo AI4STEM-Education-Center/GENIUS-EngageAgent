@@ -1,3 +1,4 @@
+import { parseTeachingContext, materialGenerationContext, type MaterialTeachingContext } from "@/lib/material-teaching-context";
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
@@ -114,7 +115,7 @@ export async function POST(request: Request) {
       fallback = false,
       classId,
       assignmentId,
-      classroomContext,
+      classroomContext, teachingContext,
       focus,
     } = (await request.json()) as {
       lessonNumber?: number;
@@ -122,7 +123,7 @@ export async function POST(request: Request) {
       fallback?: boolean;
       classId?: string;
       assignmentId?: string;
-      classroomContext?: string;
+      classroomContext?: string; teachingContext?: MaterialTeachingContext;
       focus?: unknown;
     };
     if (typeof lessonNumber !== "number") {
@@ -169,6 +170,9 @@ export async function POST(request: Request) {
       throw error;
     }
     const items: GeneratedResponseItem[] = [];
+    let settings: MaterialTeachingContext | undefined;
+    try { settings = parseTeachingContext(teachingContext); }
+    catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid teaching settings." }, { status: 422 }); }
     const classKey = classId?.trim();
     const assignmentKey = assignmentId?.trim();
     // The guard verifies native membership or an exact class/task-bound GENIUS
@@ -185,7 +189,7 @@ export async function POST(request: Request) {
       }
     }
     const diagnostic = summarizeDiagnosticAnswers(lessonNumber, responses.map(answer => answer.answers));
-    const generationContext = await materialClassroomContext(classKey!, classroomContext);
+    const generationContext = await materialClassroomContext(classKey!, materialGenerationContext(classroomContext || "", settings));
 
     const strategyResults = await Promise.all(
       strategies.map(async (strategy) => {
@@ -254,6 +258,7 @@ export async function POST(request: Request) {
             title,
             body,
             strategy,
+            teachingContext: settings, classroomContext: classroomContext || "",
             ...(textModes.length > 0 ? { textModes } : {}),
             ...(typeof item.visualBrief === "string" && item.visualBrief.trim() ? { visualBrief: item.visualBrief.trim() } : {}),
             ...(activity ? { activity } : {}),

@@ -14,6 +14,8 @@ import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
 import MaterialGalleryPanel from "./MaterialGalleryPanel";
 import SlidesWorkspace from "./SlidesWorkspace";
 import VideoMaterialEditor from "./VideoMaterialEditor";
+import VideoAdaptation from "./VideoAdaptation";
+import ShareVideoMaterial from "./ShareVideoMaterial";
 import MaterialActivityView from "./MaterialActivityView";
 import SendMaterialDialog from "./SendMaterialDialog";
 import { publishSlideDeck } from "@/lib/slides/publish-client";
@@ -194,6 +196,13 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
     if (editing) { approvedLeave.current = false; keepEditing(); }
     else setNotice(current => current.startsWith("Finish editing the video") ? "" : current);
   }, [keepEditing]);
+  const changedVideo = useCallback((item: import("@/lib/types").ContentItem) => {
+    const current = working.current;
+    if (current?.format !== "video" || current.item.id !== item.id || !item.gallerySource) return;
+    approvedLeave.current = false;
+    const next: GalleryCopy = { ...current, item: item as typeof current.item };
+    working.current = next; setEditor(previous => previous ? { ...previous, copy: next } : previous); setDirty(true); setNotice("");
+  }, []);
 
   // An unpublished copy still needs fresh signed media after restoration or returning to this tab.
   useEffect(() => {
@@ -263,20 +272,22 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
         <button type="button" className={button} disabled={disabled} onClick={() => requestLeave(closeEditor)}><ArrowLeft size={16} />Back to Gallery</button>
         <span className="text-sm text-mute">{dirty ? "Unsaved changes" : editor.savedAt ? "Saved to your materials" : "Your editable copy"}</span>
       </div>
-      <p className="text-sm text-mute">Your copy of “{editor.copy.source.title}”. Saving keeps it in your private material library.</p>
-      {attribution && <GalleryMaterialDetails {...attribution} showTags />}
+      <p className="text-sm text-mute">{editor.copy.source.private ? "Your private material." : `Your copy of “${editor.copy.source.title}”.`} Changes stay private until you share or send.</p>
+      {attribution && <details className="rounded-lg border border-line bg-white px-4 py-3"><summary className="cursor-pointer text-sm font-semibold">Material details · {attribution.creatorName || "Author not recorded"}</summary><GalleryMaterialDetails {...attribution} showTags /></details>}
       {editor.copy.format === "slides" ? !slideLesson.lesson ? <p role={slideLesson.error ? "alert" : "status"} className="text-sm text-mute">{slideLesson.error || "Loading the lesson…"}</p> : <fieldset disabled={busy} className="min-w-0"><SlidesWorkspace key={activeId} user={user}
         embeddedContext={{ lessonNumber: editor.copy.deck.lessonNumber, strategy: editor.copy.deck.strategy, classroomContext: editor.copy.deck.classroomContext, focus: editor.copy.deck.focus }}
-        incomingDeck={editor.copy.deck} incomingDeckSaved={editor.revision > 0} draftNamespace={`gallery:${activeId}`} compactEditor
+        incomingDeck={editor.copy.deck} adaptation={editor.copy.adaptation} incomingDeckSaved={editor.revision > 0} draftNamespace={`gallery:${activeId}`} compactEditor
         onSaveDraft={saveSlides} onDraftChange={changedSlides} onRequestSend={deck => { changedSlides(deck); setSending(true); }} onBusyChange={onSlideBusy} onPublished={onPublished} /></fieldset>
         : <article className="rounded-xl border border-line bg-white p-5">
           <h2 className="text-xl font-bold">{editor.copy.item.title}</h2>
           <div className="my-4 flex flex-wrap gap-2">
             <VideoMaterialEditor item={editor.copy.item} videoUrl={editor.copy.media.video} imageUrl={editor.copy.media.image} disabled={disabled} draftOnly onEditingChange={onVideoEditingChange}
-              onChange={item => { const current = working.current; if (current?.format !== "video") return; approvedLeave.current = false; const next = { ...current, item: { ...item, gallerySource: current.source } }; working.current = next; setEditor(previous => previous ? { ...previous, copy: next } : previous); setDirty(true); setNotice(""); }} />
+              onChange={changedVideo} />
             <button type="button" className={button} disabled={disabled || videoEditing} onClick={() => { if (working.current) void saveCopy(working.current).catch(() => {}); }}><Save size={16} />{busy ? "Saving…" : "Save changes"}</button>
             <button type="button" className={primary} disabled={disabled || videoEditing} onClick={() => setSending(true)}><Send size={16} />Send to students</button>
           </div>
+          <VideoAdaptation key={activeId} scope={{ classId, assignmentId }} item={editor.copy.item} adaptation={editor.copy.adaptation} disabled={disabled || videoEditing} onChange={changedVideo} onBusyChange={setSlideBusy} />
+          <details className="mb-4"><summary className="cursor-pointer text-sm font-semibold">Share with teachers</summary><ShareVideoMaterial scope={{ classId, assignmentId }} item={editor.copy.item} lessonNumber={editor.copy.item.lessonNumber!} focus={editor.copy.item.focus ? { misconceptions: editor.copy.item.focus.misconceptions || [], coreIdeas: editor.copy.item.focus.coreIdeas || [] } : undefined} videoUrl={editor.copy.media.video} imageUrl={editor.copy.media.image} disabled={disabled || videoEditing} onShared={() => setRefresh(value => value + 1)} /></details>
           {editor.copy.item.activity ? <MaterialActivityView activity={editor.copy.item.activity} preview media={editor.copy.media} />
             : <><video aria-label="Gallery video" src={editor.copy.media.video} poster={editor.copy.media.image} controls playsInline className="my-4 max-h-96 w-full rounded-lg" /><p className="whitespace-pre-wrap">{editor.copy.item.body}</p></>}
         </article>}

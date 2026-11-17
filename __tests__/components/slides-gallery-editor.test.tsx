@@ -35,6 +35,26 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+it("automatically adapts only the explicitly requested copy with its current task settings, and supports undo", async () => {
+  const original = copy();
+  original.focus = { misconceptions: ["b"], coreIdeas: [] };
+  const adapted = structuredClone(original.draft); adapted.slides[0].title = "Adapted for this class";
+  const catalog = { lessons: [{ lessonNumber: 3, lessonTitle: "Contact", learningObjective: "Explore contact" }], models: INITIAL_MODEL_CATALOG };
+  mocks.fetch.mockImplementation(async (url, init) => ({ ok: true, json: async () => init?.method !== "POST" ? catalog : url === "/api/slides" ? { draft: adapted } : { issues: [] } }));
+  const adaptation = { requestId: "copy-a", classroomContext: "Use short directions", teachingContext: { gradeBand: "Middle school", experienceContext: "Soccer" } };
+  const view = render(<SlidesWorkspace user={user} embeddedContext={context} incomingDeck={original} draftNamespace="gallery:copy-a" compactEditor adaptation={adaptation} onSaveDraft={vi.fn()} />);
+  await waitFor(() => expect(screen.getByLabelText("Slide title")).toHaveValue("Adapted for this class"));
+  await screen.findByText("5 slides ready to send.");
+  const generations = () => mocks.fetch.mock.calls.filter(([url, init]) => url === "/api/slides" && init?.method === "POST");
+  expect(generations()).toHaveLength(1);
+  expect(JSON.parse(generations()[0][1].body)).toMatchObject({ operation: "review", classroomContext: adaptation.classroomContext, teachingContext: adaptation.teachingContext, focus: original.focus, draft: original.draft });
+  view.rerender(<SlidesWorkspace user={user} embeddedContext={context} incomingDeck={original} draftNamespace="gallery:copy-a" compactEditor adaptation={{ ...adaptation }} onSaveDraft={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+  expect(screen.getByLabelText("Slide title")).toHaveValue(original.draft.slides[0].title);
+  expect(generations()).toHaveLength(1);
+  expect(original.draft.slides[0].title).not.toBe("Adapted for this class");
+});
+
 it("uses the server copy, isolates local caching, and reports actual edits without generating", async () => {
   const deck = copy(); const changed = vi.fn();
   const view = render(<SlidesWorkspace user={user} embeddedContext={context} draftNamespace="gallery:copy-a" compactEditor onDraftChange={changed} />);

@@ -23,6 +23,7 @@ function isMaterial(value: unknown): value is GalleryMaterial {
     && (value.creatorName === undefined || typeof value.creatorName === "string")
     && (value.teacherCount === undefined || (Number.isSafeInteger(value.teacherCount) && Number(value.teacherCount) >= 0))
     && (value.promptTags === undefined || (record(value.promptTags) && Object.values(value.promptTags).every(v => typeof v === "string")))
+    && (value.matchTags === undefined || (Array.isArray(value.matchTags) && value.matchTags.length === 7 && value.matchTags.every(tag => record(tag) && typeof tag.label === "string" && typeof tag.value === "string" && typeof tag.matched === "boolean")))
     && validFeedback(value.feedback)
     && (value.matchReasons === undefined || (Array.isArray(value.matchReasons) && value.matchReasons.every(v => typeof v === "string")))
     && (value.focus === undefined || (record(value.focus) && Array.isArray(value.focus.misconceptions) && value.focus.misconceptions.every(v => typeof v === "string")
@@ -77,8 +78,35 @@ export async function shareSlideMaterial(scope: GalleryScope, deck: SlideDeck, m
   }
   return materialResult(await json<{ material: GalleryMaterial }>(scope, { action: "commit-share", id }, "POST", signal));
 }
+/** Create a private receipt; this never writes a public Gallery listing. */
+export async function createPrivateSlideCopy(scope: GalleryScope, deck: SlideDeck, signal?: AbortSignal): Promise<Extract<GalleryCopy, { format: "slides" }>> {
+  const assets = Object.fromEntries(await Promise.all(deck.draft.visuals.map(async visual => {
+    const asset = deck.assets[visual.id];
+    if (!asset) throw new Error("Generate every image before saving the material.");
+    return [visual.id, { width: asset.width, height: asset.height, digest: await checksum(asset.data) }];
+  })));
+  const { id } = await json<{ id: string }>(scope, { action: "start-private-save", lessonNumber: deck.lessonNumber, strategy: deck.strategy,
+    materialId: deck.id, draft: deck.draft, assets, metadata: { title: deck.draft.title, ...deck.teachingContext,
+      ...(deck.focus ? { focus: { misconceptions: deck.focus.misconceptions || [], coreIdeas: deck.focus.coreIdeas || [] } } : {}) } }, "POST", signal);
+  if (typeof id !== "string" || !id) throw invalid();
+  for (const visual of deck.draft.visuals) {
+    const { data, width, height } = deck.assets[visual.id];
+    await json(scope, { action: "upload-asset", id, visualId: visual.id, asset: { data, width, height } }, "POST", signal);
+  }
+  const result = await json<{ copyId: string; source: GalleryProvenance }>(scope, { action: "commit-private-save", id }, "POST", signal);
+  if (!result.copyId || result.source?.private !== true || result.source.templateId !== id) throw invalid();
+  return { format: "slides", source: result.source, deck: { ...deck, id: result.copyId, gallerySource: result.source, libraryRevision: 0 } };
+}
+
 export async function shareVideoMaterial(scope: GalleryScope, item: ContentItem, lessonNumber: number, metadata: GalleryMetadata, signal?: AbortSignal): Promise<GalleryMaterial> {
   return materialResult(await json<{ material: GalleryMaterial }>(scope, { action: "share-video", item, lessonNumber, metadata }, "POST", signal));
+}
+export async function createPrivateVideoCopy(scope: GalleryScope, item: ContentItem, signal?: AbortSignal): Promise<Extract<GalleryCopy, { format: "video" }>> {
+  const result = await json<{ copyId: string; source: GalleryProvenance }>(scope, { action: "save-private-video", item, lessonNumber: item.lessonNumber,
+    metadata: { title: item.title, ...item.teachingContext, ...(item.focus ? { focus: { misconceptions: item.focus.misconceptions || [], coreIdeas: item.focus.coreIdeas || [] } } : {}) } }, "POST", signal);
+  if (!result.copyId || result.source?.private !== true) throw invalid();
+  return { format: "video", source: result.source, item: { ...item, id: `gallery-copy-${result.copyId}`, gallerySource: result.source },
+    media: (await json<{ media: { video: string; image?: string } }>(scope, { action: "copy-media", copyId: result.copyId }, "GET", signal)).media };
 }
 export async function listMaterialGallery(scope: GalleryScope, filters: GalleryFilters = {}, signal?: AbortSignal) {
   const data = await json<{ items: GalleryMaterial[]; nextCursor?: string; facets?: GalleryFacets }>(scope, filters, "GET", signal);
@@ -129,18 +157,19 @@ export async function previewGallerySlideDeck(scope: GalleryScope, id: string, s
   return imageProvenance({ id: `preview-${id}`, lessonNumber: source.lessonNumber, strategy: source.strategy,
     draft: source.draft, assets: await loadAssets(scope, source.visualIds, { id }, signal) });
 }
-export async function copyGalleryMaterial(scope: GalleryScope, id: string, mode: "use" | "adapt" = "use", signal?: AbortSignal): Promise<GalleryCopy> {
-  const copy = await json<GalleryCopy & { copyId: string; visualIds?: string[] }>(scope, { action: "copy", id, mode }, "POST", signal);
+export async function copyGalleryMaterial(scope: GalleryScope, id: string, mode: "use" | "adapt" = "use", signal?: AbortSignal, adaptation?: { classroomContext: string; teachingContext: import("./material-teaching-context").MaterialTeachingContext; focus?: import("./strategy-focus").StrategyFocus }): Promise<GalleryCopy> {
+  const copy = await json<GalleryCopy & { copyId: string; visualIds?: string[] }>(scope, { action: "copy", id, mode, ...(mode === "adapt" && adaptation ? { adaptation } : {}) }, "POST", signal);
   if (!record(copy.source) || copy.source.templateId !== id || copy.source.mode !== mode || typeof copy.source.title !== "string" || !Number.isInteger(copy.source.revision)) throw invalid();
   if (copy.format === "video") {
     if (!record(copy.item) || typeof copy.item.id !== "string" || typeof copy.item.body !== "string" || !record(copy.media) || typeof copy.media.video !== "string") throw invalid();
-    return { format: "video", item: copy.item, media: copy.media, source: copy.source };
+    return { format: "video", item: copy.item, media: copy.media, source: copy.source,
+      ...(mode === "adapt" && adaptation ? { adaptation: { ...adaptation, requestId: copy.copyId } } : {}) };
   }
   if (copy.format !== "slides" || typeof copy.copyId !== "string" || !record(copy.deck) || copy.deck.id !== copy.copyId || !isSlideStrategy(copy.deck.strategy)
     || !Array.isArray(copy.visualIds) || !copy.visualIds.every(value => typeof value === "string")) throw invalid();
   try { parseDraft(copy.deck.draft, copy.deck.strategy, true); } catch { throw invalid(); }
   const deck = imageProvenance({ ...copy.deck, assets: await loadAssets(scope, copy.visualIds || [], { copyId: copy.copyId }, signal) }) as SlideDeck & { gallerySource: GalleryProvenance };
-  return { format: "slides", deck, source: copy.source };
+  return { format: "slides", deck, source: copy.source, ...(mode === "adapt" && adaptation ? { adaptation: { ...adaptation, requestId: copy.copyId } } : {}) };
 }
 export async function refreshGalleryCopyMedia(scope: GalleryScope, contentItemId: string, signal?: AbortSignal): Promise<{ video: string; image?: string }> {
   const copyId = /^gallery-copy-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/iu.exec(contentItemId)?.[1];
@@ -172,7 +201,7 @@ export async function saveGalleryCopy(scope: GalleryScope, copy: GalleryCopy, ex
   const copyId = copy.format === "slides" ? copy.deck.id : copy.item.id.replace(/^gallery-copy-/u, "");
   let fields: Record<string, unknown>;
   if (copy.format === "slides") {
-    const { id, lessonNumber, strategy, draft, focus, gallerySource, classroomContext } = copy.deck;
+    const { id, lessonNumber, strategy, draft, focus, gallerySource, classroomContext, teachingContext } = copy.deck;
     const assets = Object.fromEntries(await Promise.all(draft.visuals.map(async visual => {
       const asset = copy.deck.assets[visual.id];
       if (!asset) throw new Error("Include every current slide image before saving this copy.");
@@ -180,7 +209,7 @@ export async function saveGalleryCopy(scope: GalleryScope, copy: GalleryCopy, ex
         ...(asset.sourcePrompt === undefined ? {} : { sourcePrompt: asset.sourcePrompt }),
         ...(asset.referenceData ? { referenceDigest: await checksum(asset.referenceData) } : {}) }];
     })));
-    fields = { deck: { id, lessonNumber, strategy, draft, focus, gallerySource, classroomContext }, assets };
+    fields = { deck: { id, lessonNumber, strategy, draft, focus, gallerySource, classroomContext, teachingContext }, assets };
   } else fields = { item: copy.item };
   const started = await json<{ saveId: string }>(scope, { action: "start-save", copyId, expectedRevision, ...fields }, "POST", signal);
   if (typeof started.saveId !== "string" || !started.saveId) throw invalid();

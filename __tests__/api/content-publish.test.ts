@@ -53,6 +53,15 @@ beforeEach(() => {
 });
 
 describe("POST /api/content-publish", () => {
+  it("keeps private generation context and teacher notes out of stored and delivered video payloads", async () => {
+    const response = await POST(new Request("http://localhost:3000/api/content-publish", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ classId: "c1", assignmentId: "a1", contentItems: [{ id: "video-private", title: "Observe", body: "What did you notice?", strategy: "cognitive conflict", type: "Video",
+        classroomContext: "PRIVATE_CLASS", teachingContext: { experienceContext: "PRIVATE_EXPERIENCE" }, teacherNotes: ["PRIVATE_NOTE"], gallerySource: { title: "Origin material" } }] }) }));
+    expect(response.status).toBe(201);
+    expect(JSON.stringify(await response.json())).not.toContain("PRIVATE_");
+    const listed = await GET(new Request("http://localhost:3000/api/content-publish?classId=c1&assignmentId=a1"));
+    expect(JSON.stringify(await listed.json())).not.toContain("PRIVATE_");
+  });
   it.each([
     { type: "Slides" }, { slides: { publicationId: "fake" } }, { id: "slides-existing-deck" },
   ])("rejects reserved Slides writes before publishing any batch items: %j", async (reserved) => {

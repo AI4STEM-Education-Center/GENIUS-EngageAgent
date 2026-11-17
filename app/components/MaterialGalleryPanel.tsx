@@ -9,13 +9,14 @@ import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
 import { loadTaskLesson } from "@/lib/lesson-client";
 import SlidePreview from "./SlidePreview";
 import type { SlideDeck } from "@/lib/slides/model";
+import type { MaterialTeachingContext } from "@/lib/material-teaching-context";
 import type { StrategyFocus } from "@/lib/strategy-focus";
 
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50";
 const primary = `${button} !border-brand !bg-brand !text-white hover:!bg-brand-dark`;
-type Props = { scope: GalleryScope; lessonNumber: number; strategy: string; format: "slides" | "video"; focus?: StrategyFocus; disabled?: boolean; onUse: (copy: GalleryCopy, material: GalleryMaterial) => void; refreshKey?: number; browseRequest?: number; standalone?: boolean; recommendationsOnly?: boolean; onBrowse?: () => void };
+type Props = { scope: GalleryScope; lessonNumber: number; strategy: string; format: "slides" | "video"; focus?: StrategyFocus; disabled?: boolean; onUse: (copy: GalleryCopy, material: GalleryMaterial) => void; refreshKey?: number; browseRequest?: number; standalone?: boolean; recommendationsOnly?: boolean; onBrowse?: () => void; teachingContext?: MaterialTeachingContext; classroomContext?: string };
 
-export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, format, focus, disabled, onUse, refreshKey = 0, browseRequest = 0, standalone = false, recommendationsOnly = false, onBrowse }: Props) {
+export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, format, focus, disabled, onUse, refreshKey = 0, browseRequest = 0, standalone = false, recommendationsOnly = false, onBrowse, teachingContext, classroomContext = "" }: Props) {
   const [filter, setFilter] = useState<"topic" | "strategy" | "all" | "mine">(standalone ? "all" : "topic");
   const [expanded, setExpanded] = useState(standalone);
   const [search, setSearch] = useState("");
@@ -43,13 +44,13 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
   const request = useRef<AbortController | null>(null);
   const operation = useRef<AbortController | null>(null);
   const previewRequest = useRef<AbortController | null>(null);
-  const scopeKey = JSON.stringify([scope.classId, scope.assignmentId, lessonNumber, strategy, format, focusKey]);
+  const scopeKey = JSON.stringify([scope.classId, scope.assignmentId, lessonNumber, strategy, format, focusKey, teachingContext]);
 
   const load = useCallback(async (nextCursor?: string) => {
     request.current?.abort();
     const controller = new AbortController(); request.current = controller;
     setLoading(true); setError("");
-    const filters: GalleryFilters = { format, ...(selectedGrade ? { gradeBand: selectedGrade } : {}), search: query || undefined, limit: recommendationsOnly ? 3 : expanded ? 12 : 6, cursor: nextCursor,
+    const filters: GalleryFilters = { format, recommendGrade: teachingContext?.gradeBand, recommendQuiz: teachingContext?.quizPattern, recommendExperience: teachingContext?.experienceContext, ...(selectedGrade ? { gradeBand: selectedGrade } : {}), search: query || undefined, limit: recommendationsOnly ? 3 : expanded ? 12 : 6, cursor: nextCursor,
       ...(filter === "topic" && lessonNumber > 0 ? { lessonNumber } : filter === "strategy" && strategy ? { strategy } : filter === "mine" ? { mine: true } : {}),
       ...(standalone && selectedLesson ? { lessonNumber: Number(selectedLesson) } : {}),
       ...(standalone && selectedStrategy ? { strategy: selectedStrategy } : {}),
@@ -64,7 +65,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     } catch (reason) {
       if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to load shared materials.");
     } finally { if (!controller.signal.aborted) setLoading(false); }
-  }, [scope.classId, scope.assignmentId, format, query, expanded, filter, lessonNumber, strategy, standalone, selectedLesson, selectedStrategy, recommended, focusKey, recommendationsOnly, selectedGrade]);
+  }, [scope.classId, scope.assignmentId, format, query, expanded, filter, lessonNumber, strategy, standalone, selectedLesson, selectedStrategy, recommended, focusKey, recommendationsOnly, selectedGrade, teachingContext?.gradeBand, teachingContext?.quizPattern, teachingContext?.experienceContext]);
   useEffect(() => { setItems([]); setCursor(undefined); void load(); return () => request.current?.abort(); }, [load, refreshKey, reload]);
   useEffect(() => {
     operation.current?.abort(); previewRequest.current?.abort(); if (dialog.current?.open) dialog.current.close();
@@ -82,13 +83,13 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     operation.current?.abort(); const controller = new AbortController(); operation.current = controller;
     setCopying(material.id); setError("");
     try {
-      const copy = await copyGalleryMaterial(scope, material.id, mode, controller.signal);
+      const copy = standalone ? await copyGalleryMaterial(scope, material.id, mode, controller.signal)
+        : await copyGalleryMaterial(scope, material.id, mode, controller.signal, { classroomContext, teachingContext: teachingContext || {}, ...(focus ? { focus } : {}) });
       if (controller.signal.aborted) return;
       onUse(copy, material);
       closePreview();
-      setNotice(standalone ? "Your copy is ready to edit." : mode === "adapt" ? material.format === "video"
-        ? "Your own copy is ready below. Open Edit material to adapt its text and teaching details."
-        : "Your own copy is ready below. Edit it or describe the changes you want in Revise with AI."
+      setNotice(standalone ? "Your copy is ready to edit." : mode === "adapt"
+        ? "Adapting your copy using the current task settings. Review the result before saving."
         : "Your own copy is ready to review below. The Gallery original is unchanged.");
     } catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to copy this material."); }
     finally { if (!controller.signal.aborted) setCopying(""); }
@@ -132,7 +133,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
       <div><h3 className="flex items-center gap-2 text-base font-semibold"><LayoutGrid size={18} />{standalone ? "Shared materials" : expanded ? "Materials Gallery" : "Matches from the Gallery"}</h3><p className="mt-1 text-xs text-mute">{standalone ? "Open a material to edit your own copy." : "Shared by teachers · use a copy or adapt it to your class"}</p></div>
       {!standalone && <button type="button" className={button} onClick={() => setExpanded(value => !value)}>{expanded ? "Show matches" : "Open Gallery"}<ChevronRight size={16} /></button>}
     </div>}
-    {recommendationsOnly && <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-bold">Recommended from Gallery</h3><p className="mt-1 text-sm text-mute">Matches your lesson, strategy and focus. Open a material to review or adapt it.</p></div>{onBrowse && <button type="button" className={button} onClick={onBrowse}>Browse all materials</button>}</div>}
+    {recommendationsOnly && <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-bold">Recommended from Gallery</h3><p className="mt-1 text-sm text-mute">Matched to your lesson, focus and teaching context.</p></div>{onBrowse && <button type="button" className={button} onClick={onBrowse}>Browse all materials</button>}</div>}
     {standalone && <div className="mt-4 flex flex-wrap gap-3">
       <label className="text-xs font-semibold text-mute">Lesson<select aria-label="Filter Gallery by lesson" value={selectedLesson} onChange={event => setSelectedLesson(event.target.value)} className="ml-2 min-h-10 rounded-lg border border-line bg-white px-3 text-sm text-ink">
         <option value="">All lessons</option>{[...new Set([...facets.lessons, ...(selectedLesson ? [Number(selectedLesson)] : [])])].sort((a, b) => a - b).map(n => <option key={n} value={n}>Lesson {n}</option>)}
@@ -159,7 +160,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
       {material.previewImage && <div className="mb-3 aspect-video max-h-40 overflow-hidden rounded-lg bg-canvas"><img src={material.previewImage} alt="" loading="lazy" className="h-full w-full object-contain" /></div>}
       <div className="flex justify-between gap-2 text-xs text-mute"><span>{material.format === "slides" ? `${material.slideCount ?? ""} slides` : "Animated video"}</span>{material.isOwner && <span className="font-semibold">Shared by you</span>}</div>
       <h4 className="mt-3 text-lg font-bold text-ink">{material.title}</h4>
-      <GalleryMaterialDetails {...material} />
+      <GalleryMaterialDetails {...material} compact={recommendationsOnly} />
       {material.description && <p className="mt-3 text-sm leading-6 text-ink-2">{material.description}</p>}
       <div className="my-3 flex flex-wrap gap-2 text-xs font-semibold">
         {(standalone || recommendationsOnly) ? material.matchReasons?.map(reason => <span key={reason} className="rounded-full bg-ok-light px-2.5 py-1 text-ok">{reason}</span>) : <>

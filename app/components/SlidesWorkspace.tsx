@@ -1,5 +1,10 @@
 "use client";
 
+import { reviewTarget } from "@/lib/slides/review-target";
+import { createPrivateSlideCopy, saveGalleryCopy } from "@/lib/material-gallery-client";
+import SlideVideoField from "./SlideVideoField";
+import { preserveSlideVideos } from "@/lib/slides/video";
+import type { MaterialTeachingContext, MaterialAdaptation } from "@/lib/material-teaching-context";
 import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Download, Expand, ImagePlus, LoaderCircle, RefreshCw, ScanEye, Send, Sparkles, X, LayoutGrid, Undo2 } from "lucide-react";
 import type { UserContext } from "@/lib/auth";
@@ -30,8 +35,9 @@ const label = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 export type SlidesWorkspaceHandle = { generate(): void };
 type SlidesWorkspaceProps = {
   user: UserContext;
-  embeddedContext?: { lessonNumber: number; strategy: SlideStrategy; classroomContext?: string; focus?: Partial<StrategyFocus> };
+  embeddedContext?: { lessonNumber: number; strategy: SlideStrategy; classroomContext?: string; teachingContext?: MaterialTeachingContext; focus?: Partial<StrategyFocus> };
   incomingDeck?: SlideDeck;
+  adaptation?: MaterialAdaptation;
   incomingDeckSaved?: boolean;
   draftNamespace?: string;
   onSaveDraft?: (deck: SlideDeck) => Promise<void>;
@@ -44,7 +50,7 @@ type SlidesWorkspaceProps = {
   onGalleryShared?: () => void;
 };
 
-const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceProps>(function SlidesWorkspaceEditor({ user, embeddedContext, incomingDeck, incomingDeckSaved = true, draftNamespace, onSaveDraft, onRequestSend, onDraftChange, compactEditor = false, onBusyChange, onReadyChange, onPublished, onGalleryShared }, ref) {
+const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceProps>(function SlidesWorkspaceEditor({ user, embeddedContext, incomingDeck, incomingDeckSaved = true, adaptation, draftNamespace, onSaveDraft, onRequestSend, onDraftChange, compactEditor = false, onBusyChange, onReadyChange, onPublished, onGalleryShared }, ref) {
   const [lessons, setLessons] = useState<SlideLesson[]>([]);
   const [standaloneLesson, setLessonNumber] = useState(1);
   const [standaloneStrategy, setStrategy] = useState<SlideStrategy>("analogy");
@@ -191,7 +197,17 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   useEffect(() => () => { onBusyChange?.(strategy, false); }, [onBusyChange, strategy]);
   useEffect(() => { onReadyChange?.(strategy, canGenerate); }, [onReadyChange, strategy, canGenerate]);
   useEffect(() => () => { onReadyChange?.(strategy, false); }, [onReadyChange, strategy]);
-  // Creating or revealing an embedded editor never starts a paid generation.
+  // Only an explicit Adapt action carries a one-shot generation request.
+  const adaptedRequests = useRef(new Set<string>());
+  useEffect(() => {
+    if (!adaptation || !deck || !canGenerate || busy || adaptedRequests.current.has(adaptation.requestId)) return;
+    adaptedRequests.current.add(adaptation.requestId);
+    const request = "Adapt this existing material to the current lesson focus, class profile, grade and selected familiar experience. Preserve useful parts, the strategy's learning sequence and the opportunity for students to reason. Use only supplied class information; do not invent survey responses. Explain the changes through the revised slides and teaching notes.";
+    setAdvancedOpen(true); setFeedback(request);
+    generate(true, request, adaptation);
+    // The receipt identifies the user action; edits/rerenders never repeat it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adaptation, canGenerate, deck, busy]);
   useImperativeHandle(ref, () => ({ generate: () => generate() }));
   const issues = useMemo(() => {
     if (!deck || typeof document === "undefined") return [];
@@ -231,7 +247,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
   async function checkText(target: SlideDeck, controller: AbortController): Promise<SlideDeck> {
     setStatus("Checking teaching sequence and scientific content...");
     try {
-      const result = await post("/api/slides/check", { lessonNumber: target.lessonNumber, strategy: target.strategy, draft: target.draft, textModel: target.modelSelection?.textModel, classroomContext: target.classroomContext ?? "", ...(target.focus ? { focus: target.focus } : {}) }, controller);
+      const result = await post("/api/slides/check", { lessonNumber: target.lessonNumber, strategy: target.strategy, draft: target.draft, textModel: target.modelSelection?.textModel, classroomContext: target.classroomContext ?? "", teachingContext: target.teachingContext, ...(target.focus ? { focus: target.focus } : {}) }, controller);
       const next = { ...target, checks: { images: target.checks?.images || {}, text: { key: textCheckKey(target), issues: result.issues, model: result.model } } };
       showDraft(next, controller);
       return next;
@@ -257,7 +273,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       : visualId === "variation" ? target.assets.target : target.strategy === "analogy" && target.draft.analogyPlan && visualId === "target" ? target.assets.analogue : undefined;
     const phenomenon = target.draft.analogyMethod === "six-step" && visualId === "target" ? target.assets.phenomenon : undefined;
     try {
-      const result = await post("/api/slides/check", { lessonNumber: target.lessonNumber, strategy: target.strategy, draft: target.draft, textModel: target.modelSelection?.textModel, classroomContext: target.classroomContext ?? "", visualId,
+      const result = await post("/api/slides/check", { lessonNumber: target.lessonNumber, strategy: target.strategy, draft: target.draft, textModel: target.modelSelection?.textModel, classroomContext: target.classroomContext ?? "", teachingContext: target.teachingContext, visualId,
         asset: { data: asset.data, width: asset.width, height: asset.height },
         ...(reference ? { referenceAsset: { data: reference.data, width: reference.width, height: reference.height } } : {}),
         ...(phenomenon ? { phenomenonAsset: { data: phenomenon.data, width: phenomenon.width, height: phenomenon.height } } : {}) }, controller);
@@ -285,26 +301,27 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     showDraft(next, controller);
     return next;
   }
-  function generate(review = false) {
+  function generate(review = false, requestOverride?: string, adaptationOverride?: MaterialAdaptation) {
     if (!canGenerate || busy || job.current || (review && !deck)) return;
     // Capture this operation's request once; automatic repairs must keep it,
     // while a new generation must not inherit an earlier revision request.
-    const teacherRequest = review ? feedback : "";
+    const teacherRequest = review ? requestOverride ?? feedback : "";
     setUndoDeck(review ? deck : null);
     void run(async controller => {
       const chosenLesson = review && deck ? deck.lessonNumber : lessonNumber;
       const chosenStrategy = review && deck ? deck.strategy : strategy;
       const chosenPrompt = review && deck ? deck.promptProvenance?.version ?? "optimized" : "optimized";
       const chosenMethod = review && deck ? resolveAnalogyMethod(deck.draft.analogyMethod) : "six-step";
-      const chosenClassroomContext = review && deck ? deck.classroomContext ?? "" : (sharedClassroomContext ?? classroomContext).trim();
+      const chosenClassroomContext = adaptationOverride?.classroomContext ?? (review && deck ? deck.classroomContext ?? "" : (sharedClassroomContext ?? classroomContext).trim());
+      const chosenTeachingContext = adaptationOverride?.teachingContext ?? (review && deck ? deck.teachingContext : embeddedContext?.teachingContext);
       const chosenFocus = review ? deck?.focus : embeddedContext?.focus;
       const chosenModels = { ...selection };
       setStatus(review ? "Reviewing slide content..." : chosenStrategy === "analogy" && chosenMethod === "six-step" ? "Generating six-step slides..." : chosenStrategy === "experience bridging" ? "Generating experience-bridging slides..." : "Generating five slides...");
-      const context = { lessonNumber: chosenLesson, strategy: chosenStrategy, textModel: chosenModels.textModel, promptVersion: chosenPrompt, classroomContext: chosenClassroomContext,
+      const context = { lessonNumber: chosenLesson, strategy: chosenStrategy, textModel: chosenModels.textModel, promptVersion: chosenPrompt, classroomContext: chosenClassroomContext, teachingContext: chosenTeachingContext,
         ...(chosenStrategy === "analogy" ? { analogyMethod: chosenMethod } : {}), ...(chosenFocus ? { focus: chosenFocus } : {}) };
       const result = await post("/api/slides", { ...context, operation: review ? "review" : "generate", ...(review && deck ? { draft: deck.draft, feedback: slideRevisionFeedback(teacherRequest, [...issues, ...suggestions]) } : {}) }, controller);
-      const draft = parseDraft(result.draft, chosenStrategy, true);
-      let next: SlideDeck = { ...(review && deck ? deck : {}), id: review && deck ? deck.id : crypto.randomUUID(), lessonNumber: chosenLesson, strategy: chosenStrategy, draft, focus: chosenFocus, classroomContext: chosenClassroomContext, assets: preservedAssets(review ? deck : null, draft), checks: review ? deck?.checks : undefined, modelSelection: chosenModels, textModel: result.model, promptProvenance: result.promptProvenance };
+      const draft = preserveSlideVideos(review ? deck?.draft : undefined, parseDraft(result.draft, chosenStrategy, true));
+      let next: SlideDeck = { ...(review && deck ? deck : {}), id: review && deck ? deck.id : crypto.randomUUID(), lessonNumber: chosenLesson, strategy: chosenStrategy, draft, focus: chosenFocus, classroomContext: chosenClassroomContext, teachingContext: chosenTeachingContext, assets: preservedAssets(review ? deck : null, draft), checks: review ? deck?.checks : undefined, modelSelection: chosenModels, textModel: result.model, promptProvenance: result.promptProvenance };
       if (controller.signal.aborted) return;
       // Bounded native repairs; retain drafts on failure and never loop on provider errors.
       setDeck(next); setIndex(0); setReviewed(false); setDownloaded(false);
@@ -314,7 +331,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         try {
           setStatus("Correcting slide content and layout...");
           const repaired = await post("/api/slides", { ...context, operation: "review", draft: next.draft, feedback: slideRevisionFeedback(teacherRequest, textFindings(next)) }, controller);
-          const corrected = parseDraft(repaired.draft, chosenStrategy, true);
+          const corrected = preserveSlideVideos(next.draft, parseDraft(repaired.draft, chosenStrategy, true));
           const unchanged = JSON.stringify(corrected) === JSON.stringify(next.draft);
           next = { ...next, draft: corrected, assets: preservedAssets(next, corrected), textModel: repaired.model, promptProvenance: repaired.promptProvenance };
           showDraft(next, controller);
@@ -361,17 +378,18 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       setError(failures.join("\n")); setStatus(failures.length ? "Slide text ready. Some images need a retry." : layoutErrors(next, browserMeasure()).length ? "Draft retained. Layout corrections needed." : `${next.draft.slides.length} slides ready to send.`);
     });
   }
-  function reviseSelectedSlide() {
+  function reviseSelectedSlide(targetIndex = index, requestOverride = feedback) {
     if (!deck || busy || !canGenerate) return;
     const original = deck;
-    const selected = index;
-    const request = feedback.trim();
+    const selected = targetIndex;
+    const request = requestOverride.trim();
+    setIndex(selected);
     setUndoDeck(original);
     void run(async controller => {
       setStatus(`Revising slide ${selected + 1}…`);
       const result = await post("/api/slides", {
         lessonNumber: original.lessonNumber, strategy: original.strategy, operation: "review-slide", slideIndex: selected,
-        draft: original.draft, textModel: selection.textModel, classroomContext: original.classroomContext ?? "",
+        draft: original.draft, textModel: selection.textModel, classroomContext: original.classroomContext ?? "", teachingContext: original.teachingContext,
         ...(original.focus ? { focus: original.focus } : {}),
         ...(original.strategy === "analogy" ? { analogyMethod: resolveAnalogyMethod(original.draft.analogyMethod) } : {}),
         promptVersion: original.promptProvenance?.version ?? "optimized",
@@ -381,7 +399,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       if (result.slideIndex !== selected || !selectedSlide || selectedSlide.stage !== original.draft.slides[selected].stage) throw new Error("The revision did not match the selected slide. Your original draft is retained.");
       // A single-slide response cannot replace the deck, visuals or analogy plan.
       // Validate its editable text in the original method and stage sequence.
-      const draft = parseDraft({ ...original.draft, slides: original.draft.slides.map((slide, n) => n === selected ? selectedSlide : slide) }, original.strategy, true);
+      const draft = parseDraft({ ...original.draft, slides: original.draft.slides.map((slide, n) => n === selected ? { ...selectedSlide, ...(slide.videoUrl ? { videoUrl: slide.videoUrl } : {}) } : slide) }, original.strategy, true);
       const revised = { ...original, draft, checks: { images: original.checks?.images ?? {} } };
       if (controller.signal.aborted) return;
       showDraft(revised, controller); setReviewed(false); setDownloaded(false);
@@ -406,6 +424,24 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     setUndoDeck(null);
     setDeck(current => current?.draft.analogyPlan ? { ...current, draft: { ...current.draft, analogyPlan: { ...current.draft.analogyPlan, [field]: value } } } : current);
     setReviewed(false); setDownloaded(false); setStatus("");
+  }
+  function fixFinding(finding: string) {
+    if (!deck || busy || !canGenerate) return;
+    const target = reviewTarget(finding, deck);
+    if (target.slideIndex !== undefined) setIndex(target.slideIndex);
+    if (target.visualId) {
+      const visualId = target.visualId;
+      setUndoDeck(deck); setReviewed(false); setDownloaded(false);
+      void run(async controller => {
+        setStatus(`Correcting ${visualId} image…`);
+        const next = await imageFor(deck, visualId, controller, selection.imageModel, finding);
+        if (!controller.signal.aborted) {
+          await checkImage(next, visualId, controller, true);
+          if (!controller.signal.aborted) setStatus("Image updated. Review the correction or undo it.");
+        }
+      });
+    } else if (target.slideIndex !== undefined) reviseSelectedSlide(target.slideIndex, `Fix this finding only; preserve other correct wording: ${finding}`);
+    else generate(true, `Fix this finding only; preserve other correct content: ${finding}`);
   }
   function retryImage(visualId: string) {
     if (!deck) return;
@@ -475,10 +511,22 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     const controller = new AbortController(); saveJob.current = controller;
     setBusy(true); setError(""); setStatus("Saving changes...");
     try {
-      if (!onSaveDraft) throw new Error("Saving is unavailable. Your edits are retained; try again when connected.");
-      await onSaveDraft(deck);
+      if (compactEditor && !onSaveDraft) throw new Error("Saving is unavailable. Your edits are retained; try again before sending.");
+      let saved = deck;
+      if (onSaveDraft) await onSaveDraft(deck);
+      else {
+        const scope = { classId: classId || "", assignmentId: assignmentId || "" };
+        const copy = deck.gallerySource && deck.libraryRevision !== undefined ? { format: "slides" as const, source: deck.gallerySource, deck: { ...deck, gallerySource: deck.gallerySource } }
+          : await createPrivateSlideCopy(scope, deck, controller.signal);
+        if (controller.signal.aborted) return;
+        // Keep the private receipt even if a later upload fails, so retry uses
+        // the same copy and preserves its optimistic revision guard.
+        setDeck(copy.deck);
+        const receipt = await saveGalleryCopy(scope, copy, copy.deck.libraryRevision ?? 0, controller.signal);
+        saved = { ...copy.deck, libraryRevision: receipt.revision }; setDeck(saved);
+      }
       if (controller.signal.aborted || saveJob.current !== controller) return;
-      setServerSavedDeck(deck); setStatus("Changes saved.");
+      setServerSavedDeck(saved); setStatus(onSaveDraft ? "Changes saved." : "Saved to My saved materials. You can reopen it from Gallery in any class.");
     } catch (err) {
       if (!controller.signal.aborted) { setError(err instanceof Error ? err.message : "Unable to save changes. Your edits are retained; try again."); setStatus(""); }
     } finally { if (saveJob.current === controller) { saveJob.current = null; setBusy(false); } }
@@ -528,7 +576,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
     {!deck && <div className="border-y border-gray-200 py-16 text-center text-sm text-gray-500">No slide draft yet.</div>}
     {deck && slide && <>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0"><h2 className="break-words text-lg font-semibold">{deck.draft.title}</h2><p className="mt-1 text-sm text-gray-500">Lesson {deck.lessonNumber} · {label(deck.strategy)} · {deck.draft.slides.length} slides</p>{deck.gallerySource && <p className="mt-1 text-xs text-mute">{deck.gallerySource.mode === "adapt" ? "Adapted from Gallery" : "From Gallery"}: {deck.gallerySource.title}</p>}</div>
+        <div className="min-w-0"><h2 className="break-words text-lg font-semibold">{deck.draft.title}</h2><p className="mt-1 text-sm text-gray-500">Lesson {deck.lessonNumber} · {label(deck.strategy)} · {deck.draft.slides.length} slides</p>{deck.gallerySource && !deck.gallerySource.private && <p className="mt-1 text-xs text-mute">{deck.gallerySource.mode === "adapt" ? "Adapted from Gallery" : "From Gallery"}: {deck.gallerySource.title}</p>}</div>
         <div className="flex flex-wrap gap-2">
           <button className={icon} disabled={!!issues.length} title="Enlarge preview" aria-label="Enlarge preview" onClick={() => dialog.current?.showModal()}><Expand size={17} /></button>
         </div>
@@ -556,7 +604,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       <nav aria-label="Choose slide" className="mb-4 overflow-x-auto pb-2">
         <ol className="grid grid-flow-col auto-cols-[minmax(145px,1fr)] gap-3">{deck.draft.slides.map((item, n) => <li key={`${item.stage}-${n}`}>
           <button type="button" className={`block w-full overflow-hidden rounded-lg border-2 text-left ${index === n ? "border-brand" : "border-line hover:border-slate-300"}`} aria-label={`Edit slide ${n + 1}: ${item.title}`} aria-current={index === n ? "step" : undefined} onClick={() => setIndex(n)}>
-            <div aria-hidden="true" className="pointer-events-none"><SlidePreview deck={deck} index={n} /></div>
+            <div aria-hidden="true" className="pointer-events-none"><SlidePreview deck={deck} index={n} interactive={false} /></div>
             <div className="flex items-center gap-2 bg-white px-2 py-2 text-xs text-ink-2"><b>{n + 1}</b><span className="truncate">{label(item.stage)}</span></div>
           </button>
         </li>)}</ol>
@@ -577,6 +625,10 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           </div>
           {editorTab === "text" ? <div className="space-y-3">{(["title", "body", "task"] as const).map(field => <label key={field} className="block text-[13px] font-semibold text-ink-2">{field === "task" ? "Thinking task" : label(field)}<textarea aria-label={`Slide ${field}`} className={`${input} mt-1.5 resize-y`} rows={field === "body" ? 3 : 2} disabled={busy} value={slide[field]} onChange={e => edit(field, e.target.value)} />{field === "body" && deck.strategy !== "analogy" && <span className="mt-1 block text-xs font-normal text-mute">{slide.stage === "question" ? "Leave this empty; students see their question task and writing card." : "Optional when the picture and thinking task provide enough context."}</span>}</label>)}{index === analogyMappingIndex(deck.draft.analogyMethod) && deck.draft.analogyPlan && analogyStudentFields(deck.draft.analogyMethod).map(field => <label key={field} className="block text-sm font-medium">{field === "mappingHint" ? "Visible comparison hint" : "Student response starter"}<textarea className={`${input} mt-2 resize-y`} rows={2} maxLength={field === "mappingHint" ? 140 : 100} disabled={busy} value={deck.draft.analogyPlan![field]} onChange={e => editMapping(field, e.target.value)} /></label>)}</div>
           : <label className="block text-[13px] font-semibold text-ink-2">Teacher notes<textarea aria-label="Slide teacher notes" className={`${input} mt-1.5 resize-y`} rows={8} disabled={busy} value={slide.teacherNotes.join("\n\n")} onChange={e => edit("teacherNotes", e.target.value.split(/\n\s*\n/u).filter(Boolean))} /><span className="mt-2 block text-xs font-normal text-mute">Private guidance for you. Students do not see these notes. Separate up to two notes with a blank line.</span></label>}
+          <div className="mt-4"><SlideVideoField key={`${deck.id}:${index}:${slide.videoUrl || ""}`} value={slide.videoUrl} disabled={busy} onChange={videoUrl => {
+            setUndoDeck(null); setReviewed(false); setDownloaded(false);
+            setDeck(current => current ? { ...current, draft: { ...current.draft, slides: current.draft.slides.map((entry, n) => n === index ? { ...entry, videoUrl } : entry) } } : current);
+          }} /></div>
         </aside>
       </div>
       {(!compactEditor || advancedOpen) && <section aria-label="AI Review" className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
@@ -594,7 +646,15 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         {!!suggestions.length && !busy && <section aria-label="AI review suggestions" className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
           <h4 className="font-semibold">Suggested improvements ({suggestions.length})</h4>
           <p className="mt-2 leading-6">Refine with AI is optional. You can download or send complete slides without refining, checking again, or confirming review.</p>
-          <ul className="mt-3 list-disc space-y-2 pl-5">{suggestions.map((finding, n) => <li key={n} className="break-words">{finding}</li>)}</ul>
+          <ul className="mt-3 space-y-3">{suggestions.map((finding, n) => {
+            const target = reviewTarget(finding, deck);
+            return <li key={`${n}:${finding}`} className="flex flex-wrap items-start gap-3 rounded-lg border border-amber-200 bg-white p-3">
+              <p className="min-w-0 flex-1 basis-64 break-words">{finding}</p><div className="flex flex-wrap gap-2">
+                {target.slideIndex !== undefined && <button type="button" className={button} onClick={() => { setIndex(target.slideIndex!); document.querySelector('[aria-label="Slide editor"]')?.scrollIntoView?.({ behavior: "smooth", block: "center" }); }}>Go to slide {target.slideIndex + 1}</button>}
+                <button type="button" className={button} disabled={!canGenerate} onClick={() => fixFinding(finding)}>Fix with AI</button>
+              </div>
+            </li>;
+          })}</ul>
           <button type="button" className={`${button} mt-3`} disabled={!canGenerate} onClick={() => generate(true)}><RefreshCw size={16} />Refine with AI</button>
         </section>}
       </section>}
@@ -612,7 +672,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
           <span>I have reviewed all {deck.draft.slides.length} slides and their images.</span>
         </button></>}
         <div className="mt-3 flex flex-wrap gap-2">
-          {(compactEditor || onSaveDraft) && <button type="button" className={button} disabled={busy} onClick={saveChanges}>Save changes</button>}
+          <button type="button" className={button} disabled={busy || (!onSaveDraft && !ready)} onClick={saveChanges}>{compactEditor || onSaveDraft || deck.libraryRevision !== undefined ? "Save changes" : "Save to my materials"}</button>
           {(!compactEditor || advancedOpen) && <button type="button" className={button} disabled={!ready || busy || reviewed} onClick={() => setReviewed(true)}><ScanEye size={16} />{reviewed ? "Review confirmed" : "Confirm review"}</button>}
           <button type="button" className={button} disabled={busy || !ready} onClick={download}><Download size={17} />Download PPTX</button>
           {(!compactEditor || advancedOpen) && <button type="button" className={button} disabled={busy || !ready} onClick={() => setShareOpen(true)}><LayoutGrid size={17} />{sharedDeck === deck ? "In Gallery · share another version" : "Share to Gallery"}</button>}

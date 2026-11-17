@@ -2,11 +2,11 @@ import { GALLERY_TAG_LABELS, type GalleryMaterial } from "@/lib/material-gallery
 import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
 import { toMisconceptionIds } from "@/lib/misconceptions";
 
-type Props = Partial<GalleryMaterial> & { showTags?: boolean };
+type Props = Partial<GalleryMaterial> & { showTags?: boolean; compact?: boolean };
 const meaningful = (value?: string) => value && !/^(Not shared|Not supplied|Not selected|Unknown)/iu.test(value) ? value : undefined;
 const short = (value: string) => value.length > 44 ? `${value.slice(0, 41)}…` : value;
 export default function GalleryMaterialDetails(material: Props) {
-  const { creatorName, teacherCount, promptTags = {}, feedback, showTags = true } = material;
+  const { creatorName, teacherCount, promptTags = {}, feedback, showTags = true, compact = false, matchTags } = material;
   const focus = meaningful(promptTags.FOCUS_ITEMS) || (material.focus ? [
     ...material.focus.misconceptions.map(code => toMisconceptionIds(material.lessonNumber || 0, code).join(" + ") || `Target ${code}`),
     ...material.focus.coreIdeas.map(index => `Core idea ${index + 1}`),
@@ -33,10 +33,11 @@ export default function GalleryMaterialDetails(material: Props) {
   return <div className="mt-2 text-sm text-mute">
     <p>{creatorName ? `By ${creatorName}` : "Author not recorded"}
       {teacherCount !== undefined && <span title="Teachers who saved an editable copy. Each teacher is counted once; previews do not count."> · {teacherCount} {teacherCount === 1 ? "teacher has" : "teachers have"} saved a copy</span>}</p>
+    {matchTags && <p className="mt-2 text-xs font-semibold text-ok">{matchTags.filter(tag => tag.matched).length} of 7 match</p>}
     <ul aria-label="Material tags" className="mt-3 flex flex-wrap gap-1.5">
-      {tags.map(([label, value], i) => <li key={`${label}-${i}`} title={`${label}: ${value}`}
-        className={`max-w-full truncate rounded-md px-2 py-1 text-xs ${label === "Strategy" || label === "Focus" ? "bg-info-light text-info" : "bg-line-2 text-ink-2"}`}>
-        <span className="font-normal opacity-75">{label}:</span> <span className="font-semibold">{short(value)}</span>
+      {(compact ? tags.slice(0, 7) : tags).map(([label, value], i) => <li key={`${label}-${i}`} title={`${label}: ${value}`}
+        className={`max-w-full truncate rounded-md px-2 py-1 text-xs ${matchTags?.find(tag => tag.label === label)?.matched ? "bg-ok-light text-ok" : label === "Strategy" || label === "Focus" ? "bg-info-light text-info" : "bg-line-2 text-ink-2"}`}>
+        {matchTags?.find(tag => tag.label === label)?.matched && <span aria-label="Matches current task">✓ </span>}<span className="font-normal opacity-75">{label}:</span> <span className="font-semibold">{short(value)}</span>
       </li>)}
     </ul>
     <div aria-label="Student feedback" className="mt-3 flex flex-wrap gap-1.5 text-xs">
@@ -47,7 +48,7 @@ export default function GalleryMaterialDetails(material: Props) {
         {result?.scienceQuestionPercent != null && <span className="rounded-md bg-ai-light px-2 py-1">Science questions: {result.scienceQuestionPercent}%</span>}
       </>}
     </div>
-    {showTags && <details className="mt-3 rounded-lg border border-line p-3">
+    {showTags && !compact && <details className="mt-3 rounded-lg border border-line p-3">
       <summary className="cursor-pointer font-semibold text-ink">Teaching tags</summary>
       <p className="mt-2 text-xs">Generation settings for this shared version. Class context contains only author-reviewed summaries.</p>
       <dl className="mt-3 grid gap-3 sm:grid-cols-2">{Object.entries(promptTags).map(([key, value]) => <div key={key} className="min-w-0">

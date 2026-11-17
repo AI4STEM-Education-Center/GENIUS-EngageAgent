@@ -25,6 +25,7 @@ import { useInGenius } from "./layout/useInGenius";
 import { useAuth } from "./AuthContext";
 import ShareVideoMaterial from "./ShareVideoMaterial";
 import VideoMaterialEditor from "./VideoMaterialEditor";
+import SaveVideoMaterial from "./SaveVideoMaterial";
 import { focusKind, lessonCoreIdeas, lessonFocusMisconceptions, resolveStrategyFocus } from "@/lib/strategy-focus";
 import { listLessonOptions, loadTaskLesson, useTaskLesson, type LessonOption } from "@/lib/lesson-client";
 import TaskQuizPanel from "./assessment/TaskQuizPanel";
@@ -56,6 +57,7 @@ import {
   buildClassPlan,
   type StrategyRecommendation,
 } from "@/lib/strategy-recommendation";
+import { GRADE_BANDS, quizBand } from "@/lib/material-teaching-context";
 import { classQuizCounts, defaultStrategyFocus, EMPTY_FOCUS, focusForStrategy, type StrategyFocus } from "@/lib/strategy-focus";
 
 const MAX_IMAGE_VERSIONS = 10;
@@ -145,6 +147,8 @@ type PersistedDraft = {
   currentStep: number;
   materialFormat?: MaterialFormat | "text-image";
   classroomContext?: string;
+  materialGrade?: string;
+  materialExperiences?: Record<string, string>;
   focusByLesson?: Record<number, StrategyFocus>;
   plan: Plan | null;
   /** The rule's result behind `plan`, for Step 2's "How we chose" (#178). */
@@ -394,6 +398,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const [materialFormat, setMaterialFormat] = useState<MaterialFormat>(initialMaterialFormat ?? "slides");
   const [savedActivitiesExpanded, setSavedActivitiesExpanded] = useState(false);
   const [classroomContext, setClassroomContext] = useState("");
+  const [materialGrade, setMaterialGrade] = useState("");
+  const [materialExperiences, setMaterialExperiences] = useState<Record<string, string>>({});
   const [focusByLesson, setFocusByLesson] = useState<Record<number, StrategyFocus>>({});
   const materialsReviewRef = useRef<HTMLDivElement>(null);
   const videoMaterialsReviewRef = useRef<HTMLDivElement>(null);
@@ -528,6 +534,10 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   // Generation uses only a focus the teacher has saved, so an unvisited Step 2 changes nothing.
   const generationFocus = (strategy: string) => (focusSaved ? focusForStrategy(selectedFocus, strategy) : undefined);
   const chosenFocus = selectedStrategies[0] ? generationFocus(selectedStrategies[0]) : undefined;
+  const experienceKey = JSON.stringify([selectedLesson, selectedStrategies[0], selectedFocus]);
+  const selectedExperience = materialExperiences[experienceKey] || "";
+  const teachingContext = useMemo(() => ({ gradeBand: materialGrade, experienceContext: selectedExperience,
+    quizPattern: !answersError && quizCounts ? quizBand(quizCounts.correct, quizCounts.responses) : "" }), [materialGrade, selectedExperience, quizCounts, answersError]);
 
   // Cohort
   const [classRecommendation, setClassRecommendation] = useState<StrategyRecommendation | null>(null);
@@ -631,7 +641,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
         lessonNumber: chosenLesson,
         currentStep: clampStep(currentStep),
         materialFormat,
-        classroomContext,
+        classroomContext, materialGrade, materialExperiences,
         focusByLesson,
         plan,
         recommendation: classRecommendation,
@@ -655,7 +665,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
       chosenLesson,
       currentStep,
       materialFormat,
-      classroomContext,
+      classroomContext, materialGrade, materialExperiences,
       focusByLesson,
       plan,
       classRecommendation,
@@ -783,7 +793,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     setCurrentStep(requestedStepRef.current ?? 1);
     setMaterialFormat(initialFormatRef.current ?? "slides");
     setSavedActivitiesExpanded(false);
-    setClassroomContext("");
+    setClassroomContext(""); setMaterialGrade(""); setMaterialExperiences({});
     setFocusByLesson({});
     setGalleryPublished(false);
     setQueuedVideoIds(new Set());
@@ -860,6 +870,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
           // retired generation format to the current default.
           setMaterialFormat(initialFormatRef.current ?? (isMaterialFormat(draft.materialFormat) ? draft.materialFormat : "slides"));
           setClassroomContext(typeof draft.classroomContext === "string" ? draft.classroomContext.slice(0, 1200) : "");
+          setMaterialGrade(typeof draft.materialGrade === "string" ? draft.materialGrade.slice(0, 80) : "");
+          setMaterialExperiences(Object.fromEntries(Object.entries(draft.materialExperiences || {}).filter(([key, value]) => key.length < 400 && typeof value === "string" && value.length <= 160).slice(0, 100)));
 
           shouldRestorePersistedMedia = restoredContent.length > 0 && Boolean(classId && assignmentId);
 
@@ -1419,7 +1431,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             selectedStrategies,
             classId,
             assignmentId,
-            classroomContext: classroomContext.trim(),
+            classroomContext: classroomContext.trim(), teachingContext,
             ...(chosenFocus ? { focus: chosenFocus } : {}),
             ...(useFallback ? { fallback: true } : {}),
           }),
@@ -2044,6 +2056,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
               recommendation={classRecommendation} onAnalyze={analyzeClass} busy={generationBusy}
               pick={selectedStrategies[0] ?? null} onPick={selectStrategy} focus={strategyFocus} onFocusChange={setStrategyFocus}
               reason={annotationReason} onReasonChange={(reason) => { setAnnotationReason(reason); setAnnotationStatus("idle"); }}
+              experience={selectedExperience} onExperienceChange={value => setMaterialExperiences(previous => ({ ...previous, [experienceKey]: value }))}
               onUse={() => void applyStrategy()} saveStatus={annotationStatus} saveError={annotationError} />
           )}
 
@@ -2052,22 +2065,23 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
             <div className="flex flex-col gap-6 rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div className="flex flex-col gap-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Step 3</p>
-                <h2 className="text-2xl font-semibold text-slate-900">Material Generation</h2>
+                <h2 className="text-2xl font-semibold text-slate-900">Engagement materials</h2>
                 <p className="text-sm text-slate-600">Find a material for this lesson, review it, and send the version you choose to your students.</p>
               </div>
 
               {visibleStep === 3 && isHydrated && hasAssignmentContext && selectedLesson && selectedStrategies.length === 1 && hasFocus && <MaterialGalleryPanel
                 scope={{ classId, assignmentId }} lessonNumber={selectedLesson} strategy={selectedStrategies[0]} focus={chosenFocus ? { misconceptions: chosenFocus.misconceptions || [], coreIdeas: chosenFocus.coreIdeas || [] } : undefined}
-                format={materialFormat === "video" ? "video" : "slides"} recommendationsOnly disabled={generationBusy}
+                format={materialFormat === "video" ? "video" : "slides"} classroomContext={classroomContext} teachingContext={teachingContext} recommendationsOnly disabled={generationBusy}
                 onBrowse={openGallery} onUse={copy => { setRecommendedCopy(copy); setShowDashboard(false); setShowGallery(true); }} />}
 
-              <div className="border-t border-line pt-5"><h3 className="text-lg font-semibold">Create new material</h3><p className="mt-1 text-sm text-mute">Use your lesson and class context to generate a draft.</p></div>
+              <nav aria-label="Material workflow" className="flex flex-wrap gap-6 border-b border-line pb-3 text-sm font-semibold"><a href="#material-generate" className="text-brand hover:underline">1 · Generate</a><a href={materialFormat === "slides" ? "#materials-review" : "#saved-activities"} className="text-brand hover:underline">2 · Review, send &amp; share</a></nav>
+              <div id="material-generate" className="scroll-mt-6"><h3 className="text-lg font-semibold">Create new material</h3><p className="mt-1 text-sm text-mute">Use your lesson and class context to generate a draft.</p></div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {[
                   { name: "Lesson", title: selectedLessonData?.lesson_title || "Choose in Step 1", detail: selectedLessonData ? `${selectedLessonData.core_ideas?.length ?? 0} core ideas` : "" },
                   { name: "Strategy", title: selectedStrategies[0] ? getStrategyLabel(selectedStrategies[0]) : "Choose in Step 2", detail: selectedFocusKind ? `${selectedFocus[selectedFocusKind].length} selected ${selectedFocusKind === "misconceptions" ? "misconceptions" : "core ideas"}` : "" },
                   classProfileCard,
-                  { name: "Students’ experiences", title: "No GENIUS check-in data", detail: "Task survey suggestions appear below when available" },
+                  { name: "Students’ experiences", title: selectedExperience || "Choose an experience in Step 2", detail: selectedExperience ? "Selected for this focus" : "No experience selected" },
                 ].map((card: { name: string; title: string; detail: string; edit?: string }) => (
                   <div key={card.name} className="rounded-xl bg-canvas p-4">
                     <p className="text-xs font-bold uppercase tracking-wider text-faint">{card.name}</p>
@@ -2080,38 +2094,34 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                 ))}
               </div>
 
-              <fieldset className="grid gap-3" aria-label="Material type">
-                <legend className="mb-3 text-sm font-semibold text-slate-700">Material type</legend>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {materialFormats.map((format) => (
-                    <label key={format.id} className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 text-sm font-semibold transition ${materialFormat === format.id ? "border-[#BA0C2F] bg-[#BA0C2F]/5 text-[#BA0C2F]" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                      <input type="radio" name="material-format" value={format.id} checked={materialFormat === format.id} onChange={() => setMaterialFormat(format.id)} className="h-4 w-4 accent-[#BA0C2F]" />
-                      {format.label}
-                    </label>
-                  ))}
+              <div className="grid items-start gap-5 lg:grid-cols-[minmax(240px,1fr)_minmax(0,2fr)]">
+                <div className="grid gap-4">
+                  <fieldset className="grid gap-3" aria-label="Material type">
+                    <legend className="mb-2 text-sm font-semibold text-slate-700">Material type</legend>
+                    <div className="flex flex-wrap gap-2">
+                      {materialFormats.map(format => <label key={format.id} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold ${materialFormat === format.id ? "border-brand bg-brand/5 text-brand" : "border-line text-mute hover:bg-canvas"}`}>
+                        <input type="radio" name="material-format" value={format.id} checked={materialFormat === format.id} disabled={generationBusy} onChange={() => setMaterialFormat(format.id)} className="h-4 w-4 accent-brand" />{format.label}
+                      </label>)}
+                    </div>
+                    <p className="text-xs leading-relaxed text-mute">{materialFormats.find(format => format.id === materialFormat)?.description}</p>
+                  </fieldset>
+                  <label className="grid gap-2 text-sm font-semibold text-slate-700">Grade band
+                    <select aria-label="Material grade band" value={materialGrade} onChange={event => setMaterialGrade(event.target.value)} disabled={generationBusy} className="rounded-lg border border-line bg-white px-3 py-2.5 font-normal">
+                      <option value="">Not specified</option>{GRADE_BANDS.map(grade => <option key={grade}>{grade}</option>)}
+                    </select>
+                  </label>
                 </div>
-                <p className="text-sm text-slate-600">{materialFormats.find((format) => format.id === materialFormat)?.description}</p>
-              </fieldset>
-
-              {visibleStep === 3 && isHydrated && hasAssignmentContext && (
-                <ActivityContextSuggestion
-                  key={materialWorkspace}
-                  classId={classId}
-                  assignmentId={assignmentId}
-                  context={classroomContext}
-                  onChange={setClassroomContext}
-                  disabled={generationBusy}
-                />
-              )}
-
-              <label className="grid gap-2 text-sm font-semibold text-slate-700">
-                Classroom context (optional)
-                <textarea aria-label="Classroom context (optional)" maxLength={1200} rows={2} disabled={generationBusy}
-                  value={classroomContext} onChange={(event) => setClassroomContext(event.target.value)}
-                  placeholder="Grade, prior knowledge, familiar experiences and classroom constraints"
-                  className="rounded-xl border border-slate-200 px-3 py-2 font-normal text-slate-800" />
-                <span className="font-normal text-slate-500">Your saved class profile is included automatically when generating or revising materials. Add task-specific context here, including reported familiar activities if available; no survey results are assumed.</span>
-              </label>
+                <div className="grid gap-3">
+                  <label className="grid gap-2 text-sm font-semibold text-slate-700">Classroom context (optional)
+                    <textarea aria-label="Classroom context (optional)" maxLength={1200} rows={4} disabled={generationBusy} value={classroomContext} onChange={event => setClassroomContext(event.target.value)}
+                      placeholder="Prior knowledge, classroom needs and constraints" className="rounded-xl border border-line px-3 py-2 font-normal text-ink" />
+                    <span className="text-xs font-normal leading-relaxed text-mute">Your saved class profile and selected experience are included when generating or revising. Add any task-specific needs here.</span>
+                  </label>
+                  {visibleStep === 3 && isHydrated && hasAssignmentContext && <details className="rounded-lg border border-line p-3"><summary className="cursor-pointer text-sm font-semibold">Suggestions from reported experiences</summary>
+                    <ActivityContextSuggestion key={materialWorkspace} classId={classId} assignmentId={assignmentId} context={classroomContext} onChange={setClassroomContext} disabled={generationBusy} />
+                  </details>}
+                </div>
+              </div>
 
               {galleryCopyIds && galleryMediaError && <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-amber-800">
                 <p>{galleryMediaError}</p><button type="button" className="font-semibold underline" onClick={() => setGalleryMediaRetry(value => value + 1)}>Refresh saved videos</button>
@@ -2124,10 +2134,10 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                 </div>
                 <button type="button" onClick={generateMaterials} disabled={!canGenerateMaterials}
                   className="min-h-11 rounded-xl bg-[#BA0C2F] px-5 py-2 text-sm font-semibold text-white hover:bg-[#9a0a27] disabled:cursor-not-allowed disabled:bg-slate-300">
-                  {generationBusy ? "Generating materials..." : materialFormat === "slides" ? "Generate new slide deck" : "Generate new animated video"}
+                  {generationBusy ? "Working…" : materialFormat === "slides" ? "Generate new slide deck" : "Generate new animated video"}
                 </button>
               </div>
-              {generationBusy && <p role="status" className="text-sm text-mute">Creating a new material can take a few minutes, especially video. Text and images appear as they are ready.</p>}
+              {generationBusy && <p role="status" className="text-sm text-mute">Please wait for the current operation to finish. Progress appears below.</p>}
               {materialFormat === "slides" && !slidesAvailable && <p role="status" className="text-sm text-amber-800">Open a class task in GENIUS or My classes to generate slides.</p>}
               {materialFormat === "slides" && unsupportedSlideStrategies.length > 0 && <p role="status" className="text-sm text-amber-800">Slides do not yet support {unsupportedSlideStrategies.map(getStrategyLabel).join(", ")}. Change the strategy in Step 2, or choose Video.</p>}
               {(!selectedLesson || !selectedStrategies.length) && <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
@@ -2142,7 +2152,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                 {isHydrated && slidesAvailable && selectedLesson && slideStrategies.map((strategy) => (
                   <SlidesWorkspace key={`${classId}:${assignmentId}:${selectedLesson}:${strategy}`} user={user}
                     ref={(editor) => { slideEditorsRef.current[strategy] = editor; }}
-                    embeddedContext={{ lessonNumber: selectedLesson, strategy, classroomContext, focus: generationFocus(strategy) }}
+                    embeddedContext={{ lessonNumber: selectedLesson, strategy, classroomContext, teachingContext, focus: generationFocus(strategy) }}
                     onBusyChange={onSlideBusyChange} onReadyChange={onSlideReadyChange} onPublished={onSlidesPublished} />
                 ))}
               </div>
@@ -2310,6 +2320,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                               </div>}
                             {materialFormat === "video" && <VideoMaterialEditor item={item} videoUrl={videos[item.id]?.url} imageUrl={images[item.id]?.url}
                               disabled={isPublished || generationBusy || publishingContent} onChange={updated => setContent(previous => previous.map(value => value.id === updated.id ? updated : value))} />}
+                            {materialFormat === "video" && <SaveVideoMaterial key={item.id} scope={{ classId, assignmentId }} item={item} disabled={videos[item.id]?.status !== "ready" || generationBusy || publishingContent} />}
                             {materialFormat === "video" && selectedLesson && <ShareVideoMaterial scope={{ classId, assignmentId }} item={item} lessonNumber={item.lessonNumber ?? selectedLesson} focus={item.focus ? { misconceptions: item.focus.misconceptions ?? [], coreIdeas: item.focus.coreIdeas ?? [] } : undefined} videoUrl={videos[item.id]?.url} imageUrl={images[item.id]?.url}
                               disabled={videos[item.id]?.status !== "ready" || generationBusy} onShared={() => {}} />}
                             {item.activity ? <MaterialActivityView key={item.id} activity={item.activity} preview media={{ image: images[item.id]?.url, video: materialFormat === "video" ? videos[item.id]?.url : undefined }} /> : <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-600">{item.body}</p>}

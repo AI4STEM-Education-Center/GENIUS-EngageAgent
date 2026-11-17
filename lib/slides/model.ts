@@ -1,3 +1,5 @@
+import { slideVideo } from "./video";
+import type { MaterialTeachingContext } from "../material-teaching-context";
 import { analogyPlanErrors, type AnalogyPlan } from "./analogy";
 import { analogyStages, analogyVisualIds, analogyVisibleVisualIds, isAnalogyMethod, type AnalogyMethod } from "./analogy-methods";
 
@@ -27,14 +29,14 @@ export const VISUALS: Record<SlideStrategy, readonly string[]> = {
 export function methodVisualIds(strategy: SlideStrategy, method?: AnalogyMethod): readonly string[] {
   return strategy === "analogy" ? analogyVisualIds(method) : VISUALS[strategy];
 }
-export type TeachingSlide = { stage: string; title: string; body: string; task: string; teacherNotes: string[] };
+export type TeachingSlide = { stage: string; title: string; body: string; task: string; teacherNotes: string[]; videoUrl?: string };
 export type SlideVisual = { id: string; prompt: string; caption: string; alt: string };
 export type SlideDraft = { title: string; slides: TeachingSlide[]; visuals: SlideVisual[]; analogyPlan?: AnalogyPlan; analogyMethod?: AnalogyMethod };
 export type SlideAsset = { data: string; width: number; height: number; model?: string; sourcePrompt?: string; referenceData?: string };
 export type SlideCheck = { key: string; issues: string[]; model?: string; imageData?: string };
 export type SlideChecks = { text?: SlideCheck; images: Record<string, SlideCheck> };
-export type GalleryProvenance = { templateId: string; revision: number; title: string; mode: "use" | "adapt" };
-export type SlideDeck = { id: string; lessonNumber: number; strategy: SlideStrategy; focus?: Partial<StrategyFocus>; gallerySource?: GalleryProvenance; classroomContext?: string; draft: SlideDraft; assets: Record<string, SlideAsset>; modelSelection?: SlideModelSelection; textModel?: string; promptProvenance?: SlidePromptProvenance; checks?: SlideChecks; teacherDecision?: { reason: string; draftKey: string; checks: SlideChecks; assets: Record<string, SlideAsset> } };
+export type GalleryProvenance = { private?: true; templateId: string; revision: number; title: string; mode: "use" | "adapt" };
+export type SlideDeck = { libraryRevision?: number; teachingContext?: MaterialTeachingContext; id: string; lessonNumber: number; strategy: SlideStrategy; focus?: Partial<StrategyFocus>; gallerySource?: GalleryProvenance; classroomContext?: string; draft: SlideDraft; assets: Record<string, SlideAsset>; modelSelection?: SlideModelSelection; textModel?: string; promptProvenance?: SlidePromptProvenance; checks?: SlideChecks; teacherDecision?: { reason: string; draftKey: string; checks: SlideChecks; assets: Record<string, SlideAsset> } };
 export type SlideLesson = { lessonNumber: number; lessonTitle: string; learningObjective: string };
 
 export function isSlideStrategy(value: unknown): value is SlideStrategy {
@@ -94,7 +96,8 @@ export function draftErrors(value: unknown, strategy: SlideStrategy, editable = 
   if (!Array.isArray(value.slides) || value.slides.length !== count) errors.push(count === 5 ? "Deck: exactly five slides are required." : `Deck: exactly ${count} slides are required for this story and boundary decision.`);
   else value.slides.forEach((slide, index) => {
     const path = `Slide ${index + 1}`;
-    if (!object(slide, ["stage", "title", "body", "task", "teacherNotes"], path)) return;
+    if (!object(slide, ["stage", "title", "body", "task", "teacherNotes", "videoUrl"], path)) return;
+    if (slide.videoUrl !== undefined && !slideVideo(slide.videoUrl)) errors.push(`${path}.videoUrl: use a valid HTTPS video link.`);
     const allowedStages = shortExperience ? [experienceBridgingStages(false)[index]] : stageOptions(strategy, index, method, includeLimits);
     if (!allowedStages.includes(slide.stage as string)) errors.push(`${path}.stage: expected ${allowedStages.join(" or ")}.`);
     text(slide.title, `${path}.title`, 64, 10);

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { listMaterialGallery, copyGalleryMaterial, previewGalleryMaterial, refreshGalleryCopyMedia, saveGalleryCopy, loadSavedGalleryCopy, listSavedGalleryCopies } from "@/lib/material-gallery-client";
+import { listMaterialGallery, copyGalleryMaterial, previewGalleryMaterial, refreshGalleryCopyMedia, saveGalleryCopy, loadSavedGalleryCopy, listSavedGalleryCopies, createPrivateSlideCopy } from "@/lib/material-gallery-client";
 import { deckFixture, tinyImage } from "../fixtures/slides";
 import type { GalleryCopy } from "@/lib/material-gallery";
 import { createHash } from "node:crypto";
@@ -42,6 +42,23 @@ const attribution = { templateId: "source-template", revision: 1, title: "Source
 const saved = { copyId: "copy-id", revision: 1, savedAt: "2026-11-04T12:00:00Z", title: "Saved ball", format: "slides", lessonNumber: 3, strategy: "cognitive conflict", source: attribution };
 const reply = (data: unknown) => ({ ok: true, json: async () => data });
 const editableCopy = (): Extract<GalleryCopy, { format: "slides" }> => ({ format: "slides", source: attribution, deck: { ...deckFixture("cognitive conflict"), id: "copy-id", gallerySource: attribution } });
+
+it("normalizes a generated strategy's partial focus before creating a private receipt", async () => {
+  const deck = deckFixture("analogy"); deck.focus = { coreIdeas: [0] };
+  deck.classroomContext = "PRIVATE_TASK_CONTEXT";
+  deck.teachingContext = { gradeBand: "Middle school", experienceContext: "Compressing a spring" };
+  const source = { templateId: "private-source", revision: 1, title: deck.draft.title, mode: "use", private: true };
+  const fetch = vi.fn().mockImplementation(async (_url, init) => {
+    const body = JSON.parse(init.body);
+    return reply(body.action === "start-private-save" ? { id: "private-source" } : body.action === "commit-private-save" ? { copyId: "private-copy", source } : {});
+  });
+  vi.stubGlobal("fetch", fetch);
+  const copy = await createPrivateSlideCopy(scope, deck);
+  expect(JSON.parse(fetch.mock.calls[0][1].body).metadata).toMatchObject({ ...deck.teachingContext, focus: { coreIdeas: [0], misconceptions: [] } });
+  expect(JSON.stringify(fetch.mock.calls)).not.toContain("PRIVATE_TASK_CONTEXT");
+  expect(copy.deck).toMatchObject({ id: "private-copy", libraryRevision: 0, focus: { coreIdeas: [0] }, classroomContext: deck.classroomContext });
+  expect(deck.id).toBe("test-deck");
+});
 
 it("uploads a private slide snapshot in bounded parts before committing and passes the expected revision", async () => {
   const copy = editableCopy();

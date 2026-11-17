@@ -1,3 +1,4 @@
+import { parseTeachingContext, materialGenerationContext } from "@/lib/material-teaching-context";
 import { beginSlideJob } from "@/lib/slides/jobs";
 import { materialClassroomContext } from "@/lib/material-classroom-context";
 import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
@@ -22,7 +23,9 @@ export async function POST(request: Request) {
     const authorized = await authorizeMaterialLibrary(request, body);
     enterLessonScope(await loadTaskLessons(authorized, body.lessonNumber));
     const { lesson, strategy } = slideContext(body);
-    const taskContext = requestClassroomContext(body.classroomContext);
+    let settings;
+    try { settings = parseTeachingContext(body.teachingContext); } catch { throw new SlideRequestError("Choose valid teaching settings.", 422); }
+    const taskContext = materialGenerationContext(requestClassroomContext(body.classroomContext), settings);
     const focus = requestFocus(lesson.lessonNumber, strategy, body.focus);
     const draft = requestDraft(body.draft, strategy, true);
     const analogyMethod = requestAnalogyMethod(body.analogyMethod, strategy, draft);

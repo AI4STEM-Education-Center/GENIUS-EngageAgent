@@ -3,7 +3,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-const mocks = vi.hoisted(() => ({ session: vi.fn(), context: vi.fn(), media: vi.fn() }));
+const mocks = vi.hoisted(() => ({ session: vi.fn(), context: vi.fn(), media: vi.fn(), complete: vi.fn() }));
+vi.mock("openai", () => ({ default: class { chat = { completions: { create: mocks.complete } }; } }));
 vi.mock("@/lib/session", async original => ({ ...await original<object>(), sessionUser: mocks.session }));
 vi.mock("@/lib/workspace", async original => ({ ...await original<object>(), workspaceContext: mocks.context }));
 // Not about lessons: getLesson reads the lesson files here. See lesson-wiring.test.ts for the stored ones.
@@ -12,6 +13,7 @@ vi.mock("@/lib/nosql", () => ({ getMedia: mocks.media }));
 import { GET, POST } from "@/app/api/material-gallery/route";
 import { GET as mediaGET } from "@/app/api/material-gallery/media/route";
 import { resolveGalleryContentMedia } from "@/lib/material-gallery-server";
+import { POST as adaptVideo } from "@/app/api/material-gallery/adapt-video/route";
 import { deckFixture, tinyImage } from "../fixtures/slides";
 import { WorkspaceError } from "@/lib/workspace";
 
@@ -544,4 +546,86 @@ describe("teacher library outside classes and strict Step 3 recommendations", ()
     expect((await (await libraryGet({ gradeBand: "University" })).json()).items).toEqual([]);
     expect((await post(startBody({ metadata: { ...metadata, keywords: Array(13).fill("tag") } }))).status).toBe(422);
   });
+});
+
+it("saves a newly generated material privately without first sharing it, and keeps media and teaching settings across classes", async () => {
+  const id = await start({ action: "start-private-save", metadata: { title: "My private lesson", gradeBand: "Middle school" } });
+  expect((await post({ action: "commit-private-save", id })).status).toBe(422);
+  await upload(id);
+  const response = await post({ action: "commit-private-save", id });
+  expect(response.status).toBe(200);
+  const created = await response.json();
+  expect(created.source.private).toBe(true);
+  expect(await (await post({ action: "commit-private-save", id })).json()).toEqual(created);
+  expect((await post({ action: "commit-share", id })).status).toBe(422);
+  expect((await get({ id })).status).toBe(404);
+  expect((await (await get()).json()).items).toEqual([]);
+  const original = deckFixture("cognitive conflict");
+  const deck = { ...original, id: created.copyId, gallerySource: created.source, classroomContext: "PRIVATE_CLASS_CONTEXT",
+    teachingContext: { gradeBand: "Middle school", experienceContext: "Soccer", quizPattern: "55–70% correct" } };
+  deck.draft.slides[0].videoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+  const staged = await post({ action: "start-save", copyId: created.copyId, expectedRevision: 0, deck,
+    assets: { evidence: { width: 1, height: 1, digest: hash } } });
+  expect(staged.status).toBe(200);
+  const { saveId } = await staged.json();
+  await post({ action: "upload-copy-asset", copyId: created.copyId, saveId, visualId: "evidence", asset: { data: tinyImage, width: 1, height: 1 } });
+  expect((await post({ action: "commit-save", copyId: created.copyId, saveId })).status).toBe(200);
+  const reopenedResponse = await get({ action: "saved-copy", copyId: created.copyId }, { classId: "ea-class-other", assignmentId: "ea-task-other" });
+  expect(reopenedResponse.status).toBe(200);
+  const reopened = await reopenedResponse.json();
+  expect(reopened.copy.deck).toMatchObject({ teachingContext: deck.teachingContext, classroomContext: "PRIVATE_CLASS_CONTEXT", libraryRevision: 1 });
+  expect(reopened.copy.deck.draft.slides[0].videoUrl).toBe(deck.draft.slides[0].videoUrl);
+  expect((await (await get()).json()).items).toEqual([]);
+  mocks.session.mockResolvedValue({ ...teacher, geniusId: "another-teacher" });
+  expect((await get({ action: "saved-copy", copyId: created.copyId })).status).toBe(404);
+});
+
+it("carries current teaching choices into an adaptation without changing its public source", async () => {
+  const id = await share({ metadata: { ...metadata, focus: { misconceptions: ["a"], coreIdeas: [] } } });
+  const adaptation = { classroomContext: "Use short directions", teachingContext: { gradeBand: "Middle school", experienceContext: "Soccer" }, focus: { misconceptions: ["b"], coreIdeas: [] } };
+  const result = await post({ action: "copy", id, mode: "adapt", adaptation });
+  expect(result.status).toBe(200);
+  const copy = await result.json();
+  expect(copy.deck).toMatchObject({ classroomContext: adaptation.classroomContext, teachingContext: adaptation.teachingContext, focus: adaptation.focus });
+  const stage = await post({ action: "start-save", copyId: copy.copyId, expectedRevision: 0, deck: copy.deck, assets: { evidence: { width: 1, height: 1, digest: hash } } });
+  expect(stage.status).toBe(200);
+  expect((await (await get({ id })).json()).material.focus).toEqual({ misconceptions: ["a"], coreIdeas: [] });
+  expect(JSON.stringify(await (await get({ id })).json())).not.toContain("Use short directions");
+});
+
+it("saves generated video privately, adapts its text with authorized context and preserves the saved media", async () => {
+  vi.stubEnv("OPENAI_API_KEY", "test-key");
+  const item = { id: "generated-private-video", lessonNumber: 3, strategy: "cognitive conflict", type: "Video", title: "Contact", body: "Observe the ball during contact." };
+  mocks.media.mockImplementation(async (_c, _a, _s, id, kind) => id === item.id && kind === "video" ? {
+    class_id: scope.classId, assignment_id: scope.assignmentId, student_id: "cohort", content_item_id: id,
+    mime_type: "video/mp4", data_url: "data:video/mp4;base64,dmlkZW8=",
+  } : null);
+  const createdResponse = await post({ action: "save-private-video", item, lessonNumber: 3, metadata: { title: item.title } });
+  expect(createdResponse.status).toBe(200);
+  const created = await createdResponse.json();
+  expect(created.source.private).toBe(true);
+  expect((await (await get()).json()).items).toEqual([]);
+  const original = { ...item, id: `gallery-copy-${created.copyId}`, gallerySource: created.source };
+  const request = () => new Request(`${origin}/api/material-gallery/adapt-video`, { method: "POST", headers: { "Content-Type": "application/json", origin },
+    body: JSON.stringify({ library: true, copyId: created.copyId, item: original, classroomContext: "Use shorter sentences", teachingContext: { gradeBand: "Middle school" } }) });
+  mocks.complete.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ title: "Watch contact", body: "Watch the ball. What happens during contact?", visualBrief: "FORGED NEW SCENE" }) } }] });
+  const adapted = await adaptVideo(request());
+  expect(adapted.status).toBe(200);
+  const result = await adapted.json();
+  expect(result.item).toMatchObject({ id: original.id, title: "Watch contact", teachingContext: { gradeBand: "Middle school" }, classroomContext: "Use shorter sentences" });
+  expect(JSON.stringify(result)).not.toContain("FORGED NEW SCENE");
+  expect(mocks.complete.mock.calls[0][0].messages[1].content).toContain("Use shorter sentences");
+  const staged = await post({ action: "start-save", copyId: created.copyId, expectedRevision: 0, item: result.item });
+  expect(staged.status).toBe(200);
+  const { saveId } = await staged.json();
+  expect((await post({ action: "commit-save", copyId: created.copyId, saveId })).status).toBe(200);
+  const reopened = await (await get({ action: "saved-copy", copyId: created.copyId })).json();
+  expect(reopened.copy.item).toMatchObject(result.item);
+  const media = await mediaGET(new Request(`${origin}${reopened.copy.media.video}`));
+  expect(Buffer.from(await media.arrayBuffer()).toString()).toBe("video");
+  mocks.session.mockResolvedValue({ ...teacher, geniusId: "other-teacher" });
+  expect((await adaptVideo(request())).status).toBe(404);
+  mocks.session.mockResolvedValue({ ...teacher, role: "student" });
+  expect((await adaptVideo(request())).status).toBe(403);
+  expect(mocks.complete).toHaveBeenCalledOnce();
 });
