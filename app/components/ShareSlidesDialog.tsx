@@ -1,4 +1,7 @@
 "use client";
+import SharingPrivacyReview from "./SharingPrivacyReview";
+import ShareTagPreview, { shareContextDefault } from "./ShareTagPreview";
+import { GRADE_BANDS, QUIZ_BANDS, canonicalGrade } from "@/lib/material-teaching-context";
 
 import { useEffect, useRef, useState } from "react";
 import { LayoutGrid, LoaderCircle, X } from "lucide-react";
@@ -18,12 +21,13 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
   const [draft, setDraft] = useState(() => structuredClone(deck.draft));
   const [title, setTitle] = useState(deck.draft.title);
   const [description, setDescription] = useState("");
-  const [gradeBand, setGradeBand] = useState(deck.teachingContext?.gradeBand || "");
+  const [topic, setTopic] = useState(deck.generation?.tags.TOPIC || "");
+  const [gradeBand, setGradeBand] = useState(canonicalGrade(deck.teachingContext?.gradeBand || ""));
   const [experienceContext, setExperienceContext] = useState(deck.teachingContext?.experienceContext || "");
   const [quizPattern, setQuizPattern] = useState(deck.teachingContext?.quizPattern || "");
   const [includeNotes, setIncludeNotes] = useState(true);
-  const [teachingContext, setTeachingContext] = useState("");
-  const [classProfile, setClassProfile] = useState("");
+  const [teachingContext, setTeachingContext] = useState(shareContextDefault(deck.strategy, deck.teachingContext?.experienceContext));
+  const [classProfile, setClassProfile] = useState(deck.teachingContext?.gradeBand ? deck.teachingContext.gradeBand : "");
   const [keywords, setKeywords] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -46,10 +50,10 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
     try {
       // Context, review findings and provider prompts belong to the class draft.
       // The reusable source contains only the teacher-reviewed deck and assets.
-      const source: SlideDeck = { id: deck.id, lessonNumber: deck.lessonNumber, strategy: deck.strategy,
+      const source: SlideDeck = { id: deck.id, lessonNumber: deck.lessonNumber, strategy: deck.strategy, generation: deck.generation,
         draft: { ...draft, title: title.trim(), slides: draft.slides.map(slide => includeNotes ? slide : { ...slide, teacherNotes: [] }) }, assets: deck.assets, focus: deck.focus, ...(deck.gallerySource ? { gallerySource: deck.gallerySource } : {}) };
       const material = await shareSlideMaterial(scope, source, {
-        title: title.trim(), description: description.trim(), gradeBand: gradeBand.trim(),
+        title: title.trim(), topic: topic.trim(), description: description.trim(), gradeBand: gradeBand.trim(),
         experienceContext: experienceContext.trim(), quizPattern: quizPattern.trim(),
         teachingContext: teachingContext.trim(), classProfile: classProfile.trim(), keywords: keywords.split(",").map(tag => tag.trim()).filter(Boolean),
         ...(deck.focus ? { focus: { misconceptions: deck.strategy === "cognitive conflict" || deck.strategy === "engaged critiquing" ? deck.focus.misconceptions ?? [] : [], coreIdeas: deck.strategy === "analogy" || deck.strategy === "experience bridging" ? deck.focus.coreIdeas ?? [] : [] } } : {}),
@@ -72,12 +76,14 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
     </div>
     <fieldset disabled={busy} className="min-w-0 space-y-4 p-5">
       <label className="block text-sm font-semibold text-ink-2">Gallery title<input className={input} maxLength={80} value={title} onChange={event => { setTitle(event.target.value); setConfirmed(false); }} /></label>
+      <label className="block text-sm font-semibold text-ink-2">Topic<input className={input} maxLength={160} value={topic} placeholder="Defaults to this lesson’s topic" onChange={event => { setTopic(event.target.value); setConfirmed(false); }} /></label>
       <label className="block text-sm font-semibold text-ink-2">Description (optional)<textarea className={input} maxLength={800} rows={2} value={description} onChange={event => { setDescription(event.target.value); setConfirmed(false); }} /></label>
       <div className="grid gap-3 sm:grid-cols-3">
-        <label className="block text-sm font-semibold text-ink-2">Grade band (optional)<input className={input} maxLength={80} placeholder="e.g. Grades 7–8" value={gradeBand} onChange={event => { setGradeBand(event.target.value); setConfirmed(false); }} /></label>
+        <label className="block text-sm font-semibold text-ink-2">Grade band (optional)<select className={input} value={gradeBand} onChange={event => { setGradeBand(event.target.value); setConfirmed(false); }}><option value="">Not supplied</option>{gradeBand && !(GRADE_BANDS as readonly string[]).includes(gradeBand) && <option>{gradeBand}</option>}{GRADE_BANDS.map(value => <option key={value}>{value}</option>)}</select></label>
         <label className="block text-sm font-semibold text-ink-2">Experience context (optional)<input className={input} maxLength={160} placeholder="e.g. Soccer" value={experienceContext} onChange={event => { setExperienceContext(event.target.value); setConfirmed(false); }} /></label>
-        <label className="block text-sm font-semibold text-ink-2">Quiz pattern (optional)<input className={input} maxLength={160} placeholder="e.g. Force and damage" value={quizPattern} onChange={event => { setQuizPattern(event.target.value); setConfirmed(false); }} /></label>
+        <label className="block text-sm font-semibold text-ink-2">Quiz pattern (optional)<select className={input} value={quizPattern} onChange={event => { setQuizPattern(event.target.value); setConfirmed(false); }}><option value="">Not supplied</option>{quizPattern && !(QUIZ_BANDS as readonly string[]).includes(quizPattern) && <option>{quizPattern}</option>}{QUIZ_BANDS.map(value => <option key={value}>{value}</option>)}</select></label>
       </div>
+      <ShareTagPreview lessonNumber={deck.lessonNumber} strategy={deck.strategy} focus={deck.focus} grade={gradeBand} quiz={quizPattern} experience={experienceContext} format="slides" generation={deck.generation} />
       <details className="rounded-lg border border-line p-3">
         <summary className="cursor-pointer text-sm font-semibold">Teaching tags</summary>
         <p className="mt-2 text-xs text-mute">Lesson, learning objective, strategy, focus and material type are included automatically. Add reusable summaries below; these will be visible to other teachers and searchable in Gallery.</p>
@@ -87,6 +93,7 @@ export default function ShareSlidesDialog({ deck, scope, onClose, onShared }: Pr
           <label className="text-sm font-semibold">Class profile summary (optional)<input className={input} maxLength={200} placeholder="e.g. Introductory physics; visual and language supports" value={classProfile} onChange={event => { setClassProfile(event.target.value); setConfirmed(false); }} /></label>
         </div>
       </details>
+      <SharingPrivacyReview scope={scope} disabled={busy} value={{ title, description, experienceContext, teachingContext, classProfile, draft }} onApply={next => { setTitle(next.title); setDescription(next.description); setExperienceContext(next.experienceContext); setTeachingContext(next.teachingContext); setClassProfile(next.classProfile); setDraft(next.draft); setConfirmed(false); }} />
       <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={includeNotes} onChange={event => { setIncludeNotes(event.target.checked); setConfirmed(false); }} />Include teacher notes</label>
       <div className="rounded-lg border border-amber-200 bg-warn-light p-3 text-sm leading-relaxed text-warn">
         Classroom context is excluded. Review the slides, notes and images below and remove student names, counts, survey quotes and other class details. Changes here apply only to the Gallery copy.

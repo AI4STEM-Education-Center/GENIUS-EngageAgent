@@ -4,7 +4,7 @@ import { analogyActivity, conflictActivity, bridgingActivity, critiquingActivity
 
 const { complete, generate, edit } = vi.hoisted(() => ({ complete: vi.fn(), generate: vi.fn(), edit: vi.fn() }));
 vi.mock("openai", () => ({ default: class { chat = { completions: { create: complete } }; images = { generate, edit }; }, toFile: vi.fn(async () => "image-input") }));
-vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null) }));
+vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null), workspaceRequestUser: vi.fn(async () => ({ geniusId: "test-teacher", role: "teacher" })) }));
 vi.mock("@/lib/nosql", () => ({ getClassProfile: vi.fn(async () => null), listStudentAnswers: vi.fn(async () => []), getMedia: vi.fn(), upsertMedia: vi.fn() }));
 import { POST as content } from "@/app/api/engagement-content/route";
 import { POST as image } from "@/app/api/engagement-image/route";

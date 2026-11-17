@@ -43,8 +43,8 @@ async function taskData(scope: GalleryScope) {
 export const galleryFeedbackCache = () => new Map<string, Promise<TaskData>>();
 
 /** Ratings describe engagement (1–5), not achievement. Questions can only be
- * attributed where one material was published; multi-material activities are
- * excluded rather than crediting the same questions to every material. */
+ * attributed to the explicitly selected publication version. Legacy unbound
+ * questions count only when one material was published. */
 export async function galleryFeedback(templateId: string, cache = galleryFeedbackCache()): Promise<GalleryFeedback> {
   try {
     const uses = await workspaceQuery<Use>(partition(templateId), "USE#");
@@ -52,6 +52,8 @@ export async function galleryFeedback(templateId: string, cache = galleryFeedbac
     const questions = new Set<string>(), authors = new Set<string>(), activities = new Set<string>();
     const types: Record<string, number> = { Investigable: 0, "Explanation-seeking": 0, Clarifying: 0, "Off-topic": 0 };
     let analyzed = 0, attributableActivities = 0;
+    let firstPublicationAt: string | undefined, lastFeedbackAt: string | undefined;
+    const observe = (at: string) => { if (Number.isFinite(Date.parse(at)) && (!lastFeedbackAt || at > lastFeedbackAt)) lastFeedbackAt = at; };
     for (const use of uses) {
       const key = hash([use.classId, use.assignmentId]);
       let pending = cache.get(key); if (!pending) { pending = taskData(use); cache.set(key, pending); }
@@ -61,17 +63,24 @@ export async function galleryFeedback(templateId: string, cache = galleryFeedbac
       activities.add(key);
       // Do not carry a replaced version's responses into a new publication.
       const since = Date.parse(published.published_at || "");
+      if (Number.isFinite(since) && (!firstPublicationAt || published.published_at < firstPublicationAt)) firstPublicationAt = published.published_at;
       const current = (value: string) => Number.isFinite(since) && Date.parse(value) >= since;
       for (const row of task.ratings) {
         if (row.content_item_id !== use.contentItemId || !row.student_id || !Number.isInteger(row.rating) || row.rating < 1 || row.rating > 5 || !current(row.rated_at)) continue;
+        observe(row.rated_at);
         const previous = latestRatings.get(row.student_id);
         if (!previous || row.rated_at > previous.at) latestRatings.set(row.student_id, { rating: row.rating, at: row.rated_at });
       }
-      if (task.published.length !== 1) continue;
+      const attributableRows = task.questions.filter(row => current(row.submitted_at)).map(row => ({ ...row, questions: row.questions.filter((_, index) => {
+        const binding = row.questionMaterials?.[index];
+        return binding ? binding.contentItemId === use.contentItemId && binding.publishedAt === published.published_at : !row.questionMaterials && task.published.length === 1;
+      }) })).filter(row => row.questions.length);
+      if (!attributableRows.length && task.published.length !== 1) continue;
       attributableActivities++;
+      attributableRows.forEach(row => observe(row.submitted_at));
       const allQuestions = collectQuestions(task.questions, new Map());
       const validAnalysis = task.analysis?.version === QUESTION_ANALYSIS_VERSION && task.analysis.sourceKey === questionsSourceKey(allQuestions) ? task.analysis : null;
-      const currentQuestions = collectQuestions(task.questions.filter(row => current(row.submitted_at)), new Map());
+      const currentQuestions = collectQuestions(attributableRows, new Map());
       for (const question of currentQuestions) {
         const questionKey = `${key}:${question.id}`;
         if (questions.has(questionKey)) continue;
@@ -81,7 +90,7 @@ export async function galleryFeedback(templateId: string, cache = galleryFeedbac
       }
     }
     const ratings = [...latestRatings.values()].map(row => row.rating);
-    return { status: "available", ratingCount: ratings.length,
+    return { status: "available", observedAt: new Date().toISOString(), ...(firstPublicationAt ? { firstPublicationAt } : {}), ...(lastFeedbackAt ? { lastFeedbackAt } : {}), ratingCount: ratings.length,
       averageRating: ratings.length ? Math.round(ratings.reduce((a, b) => a + b, 0) / ratings.length * 10) / 10 : null,
       highRatingPercent: ratings.length ? Math.round(ratings.filter(value => value >= 4).length / ratings.length * 100) : null,
       activityCount: activities.size, questionCount: questions.size, questionAuthorCount: authors.size,

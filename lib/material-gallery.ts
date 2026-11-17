@@ -3,7 +3,7 @@ import type { MaterialAdaptation, MaterialTeachingContext } from "./material-tea
 import type { ContentItem } from "./types";
 
 export const GALLERY_TAG_LABELS: Record<string, string> = {
-  FOCUS_ITEMS: "Selected focus", GRADE_LEVEL: "Grade level", SUBJECT: "Subject", TOPIC: "Topic", LEARNING_OBJECTIVE: "Learning objective",
+  MODEL: "Generation model", INPUT_CAPTURED_AT: "Inputs captured", FOCUS_ITEMS: "Selected focus", GRADE_LEVEL: "Grade level", SUBJECT: "Subject", TOPIC: "Topic", LEARNING_OBJECTIVE: "Learning objective",
   TARGET_CONCEPT: "Target concept", CURRENT_UNDERSTANDING: "Prior understanding / quiz pattern",
   MISCONCEPTION_OR_GAP: "Misconception or gap", KNOWLEDGE_GAP: "Knowledge gap", TARGET_UNDERSTANDING: "Target understanding",
   SELECTED_STRATEGY: "Strategy", LEARNER_CONTEXT: "Teaching context", CLASS_PROFILE: "Class profile",
@@ -15,6 +15,7 @@ export type GalleryScope = { classId: string; assignmentId: string };
 export type GalleryFocus = { misconceptions: string[]; coreIdeas: number[] };
 export type GalleryProvenance = { private?: true; templateId: string; revision: number; title: string; mode: "use" | "adapt" };
 export type GalleryMetadata = {
+  topic?: string;
   title: string;
   description?: string;
   gradeBand?: string;
@@ -29,7 +30,7 @@ export type GalleryMetadata = {
   sharingConfirmed: true;
 };
 export type GalleryFeedback = { status: "unavailable" } | {
-  status: "available"; ratingCount: number; averageRating: number | null; highRatingPercent: number | null;
+  status: "available"; observedAt?: string; firstPublicationAt?: string; lastFeedbackAt?: string; ratingCount: number; averageRating: number | null; highRatingPercent: number | null;
   activityCount: number; questionCount: number; questionAuthorCount: number; attributableActivities: number;
   analyzedQuestionCount: number; questionTypes: Record<string, number>; scienceQuestionPercent: number | null;
 };
@@ -54,7 +55,12 @@ export type GalleryMaterial = {
   creatorName?: string;
   /** Distinct teachers who completed a private-copy save, not previews/opens. */
   teacherCount?: number;
+  generation?: import("./generation-record").GenerationRecord;
+  metadataOrigin?: "captured" | "teacher_confirmed" | "legacy";
+  metadataRevision?: number;
   promptTags?: Record<string, string>;
+  /** Original curriculum identity, independent of editable public topic labels. */
+  lessonIdentity?: { topic: string; learningObjective: string };
   matchReasons?: string[];
   matchTags?: { label: string; value: string; matched: boolean }[];
   feedback?: GalleryFeedback;

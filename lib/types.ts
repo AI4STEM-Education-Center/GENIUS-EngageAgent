@@ -18,10 +18,12 @@ export type TextMode = "questions" | "phenomenon" | "dialogue";
 
 export type ContentItem = {
   id: string;
+  publishedAt?: string;
   lessonNumber?: number;
   focus?: Partial<import("./strategy-focus").StrategyFocus>;
   gallerySource?: import("./material-gallery").GalleryProvenance;
   /** Private generation choices; projected out of student and public payloads. */
+  generation?: import("./generation-record").GenerationRecord;
   teachingContext?: import("./material-teaching-context").MaterialTeachingContext;
   classroomContext?: string;
   type: string;
@@ -152,6 +154,7 @@ export type ReviewQuestionRecord = {
   assignment_id: string;
   student_id: string;
   questions: string[];
+  questionMaterials?: ({ contentItemId: string; publishedAt: string } | null)[];
   submitted_at: string;
 };
 

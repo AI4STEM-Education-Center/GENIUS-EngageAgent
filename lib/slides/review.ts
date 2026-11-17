@@ -2,6 +2,7 @@ import type { ResponseFormatJSONSchema } from "openai/resources/shared";
 import type { SlideDraft } from "./model";
 import { analogyPlanFields, analogyStudentFields } from "./analogy";
 import { analogyMappingIndex } from "./analogy-methods";
+import { REVIEW_RUBRIC, type ReviewFinding } from "./review-rubric";
 
 export function reviewFields(draft: SlideDraft) {
   return [
@@ -23,7 +24,10 @@ export function textReviewFormat(draft: SlideDraft): ResponseFormatJSONSchema {
   const inquiryStrategy = draft.slides[1]?.stage === "prediction" || draft.slides[0]?.stage === "experience";
   const string = (maxLength: number) => ({ type: "string", minLength: 1, maxLength, pattern: "\\S" });
   return { type: "json_schema", json_schema: { name: "slide_content_findings", strict: true, schema: {
-    type: "object", additionalProperties: false, required: ["issues"], properties: {
+    type: "object", additionalProperties: false, required: ["issues", "rubric"], properties: {
+      rubric: { type: "array", minItems: 15, maxItems: 15, items: { type: "object", additionalProperties: false, required: ["id", "status", "reason"], properties: {
+        id: { type: "string", enum: REVIEW_RUBRIC.map(([id]) => id) }, status: { type: "string", enum: ["pass", "issue", "not_applicable", "needs_review"] }, reason: string(240),
+      } } },
       issues: { type: "array", maxItems: 5, items: {
         type: "object", additionalProperties: false, required: ["field", "quote", "problem", "correction"], properties: {
           field: { type: "string", enum: reviewFields(draft).map(field => field.id) },
@@ -34,6 +38,19 @@ export function textReviewFormat(draft: SlideDraft): ResponseFormatJSONSchema {
       } },
     },
   } } };
+}
+
+export function structuredTextFindings(value: unknown, draft: SlideDraft): ReviewFinding[] {
+  const messages = parseTextFindings(value, draft);
+  return (value as { field: string; quote: string }[]).map((finding, index) => {
+    let hash = 2166136261;
+    for (const c of messages[index]) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
+    const slide = /^slide-(\d+)-/u.exec(finding.field);
+    const visual = draft.visuals.find(v => finding.field.startsWith(`image-${v.id}-`));
+    const visualIndex = visual ? draft.slides.findIndex(s => s.stage === visual.id) : -1;
+    return { id: `${finding.field}:${(hash >>> 0).toString(16)}`, field: finding.field, message: messages[index],
+      ...(slide ? { slideIndex: Number(slide[1]) - 1 } : visualIndex >= 0 ? { slideIndex: visualIndex } : {}), ...(visual ? { visualId: visual.id } : {}) };
+  });
 }
 
 export function parseTextFindings(value: unknown, draft: SlideDraft): string[] {

@@ -1,3 +1,4 @@
+import { isGenerationRecord } from "../generation-record";
 import { slideVideo } from "./video";
 import type { SlideAsset, SlideDeck } from "./model";
 import { isSlideAsset } from "./model";
@@ -14,7 +15,7 @@ export async function decodeSlideAsset(asset: unknown): Promise<SlideAsset> {
   image.src = asset.data;
   await image.decode();
   if (!image.naturalWidth || image.naturalWidth > 4096 || image.naturalHeight > 4096) throw new Error("Invalid image dimensions.");
-  return { data: asset.data, width: image.naturalWidth, height: image.naturalHeight,
+  return { ...(isGenerationRecord(asset.generation) ? { generation: asset.generation } : {}), data: asset.data, width: image.naturalWidth, height: image.naturalHeight,
     ...(typeof asset.model === "string" && asset.model.length <= 120 ? { model: asset.model } : {}) };
 }
 

@@ -54,3 +54,13 @@ describe("Amplify production configuration preflight", () => {
     }
   });
 });
+
+it("keeps the context provider optional but rejects an incomplete or unsafe activation", () => {
+  expect(productionConfigErrors(ready)).toEqual([]);
+  expect(productionConfigErrors({ ...ready, GENIUS_CONTEXT_ENDPOINT: "https://genius.example.edu/context", GENIUS_CONTEXT_TOKEN: "test-token" })).toEqual([]);
+  for (const config of [
+    { GENIUS_CONTEXT_ENDPOINT: "https://genius.example.edu/context" },
+    { GENIUS_CONTEXT_ENDPOINT: "http://localhost:3245/context", GENIUS_CONTEXT_TOKEN: "test-token" },
+    { GENIUS_CONTEXT_ENDPOINT: "https://user:secret@genius.example.edu/context", GENIUS_CONTEXT_TOKEN: "test-token" },
+  ]) expect(productionConfigErrors({ ...ready, ...config }).join(" ")).toMatch(/GENIUS_CONTEXT/);
+});

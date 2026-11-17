@@ -75,7 +75,7 @@ it("revises exactly one page with a narrow schema and no larger generation budge
   mocks.complete.mockResolvedValue(completion({ slide }));
   const response = await POST(req({ ...base, operation: "review-slide", slideIndex: 4, draft, feedback: "Shorten the final task", focus: { misconceptions: ["a"] } }));
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ slide, slideIndex: 4, model: "gpt-6.1-sol" });
+  expect(await response.json()).toMatchObject({ slide, slideIndex: 4, model: "gpt-6.1-sol" });
   const params = mocks.complete.mock.calls[0][0];
   expect(params.text.format.name).toBe("single_slide_revision");
   expect(Object.keys(params.text.format.schema.properties)).toEqual(["slide"]);
@@ -437,7 +437,7 @@ describe("authorized slide APIs", () => {
     expect((await image(request)).status).toBe(200);
     expect(mocks.generate.mock.calls[0][0].tools[0]).toMatchObject({ model: imageModel, action: "generate", size: "1536x1024", quality: "high", output_format: "jpeg", output_compression: 85 });
     expect(mocks.generate.mock.calls[0][1].signal).toBe(request.signal);
-    expect(mocks.begin.mock.calls[0][3]).toEqual({ kind: "image", model: imageModel });
+    expect(mocks.begin.mock.calls[0][3]).toMatchObject({ kind: "image", model: imageModel });
   });
   it("rejects the retired project image default before paid submission while allowing an explicit supported choice", async () => {
     vi.stubEnv("OPENAI_IMAGE_MODEL", "gpt-image-1");

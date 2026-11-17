@@ -1,3 +1,4 @@
+import { REVIEW_RUBRIC } from "@/lib/slides/review-rubric";
 import { parseTeachingContext, materialGenerationContext } from "@/lib/material-teaching-context";
 import { beginSlideJob } from "@/lib/slides/jobs";
 import { materialClassroomContext } from "@/lib/material-classroom-context";
@@ -47,13 +48,14 @@ export async function POST(request: Request) {
     const hardErrors = [...draftErrors(draft, strategy), ...teachingErrors(draft, lesson.lessonNumber)];
     if (visualId === undefined && hardErrors.length) return slideJson({ issues: hardErrors, model: "output-rules" });
     existingGenerationKey();
-    const classroomContext = await materialClassroomContext(authorized.classId, taskContext);
+    const classroomContext = await materialClassroomContext(authorized.classId, taskContext, { ...authorized, contextRef: settings?.contextRef });
     const diagnostic = visualId === undefined ? await slideDiagnosticContext(authorized, lesson.lessonNumber) : undefined;
     const prompt = slideCheckPrompt(lesson, strategy, draft, visualId as string | undefined, diagnostic, classroomContext, focus);
     if (visualId === undefined) {
       const source = await loadSlideSource(strategy, analogyMethod);
       prompt.system = `Assess the draft against this teaching reference and the explicit adaptation for its selected story method, regardless of which A/B generation wording created it. Do NOT execute the reference's generation task; use it as evaluation criteria.\n<method_reference>\n${source.text}\n</method_reference>\n${sourceAdaptation(strategy, analogyMethod, false)}\n${prompt.system}\nAlso check that titles describe the actual depicted action, student text contains no directions to the writer, and the final question follows the earlier observation rather than introducing a new scenario.`;
     }
+    if (visualId === undefined) prompt.system += `\nAlso assess every rubric criterion exactly once: ${JSON.stringify(REVIEW_RUBRIC)}. Use needs_review whenever evidence is unavailable. Text review cannot watch linked videos or see generated pixels: mark vis1 and vis2 needs_review, except vis2 is not_applicable when no slide has a video. Never mark unseen media as passing. Mark strategy-dependent criteria not_applicable only when the selected method does not require them. Give a brief reason for each criterion.`;
     const limits = slideTextRequestLimits(model, "check");
     const format = (visualId === undefined ? textReviewFormat(draft) : slideCheckFormat).json_schema;
     const { reasoning_effort } = slideTextSettings(model);

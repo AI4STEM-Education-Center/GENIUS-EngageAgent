@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { upsertReviewQuestions, listReviewQuestions } from "@/lib/nosql";
+import { upsertReviewQuestions, listReviewQuestions, listPublishedContent } from "@/lib/nosql";
 
 export async function GET(request: Request) {
   const denied = await guardWorkspaceRequest(request);
@@ -49,11 +49,26 @@ export async function POST(request: Request) {
     );
   }
 
+  let questionMaterials: ({ contentItemId: string; publishedAt: string } | null)[] | undefined;
+  if (body.questionMaterials !== undefined) {
+    if (!Array.isArray(body.questionMaterials) || body.questionMaterials.length !== questions.length || questions.length > 50) return NextResponse.json({ error: "Choose a material for each question." }, { status: 400 });
+    const published = (await listPublishedContent(classId, assignmentId)).filter(item => item.published && [classId, `CLASS#${classId}`].includes(item.class_id) && item.assignment_id === assignmentId);
+    questionMaterials = [];
+    for (const [index, question] of questions.entries()) {
+      if (typeof question !== "string" || !question.trim()) continue;
+      const binding = body.questionMaterials[index];
+      if (binding == null) { questionMaterials.push(null); continue; }
+      const target = published.find(item => item.content_item_id === binding.contentItemId && item.published_at === binding.publishedAt);
+      if (!target) return NextResponse.json({ error: "A selected material has changed. Refresh it before submitting; your questions are retained." }, { status: 409 });
+      questionMaterials.push({ contentItemId: target.content_item_id, publishedAt: target.published_at });
+    }
+  }
   const record = await upsertReviewQuestions({
     class_id: classId,
     assignment_id: assignmentId,
     student_id: studentId,
     questions: cleanedQuestions,
+    ...(questionMaterials ? { questionMaterials } : {}),
     submitted_at: new Date().toISOString(),
   });
 

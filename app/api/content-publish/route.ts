@@ -27,7 +27,7 @@ const sanitizePublishedItem = (item: Record<string, unknown>) => {
       : {}),
   };
 
-  const rest = Object.fromEntries(Object.entries(item).filter(([key]) => !["media", "classroomContext", "teachingContext", "teacherNotes"].includes(key)));
+  const rest = Object.fromEntries(Object.entries(item).filter(([key]) => !["media", "classroomContext", "teachingContext", "teacherNotes", "generation"].includes(key)));
   return {
     ...rest,
     ...(Object.keys(sanitizedMedia).length > 0 ? { media: sanitizedMedia } : {}),

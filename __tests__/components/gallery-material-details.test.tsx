@@ -14,7 +14,7 @@ it("shows all seven prototype dimensions and keeps outcomes separate from genera
   expect(screen.getByText("★ 4.5/5 · 12 ratings")).toBeTruthy();
   expect(screen.getByText("Questions: 18 · 9 learners")).toBeTruthy();
   expect(screen.getByText(/Learning gain: not measured/)).toBeTruthy();
-  expect(screen.getByText(/Questions from activities with several materials are excluded/)).toBeTruthy();
+  expect(screen.getByText(/Questions are attributed to the material version selected by the learner/)).toBeTruthy();
 });
 it("does not present a data failure as a zero rating or invented learning result", () => {
   render(<GalleryMaterialDetails feedback={{ status: "unavailable" }} />);

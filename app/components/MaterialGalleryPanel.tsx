@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, LayoutGrid, LoaderCircle, Search, X } from "lucide-react";
 import { copyGalleryMaterial, listMaterialGallery, previewGalleryMaterial, previewGallerySlideDeck, unshareGalleryMaterial } from "@/lib/material-gallery-client";
 import type { GalleryCopy, GalleryFacets, GalleryFilters, GalleryMaterial, GalleryPreviewSource, GalleryScope } from "@/lib/material-gallery";
+import GalleryMetadataEditor from "./GalleryMetadataEditor";
 import GalleryMaterialDetails from "./GalleryMaterialDetails";
 import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
 import { loadTaskLesson } from "@/lib/lesson-client";
@@ -28,6 +29,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
   const [facets, setFacets] = useState<GalleryFacets>({ lessons: [], strategies: [] });
   const focusKey = focus ? JSON.stringify(focus) : undefined;
   const [items, setItems] = useState<GalleryMaterial[]>([]);
+  const [failedPreviews, setFailedPreviews] = useState<Record<string, string>>({});
   const [cursor, setCursor] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -39,6 +41,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
   const [previewItem, setPreviewItem] = useState<GalleryMaterial | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
+  const [editDetails, setEditDetails] = useState<GalleryMaterial | null>(null);
   const [removeTarget, setRemoveTarget] = useState<GalleryMaterial | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const request = useRef<AbortController | null>(null);
@@ -157,7 +160,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     {notice && <p role="status" className="mt-4 rounded-lg bg-ok-light p-3 text-sm text-ok">{notice}</p>}
     {!loading && !error && !items.length && <div className="py-8 text-center"><p className="font-semibold text-ink">No shared materials match yet</p><p className="mt-2 text-sm text-mute">{standalone ? "Try another filter or search. Materials shared by teachers will appear here." : "Try another filter, or generate a new material below. You can share it after reviewing."}</p></div>}
     <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4">{(recommendationsOnly ? items.slice(0, 3) : items).map(material => <article key={material.id} className="flex min-w-0 flex-col rounded-xl border border-line bg-white p-4">
-      {material.previewImage && <div className="mb-3 aspect-video max-h-40 overflow-hidden rounded-lg bg-canvas"><img src={material.previewImage} alt="" loading="lazy" className="h-full w-full object-contain" /></div>}
+      {material.previewImage && <div className="mb-3 aspect-video max-h-40 overflow-hidden rounded-lg bg-canvas">{failedPreviews[material.id] === material.previewImage ? <p className="flex h-full items-center justify-center text-xs text-mute">Preview image unavailable</p> : <img src={material.previewImage} alt="" loading="lazy" onError={() => setFailedPreviews(current => ({ ...current, [material.id]: material.previewImage! }))} className="h-full w-full object-contain" />}</div>}
       <div className="flex justify-between gap-2 text-xs text-mute"><span>{material.format === "slides" ? `${material.slideCount ?? ""} slides` : "Animated video"}</span>{material.isOwner && <span className="font-semibold">Shared by you</span>}</div>
       <h4 className="mt-3 text-lg font-bold text-ink">{material.title}</h4>
       <GalleryMaterialDetails {...material} compact={recommendationsOnly} />
@@ -170,9 +173,11 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
       </div>
       <div className="mt-auto flex flex-wrap gap-2 pt-3"><button type="button" className={primary} disabled={disabled || !!copying || (!standalone && material.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(material, standalone ? "adapt" : "use")}>{copying === material.id ? "Opening…" : standalone ? "Open" : "Use as is"}</button>{!standalone && <button type="button" className={button} disabled={disabled || !!copying || material.lessonNumber !== lessonNumber} onClick={() => void selectMaterial(material, "adapt")}>Adapt</button>}<button type="button" className={button} onClick={() => void openPreview(material)}>Preview</button></div>
       {!standalone && material.lessonNumber !== lessonNumber && <p className="mt-2 text-xs text-mute">Choose Lesson {material.lessonNumber} in Assessment to use this material.</p>}
+      {material.isOwner && <button type="button" className="mt-3 self-start text-xs font-semibold text-brand underline" disabled={!!copying} onClick={() => setEditDetails(material)}>Edit details</button>}
       {material.isOwner && <button type="button" className="mt-3 self-start text-xs font-semibold text-mute underline" disabled={!!copying} onClick={() => setRemoveTarget(material)}>Remove from Gallery</button>}
     </article>)}</div>
     {cursor && !recommendationsOnly && <button type="button" className={`${button} mt-4`} disabled={loading} onClick={() => void load(cursor)}>{loading ? "Loading…" : "Load more"}</button>}
+    {editDetails && <GalleryMetadataEditor material={editDetails} scope={scope} onClose={() => setEditDetails(null)} onSaved={value => { setItems(items => items.map(item => item.id === value.id ? value : item)); setEditDetails(null); setReload(n => n + 1); setNotice("Material details updated. Existing classroom copies are unchanged."); }} />}
     {removeTarget && <div role="alertdialog" aria-label="Remove shared material" className="mt-4 rounded-lg border border-warn bg-warn-light p-4 text-sm"><p>Remove “{removeTarget.title}” from the Gallery? Teachers who already copied it keep their copies.</p><div className="mt-3 flex gap-2"><button className={button} type="button" onClick={() => setRemoveTarget(null)}>Keep shared</button><button className={button} type="button" disabled={!!copying} onClick={() => void remove()}>Remove shared material</button></div></div>}
     <dialog ref={dialog} aria-label="Gallery material preview" onCancel={closePreview} className="fixed inset-0 m-auto max-h-[90vh] w-[94vw] max-w-3xl overflow-auto rounded-2xl border border-line bg-white p-6 backdrop:bg-ink/50">
       <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-mute">Gallery preview</p><h3 className="mt-1 text-xl font-bold">{previewItem?.title}</h3></div><button type="button" className={button} aria-label="Close Gallery preview" onClick={closePreview}><X size={18} /></button></div>

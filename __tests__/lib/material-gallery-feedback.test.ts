@@ -71,3 +71,12 @@ it("resolves ownership from saved receipts and treats read failures as unavailab
   mocks.ratings.mockRejectedValue(new Error("PRIVATE_STORAGE_ERROR"));
   expect(await galleryFeedback("template")).toEqual({ status: "unavailable" });
 });
+
+it("attributes multi-material questions only to their selected publication version", async () => {
+  await indexGalleryUse("template", scope, "slides-copy");
+  mocks.published.mockResolvedValue([publication(), publication("another")]);
+  mocks.questions.mockResolvedValue([{ ...row, student_id: "s1", submitted_at: at,
+    questions: ["Current question?", "Other material?", "Old version?", "Whole activity?"],
+    questionMaterials: [{ contentItemId: "slides-copy", publishedAt: since }, { contentItemId: "another", publishedAt: since }, { contentItemId: "slides-copy", publishedAt: "2026-11-15T00:00:00.000Z" }, null] }]);
+  expect(await galleryFeedback("template")).toMatchObject({ questionCount: 1, questionAuthorCount: 1, attributableActivities: 1, firstPublicationAt: since, lastFeedbackAt: at });
+});

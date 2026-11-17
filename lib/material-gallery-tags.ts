@@ -1,3 +1,4 @@
+import { canonicalGrade } from "./material-teaching-context";
 import { GALLERY_TAG_LABELS, type GalleryMaterial, type GalleryMetadata } from "./material-gallery";
 import { toMisconceptionIds } from "./misconceptions";
 import { getLesson } from "./quiz-data";
@@ -44,10 +45,16 @@ export function galleryPromptTags(lessonNumber: number, strategy: string, format
     .map(([key, value]) => [key, value.slice(0, 4000)]));
 }
 
+export function galleryLessonIdentity(tags?: Record<string, string>): GalleryMaterial["lessonIdentity"] {
+  return tags?.TOPIC && tags.LEARNING_OBJECTIVE ? { topic: tags.TOPIC, learningObjective: tags.LEARNING_OBJECTIVE } : undefined;
+}
+
 export function galleryMatches(material: GalleryMaterial, lesson: number, strategy: string, focus?: { misconceptions: string[]; coreIdeas: number[] }, contextTags?: Record<string, string>) {
   const reasons: string[] = [];
-  const sameLesson = material.lessonNumber === lesson && (!material.promptTags || !contextTags
-    || ["TOPIC", "LEARNING_OBJECTIVE"].every(key => material.promptTags?.[key] === contextTags[key]));
+  const identity = material.lessonIdentity || galleryLessonIdentity(material.generation?.tags) || galleryLessonIdentity(material.promptTags);
+  const sameLesson = material.lessonNumber === lesson && (!contextTags || (identity
+    ? identity.topic === contextTags.TOPIC && identity.learningObjective === contextTags.LEARNING_OBJECTIVE
+    : !material.promptTags));
   const sameStrategy = material.strategy === strategy;
   const overlappingFocus = sameLesson && material.focus && focus
     ? material.focus.misconceptions.filter(id => focus.misconceptions.includes(id)).length + material.focus.coreIdeas.filter(id => focus.coreIdeas.includes(id)).length : 0;
@@ -57,7 +64,7 @@ export function galleryMatches(material: GalleryMaterial, lesson: number, strate
     { label: "Lesson", value: `Lesson ${material.lessonNumber}`, matched: sameLesson },
     { label: "Strategy", value: getEngagementStrategyLabel(material.strategy), matched: sameStrategy },
     { label: "Focus", value: material.promptTags?.FOCUS_ITEMS || (material.focus ? [...material.focus.misconceptions.map(id => `Target ${id}`), ...material.focus.coreIdeas.map(i => `Core idea ${i + 1}`)].join(" · ") : "Not recorded"), matched: overlappingFocus > 0 },
-    { label: "Grade", value: material.gradeBand || "Not provided", matched: equal(material.gradeBand, contextTags?.GRADE_LEVEL) },
+    { label: "Grade", value: material.gradeBand || "Not provided", matched: equal(canonicalGrade(material.gradeBand), canonicalGrade(contextTags?.GRADE_LEVEL || "")) },
     { label: "Prior quiz", value: material.quizPattern || "Not recorded", matched: equal(material.quizPattern, contextTags?.CURRENT_UNDERSTANDING) },
     { label: "Experience", value: material.experienceContext || "Not provided", matched: equal(material.experienceContext, contextTags?.EXPERIENCE_CONTEXT) },
     { label: "Format", value: material.format === "video" ? "Animated video" : "Slide deck", matched: equal(material.format, contextTags?.FORMAT) },

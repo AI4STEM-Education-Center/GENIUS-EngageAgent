@@ -63,6 +63,9 @@ function ContentReview({
   const [error, setError] = useState<string | null>(null);
 
   const [submittedQuestions, setSubmittedQuestions] = useState<string[] | null>(null);
+  const [activeMaterialId, setActiveMaterialId] = useState("");
+  const [questionMaterialIds, setQuestionMaterialIds] = useState<string[]>([]);
+  const activeMaterial = contentItems.find(item => item.id === activeMaterialId) || contentItems[0];
   const [draftQuestions, setDraftQuestions] = useState<string[]>([""]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -264,13 +267,16 @@ function ContentReview({
 
   const updateDraftQuestion = (index: number, value: string) => {
     setDraftQuestions((prev) => prev.map((q, i) => (i === index ? value : q)));
+    setQuestionMaterialIds(prev => { const next = [...prev]; if (next[index] === undefined) next[index] = activeMaterial?.id || ""; return next; });
   };
 
   const addDraftQuestion = () => {
+    setQuestionMaterialIds(prev => [...Array.from({ length: draftQuestions.length }, (_, i) => prev[i] || ""), activeMaterial?.id || ""]);
     setDraftQuestions((prev) => [...prev, ""]);
   };
 
   const removeDraftQuestion = (index: number) => {
+    setQuestionMaterialIds(prev => prev.filter((_, i) => i !== index));
     setDraftQuestions((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
   };
 
@@ -295,6 +301,11 @@ function ContentReview({
           assignmentId,
           studentId: user.userId,
           questions: cleaned,
+          ...(contentItems.some(item => item.publishedAt) ? { questionMaterials: draftQuestions.flatMap((question, index) => {
+            if (!question.trim()) return [];
+            const item = contentItems.find(item => item.id === questionMaterialIds[index]);
+            return [item?.publishedAt ? { contentItemId: item.id, publishedAt: item.publishedAt } : null];
+          }) } : {}),
         }),
       });
 
@@ -418,7 +429,8 @@ function ContentReview({
         </button>
       </div>}
 
-      {contentItems.map((item) => {
+      {contentItems.length > 1 && <nav aria-label="Choose learning material" className="flex flex-wrap gap-2">{contentItems.map((item, index) => <button key={item.id} type="button" aria-pressed={activeMaterial?.id === item.id} onClick={() => setActiveMaterialId(item.id)} className={activeMaterial?.id === item.id ? primaryButton : secondaryButton}>{index + 1}. {item.title}</button>)}</nav>}
+      {contentItems.filter(item => item.id === activeMaterial?.id).map((item) => {
         const itemMedia = media[item.id];
         return <article key={item.id} aria-label={item.title} className={`${cardStyle} ${item.slides ? "!p-4" : ""}`}>
           {item.slides ? (
@@ -430,7 +442,7 @@ function ContentReview({
             <h3 className="mt-2 text-lg font-semibold text-ink">{item.title}</h3>
             {item.activity ? <MaterialActivityView activity={item.activity} media={itemMedia} questionInput={false}
               onVideoError={url => recoverVideo(item.id, url)}
-              predictionKey={`engage:material-prediction:${JSON.stringify([user.geniusId, classId, assignmentId, item.id])}`} /> : (
+              predictionKey={`engage:material-prediction:${JSON.stringify([user.geniusId, classId, assignmentId, item.id, ...(item.publishedAt ? [item.publishedAt] : [])])}`} /> : (
               <div className="mt-3 space-y-4">
                 {itemMedia?.image && <img src={itemMedia.image} alt={item.title} className="max-h-96 w-full rounded-lg border border-line object-contain" />}
                 {itemMedia?.video && <video src={itemMedia.video} aria-label={item.title} className="max-h-96 w-full rounded-lg border border-line" controls playsInline preload="metadata" onError={event => recoverVideo(item.id, event.currentTarget.getAttribute("src") ?? "")} />}
@@ -453,7 +465,8 @@ function ContentReview({
         ) : (
           <>
             <div className="mt-3 flex flex-col gap-3">
-              {draftQuestions.map((q, i) => <div key={i} className="flex items-start gap-2">
+              {draftQuestions.map((q, i) => <div key={i} className="flex flex-wrap items-start gap-2">
+                {contentItems.length > 1 && <label className="w-full text-xs text-mute">About<select aria-label={`Material for question ${i + 1}`} className="ml-2 rounded border border-line bg-white px-2 py-1" value={questionMaterialIds[i] ?? activeMaterial?.id ?? ""} onChange={event => setQuestionMaterialIds(prev => { const next = [...prev]; next[i] = event.target.value; return next; })}><option value="">Whole activity</option>{contentItems.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>}
                 <textarea
                   ref={i === 0 ? firstQuestion : undefined}
                   aria-label={`Question ${i + 1}`}

@@ -457,8 +457,7 @@ it.each([false, true])("recovers an early-expired video from the latest polled U
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   }
   const video = screen.getByLabelText(inquiry ? "Activity video" : "Recover video 0", { selector: "video" });
-  const working = screen.getByLabelText("Working video", { selector: "video" }) as HTMLVideoElement;
-  working.currentTime = 8;
+  expect(screen.queryByLabelText("Working video", { selector: "video" })).toBeNull();
   revision = 1; url = freshUrl;
   fireEvent.focus(window);
   await screen.findByRole("article", { name: "Recover video 1" });
@@ -467,9 +466,7 @@ it.each([false, true])("recovers an early-expired video from the latest polled U
   fireEvent.error(video);
   expect(video.getAttribute("src")).toBe(freshUrl);
   expect(fetchMock.mock.calls).toHaveLength(requestsBeforeError);
-  expect(screen.getByLabelText("Working video", { selector: "video" })).toBe(working);
-  expect(working.getAttribute("src")).toBe(workingUrl);
-  expect(working.currentTime).toBe(8);
+  expect(screen.queryByLabelText("Working video", { selector: "video" })).toBeNull();
   if (inquiry) {
     expect(screen.getByLabelText("Your prediction")).toHaveProperty("value", "My original prediction.");
     expect(screen.getByLabelText("Your prediction")).toHaveProperty("readOnly", true);
@@ -483,6 +480,8 @@ it.each([false, true])("recovers an early-expired video from the latest polled U
   fireEvent.focus(window);
   await screen.findByRole("article", { name: "Recover video 2" });
   expect(video.getAttribute("src")).toBe(freshUrl);
+  fireEvent.click(screen.getByRole("button", { name: /2.*Working video/ }));
+  expect(screen.getByLabelText("Working video", { selector: "video" }).getAttribute("src")).toBe(workingUrl);
 });
 
 it("replaces a failed URL on the next normal poll when no newer signature was cached", async () => {

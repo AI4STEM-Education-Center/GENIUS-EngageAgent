@@ -1,3 +1,6 @@
+import type { GenerationRecord } from "./generation-record";
+import { resolveGeneration } from "./generation-record-server";
+import { canonicalGrade } from "./material-teaching-context";
 import { parseTeachingContext, type MaterialTeachingContext } from "./material-teaching-context";
 import { galleryFeedback, galleryFeedbackCache, indexGalleryUse } from "./material-gallery-feedback";
 import { createHash, randomUUID } from "node:crypto";
@@ -8,7 +11,7 @@ import { enterLessonScope, loadTaskLessons } from "./lesson-scope";
 import { resolveStrategyFocus } from "./strategy-focus";
 import { getMedia } from "./nosql";
 import { parseMaterialActivity } from "./material-activities";
-import { galleryMatches, galleryPromptTags } from "./material-gallery-tags";
+import { galleryLessonIdentity, galleryMatches, galleryPromptTags } from "./material-gallery-tags";
 import { isSlideAsset, type SlideDraft } from "./slides/model";
 import type { ContentItem, TextMode } from "./types";
 import type { GalleryFilters, GalleryFocus, GalleryMaterial, GalleryMetadata, GalleryProvenance, GalleryScope, SavedGalleryCopySummary } from "./material-gallery";
@@ -18,8 +21,10 @@ const PARTITION = "MATERIAL_GALLERY#v1";
 const MAX_SOURCE_BYTES = 180_000;
 const MAX_IMAGE_BYTES = 4_350_000;
 const STAGING_SECONDS = 30 * 60;
-type AssetDescription = { width: number; height: number; digest: string };
+type AssetDescription = { generation?: GenerationRecord; width: number; height: number; digest: string };
 type Source = {
+  lessonIdentity?: GalleryMaterial["lessonIdentity"];
+  generation?: GenerationRecord; metadataRevision?: number; metadataOrigin?: "captured" | "teacher_confirmed" | "legacy";
   id: string; revision: 1; ownerId: string; createdAt: string; expiresAt: number;
   privateCopyId?: string; creatorName?: string; originMaterialId?: string; promptTags?: Record<string, string>;
   metadata: Omit<GalleryMetadata, "sharingConfirmed">;
@@ -31,6 +36,7 @@ type Source = {
 type LibraryContext = AuthorizedSlideContext & { storagePartition?: string };
 type Copy = { focus?: GalleryFocus; teachingContext?: MaterialTeachingContext; classroomContext?: string; deliveryOnly?: boolean; videoMedia?: Source["videoMedia"]; storagePartition?: string; id: string; ownerId: string; classId: string; assignmentId: string; templateId: string; source: GalleryProvenance; createdAt: string; saved?: SavedGalleryCopySummary & { snapshotId: string } };
 type CopySnapshot = {
+  generation?: GenerationRecord;
   id: string; copyId: string; expectedRevision: number; createdAt: string; expiresAt: number;
   format: "slides" | "video"; lessonNumber: number; strategy: string;
   draft?: SlideDraft; item?: ContentItem; classroomContext?: string; teachingContext?: MaterialTeachingContext;
@@ -66,7 +72,7 @@ function teachingSettings(value: unknown) {
 }
 function metadata(value: unknown, lessonNumber: number, strategy: string): Source["metadata"] {
   if (!record(value) || value.sharingConfirmed !== true) throw new SlideRequestError("Review the shared content and confirm that class details have been removed.", 422);
-  if (Object.keys(value).some(key => !["title", "description", "gradeBand", "experienceContext", "quizPattern", "teachingContext", "classProfile", "focus", "keywords", "sharingConfirmed"].includes(key))) throw new SlideRequestError("Unexpected sharing metadata.");
+  if (Object.keys(value).some(key => !["topic", "title", "description", "gradeBand", "experienceContext", "quizPattern", "teachingContext", "classProfile", "focus", "keywords", "sharingConfirmed"].includes(key))) throw new SlideRequestError("Unexpected sharing metadata.");
   if (value.keywords !== undefined && (!Array.isArray(value.keywords) || value.keywords.length > 12 || value.keywords.some(tag => typeof tag !== "string" || !tag.trim() || tag.length > 40 || /[\u0000-\u001f\u007f]/u.test(tag)))) throw new SlideRequestError("Use up to 12 keywords, each 1–40 characters.", 422);
   let focus: GalleryFocus | undefined;
   if (value.focus !== undefined) {
@@ -83,13 +89,26 @@ function metadata(value: unknown, lessonNumber: number, strategy: string): Sourc
   }
   return { title: text(value.title, "Title", 160, false), description: text(value.description, "Description", 1000),
     ...(Array.isArray(value.keywords) ? { keywords: [...new Set(value.keywords.map(tag => String(tag).trim()))] } : {}),
-    gradeBand: text(value.gradeBand, "Grade band", 80), experienceContext: text(value.experienceContext, "Experience context", 200),
+    topic: text(value.topic, "Topic", 160), gradeBand: canonicalGrade(text(value.gradeBand, "Grade band", 80)), experienceContext: text(value.experienceContext, "Experience context", 200),
     quizPattern: text(value.quizPattern, "Quiz pattern", 200),
     ...(value.teachingContext === undefined ? {} : { teachingContext: text(value.teachingContext, "Teaching context", 400) }),
     ...(value.classProfile === undefined ? {} : { classProfile: text(value.classProfile, "Class profile summary", 200) }), ...(focus ? { focus } : {}) };
 }
+function shareableGeneration(generation: GenerationRecord): GenerationRecord {
+  const tags = Object.fromEntries(Object.entries(generation.tags).filter(([key]) => !["EXPERIENCE_CONTEXT", "CURRENT_UNDERSTANDING", "LEARNER_CONTEXT", "CLASS_PROFILE"].includes(key)));
+  return { ...generation, tags };
+}
+function tagsFromGeneration(source: Source, fallback: Record<string, string>) {
+  if (!source.generation) return { ...fallback, ...(source.metadata.topic ? { TOPIC: source.metadata.topic } : {}) };
+  const tags = { ...fallback, ...shareableGeneration(source.generation).tags };
+  // Published suitability is explicitly reviewed and may differ from original inputs.
+  return { ...tags, ...(source.metadata.topic ? { TOPIC: source.metadata.topic } : {}), GRADE_LEVEL: source.metadata.gradeBand || tags.GRADE_LEVEL, EXPERIENCE_CONTEXT: source.metadata.experienceContext || "Not shared",
+    CURRENT_UNDERSTANDING: source.metadata.quizPattern || "Not shared", CLASS_PROFILE: source.metadata.classProfile || "Not shared", LEARNER_CONTEXT: source.metadata.teachingContext || "Not shared" };
+}
 function materialSummary(source: Source): Omit<GalleryMaterial, "isOwner"> {
   return { id: source.id, revision: source.revision, title: source.metadata.title,
+    ...(source.lessonIdentity ? { lessonIdentity: source.lessonIdentity } : {}),
+    ...(source.generation ? { generation: shareableGeneration(source.generation) } : {}), metadataOrigin: source.metadataOrigin || "legacy", metadataRevision: source.metadataRevision || 0,
     description: source.metadata.description || "", gradeBand: source.metadata.gradeBand || "", experienceContext: source.metadata.experienceContext || "",
     quizPattern: source.metadata.quizPattern || "", ...(source.metadata.focus ? { focus: source.metadata.focus } : {}),
     lessonNumber: source.lessonNumber, strategy: source.strategy, format: source.format, createdAt: source.createdAt,
@@ -134,6 +153,16 @@ function parseAssetDescriptions(value: unknown, draft: SlideDraft) {
     return [visual.id, { width: Number(a.width), height: Number(a.height), digest: a.digest }];
   }));
 }
+async function captureAssetGenerations(assets: Record<string, AssetDescription>, input: unknown, context: LibraryContext, source: Source, inherited?: Record<string, AssetDescription>) {
+  for (const [visualId, asset] of Object.entries(assets)) {
+    const value = record(input) && record(input[visualId]) ? input[visualId].generation : undefined;
+    const generation = await resolveGeneration(context.userId, value, source.lessonNumber, source.strategy, inherited?.[visualId]?.generation, "slides");
+    if (generation) {
+      if (!generation.operation.startsWith("image")) throw new SlideRequestError("Choose the generation record for this image.", 422);
+      asset.generation = generation;
+    }
+  }
+}
 function imageDimensions(bytes: Buffer, mime: string): { width: number; height: number } | null {
   if (mime === "image/png") return bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && bytes.toString("ascii", 12, 16) === "IHDR"
     ? { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) } : null;
@@ -174,7 +203,13 @@ async function startShare(body: Record<string, unknown>, context: LibraryContext
     ...(privateOnly ? { privateCopyId: randomUUID() } : {}),
     metadata: metadata(privateOnly && record(body.metadata) ? { ...body.metadata, sharingConfirmed: true } : body.metadata, Number(body.lessonNumber), strategy), format: "slides", lessonNumber: Number(body.lessonNumber), strategy,
     draft, assets, ...(derivedFrom ? { derivedFrom } : {}) });
-  source.promptTags = galleryPromptTags(source.lessonNumber, strategy, "slides", source.metadata, draft);
+  const generation = await resolveGeneration(context.userId, body.generation, source.lessonNumber, strategy, parent?.source.generation, "slides");
+  if (generation) source.generation = generation;
+  await captureAssetGenerations(source.assets, body.assets, context, source, parent?.source.assets);
+  source.metadataOrigin = source.generation ? "captured" : "teacher_confirmed";
+  const originalTags = galleryPromptTags(source.lessonNumber, strategy, "slides", source.metadata, draft);
+  source.lessonIdentity = galleryLessonIdentity(source.generation?.tags) || galleryLessonIdentity(originalTags);
+  source.promptTags = tagsFromGeneration(source, originalTags);
   boundedSource(source);
   assertGalleryStorage();
   await workspacePut([{ partition: PARTITION, key: sourceKey(source.id), value: source, createOnly: true, expiresAt: source.expiresAt }]);
@@ -307,14 +342,17 @@ async function shareVideo(body: Record<string, unknown>, context: LibraryContext
   const copyId = /^gallery-copy-([a-f0-9-]{36})$/iu.exec(item.id)?.[1];
   const parent = copyId ? await copiedSource(context, copyId) : undefined;
   const derivedFrom = parent && !parent.source.privateCopyId ? { templateId: parent.source.id, revision: parent.source.revision, title: parent.source.metadata.title } : undefined;
+  const generation = await resolveGeneration(context.userId, record(body.item) ? body.item.generation : undefined, Number(body.lessonNumber), item.strategy, parent?.source.generation, "video");
   const video = await savedVideoMedia(context, item, id, "video");
   const image = await savedVideoMedia(context, item, id, "image");
   const source: Source = boundedSource({ id, revision: 1, ownerId: context.userId, createdAt: new Date().toISOString(), expiresAt: Math.floor(Date.now() / 1000) + STAGING_SECONDS,
-    creatorName: creatorName(context), originMaterialId: item.id, ...(privateOnly ? { privateCopyId: randomUUID() } : {}),
+    creatorName: creatorName(context), ...(generation ? { generation } : {}), metadataOrigin: generation ? "captured" : "teacher_confirmed", originMaterialId: item.id, ...(privateOnly ? { privateCopyId: randomUUID() } : {}),
     promptTags: galleryPromptTags(Number(body.lessonNumber), item.strategy, "video", meta, undefined, item.textModes),
     metadata: meta, format: "video", lessonNumber: Number(body.lessonNumber), strategy: item.strategy,
     // The originating class/task/content identifiers never enter the shared template.
     item: { ...item, id: `gallery-${id}` }, assets: {}, videoMedia: { video: video!, ...(image ? { image } : {}) }, ...(derivedFrom ? { derivedFrom } : {}) });
+  source.lessonIdentity = galleryLessonIdentity(source.generation?.tags) || galleryLessonIdentity(source.promptTags);
+  source.promptTags = tagsFromGeneration(source, source.promptTags || {});
   await workspacePut([{ partition: PARTITION, key: sourceKey(id), value: source, createOnly: true, expiresAt: source.expiresAt }]);
   return privateOnly ? commitPrivate({ id }, context) : commitShare({ id }, context);
 }
@@ -358,10 +396,13 @@ async function startCopySave(body: Record<string, unknown>, context: LibraryCont
   const id = randomUUID();
   const snapshot: CopySnapshot = { id, copyId: copy.id, expectedRevision: Number(body.expectedRevision), createdAt: new Date().toISOString(),
     expiresAt: Math.floor(Date.now() / 1000) + STAGING_SECONDS, format: source.format, lessonNumber: source.lessonNumber, strategy: source.strategy, assets: {} };
+  const generation = await resolveGeneration(context.userId, value.generation, source.lessonNumber, source.strategy, source.generation, source.format);
+  if (generation) snapshot.generation = generation;
   if (source.format === "slides") {
     const draft = requestDraft(value.draft, slideContext(source).strategy, true);
     snapshot.draft = draft;
     snapshot.assets = parseAssetDescriptions(body.assets, draft);
+    await captureAssetGenerations(snapshot.assets, body.assets, context, source, source.assets);
     snapshot.classroomContext = text(value.classroomContext, "Classroom context", 1200);
     snapshot.teachingContext = teachingSettings(value.teachingContext) ?? {};
     for (const [visualId, description] of Object.entries(snapshot.assets)) {
@@ -467,6 +508,8 @@ export async function videoAdaptationInput(request: Request, body: Record<string
   }
   const item = { ...videoItem(current, source.lessonNumber), gallerySource: copy.source,
     classroomContext: text(body.classroomContext, "Classroom context", 1200), teachingContext: teachingSettings(body.teachingContext) };
+  const generation = await resolveGeneration(context.userId, current.generation, source.lessonNumber, source.strategy, source.generation, "video");
+  if (generation) item.generation = generation;
   return { context, item };
 }
 async function loadCopySave(context: LibraryContext, copyId: unknown) {
@@ -474,9 +517,9 @@ async function loadCopySave(context: LibraryContext, copyId: unknown) {
   const common = { source: copy.source };
   return { revision: pointer.revision, savedAt: pointer.savedAt,
     copy: snapshot.format === "slides" ? { ...common, format: "slides", deck: { id: copy.id, lessonNumber: source.lessonNumber, strategy: source.strategy,
-      draft: snapshot.draft, assets: {}, libraryRevision: pointer.revision, gallerySource: copy.source, classroomContext: snapshot.classroomContext, teachingContext: snapshot.teachingContext,
+      draft: snapshot.draft, ...(snapshot.generation ? { generation: snapshot.generation } : {}), assets: {}, libraryRevision: pointer.revision, gallerySource: copy.source, classroomContext: snapshot.classroomContext, teachingContext: snapshot.teachingContext,
       ...((copy.focus ?? source.metadata.focus) ? { focus: copy.focus ?? source.metadata.focus } : {}) } } : { ...common, format: "video", item: { ...snapshot.item,
-      gallerySource: copy.source, teachingContext: snapshot.teachingContext, classroomContext: snapshot.classroomContext }, media: await videoUrls(snapshot) },
+      gallerySource: copy.source, ...(snapshot.generation ? { generation: snapshot.generation } : {}), teachingContext: snapshot.teachingContext, classroomContext: snapshot.classroomContext }, media: await videoUrls(snapshot) },
     visualIds: Object.keys(snapshot.assets) };
 }
 async function savedCopyAsset(context: LibraryContext, params: URLSearchParams) {
@@ -491,7 +534,7 @@ async function savedCopyAsset(context: LibraryContext, params: URLSearchParams) 
   if (bytes.length > MAX_IMAGE_BYTES || digest(bytes) !== snapshot.assets[visualId].digest) throw new SlideRequestError("The saved image could not be verified.", 503);
   const description = snapshot.assets[visualId];
   return { asset: { data: `data:${asset.mime};base64,${bytes.toString("base64")}`, width: asset.width, height: asset.height,
-    ...(description.sourcePrompt === undefined ? {} : { sourcePrompt: description.sourcePrompt }) }, referenceDigest: description.referenceDigest };
+    ...(description.sourcePrompt === undefined ? {} : { sourcePrompt: description.sourcePrompt }), ...(description.generation ? { generation: description.generation } : {}) }, referenceDigest: description.referenceDigest };
 }
 async function copyMaterial(body: Record<string, unknown>, context: LibraryContext) {
   if (body.mode !== "use" && body.mode !== "adapt") throw new SlideRequestError("Choose use or adapt.");
@@ -517,10 +560,10 @@ async function copyMaterial(body: Record<string, unknown>, context: LibraryConte
     ...(context.classId && context.assignmentId ? [{ partition: legacyCopyPartition(context), key: `COPY#${copy.id}`, value: { ...copy, deliveryOnly: true }, createOnly: true }] : [])]);
   await indexGalleryUse(source.id, context, source.format === "slides" ? `slides-${copy.id}` : `gallery-copy-${copy.id}`);
   if (source.format === "slides") return { format: "slides", copyId: copy.id, source: copy.source,
-    deck: { id: copy.id, lessonNumber: source.lessonNumber, strategy: source.strategy, draft: source.draft, assets: {}, gallerySource: copy.source, classroomContext, teachingContext,
+    deck: { id: copy.id, lessonNumber: source.lessonNumber, strategy: source.strategy, draft: source.draft, ...(source.generation ? { generation: shareableGeneration(source.generation) } : {}), assets: {}, gallerySource: copy.source, classroomContext, teachingContext,
       ...(selectedFocus ? { focus: selectedFocus } : {}) }, visualIds: Object.keys(source.assets) };
   return { format: "video", copyId: copy.id, source: copy.source, item: { ...source.item, id: `gallery-copy-${copy.id}`, lessonNumber: source.lessonNumber,
-    ...(selectedFocus ? { focus: selectedFocus } : {}), gallerySource: copy.source, teachingContext, classroomContext }, media: await videoUrls(source) };
+    ...(selectedFocus ? { focus: selectedFocus } : {}), ...(source.generation ? { generation: shareableGeneration(source.generation) } : {}), gallerySource: copy.source, teachingContext, classroomContext }, media: await videoUrls(source) };
 }
 async function videoUrls(source: { videoMedia?: Source["videoMedia"] }) {
   if (!source.videoMedia) throw new SlideRequestError("Saved video is missing.", 503);
@@ -566,6 +609,31 @@ export async function resolveGalleryContentMedia(classId: string, assignmentId: 
 export async function galleryPost(request: Request, body: Record<string, unknown>) {
   const context = await authorizeMaterialLibrary(request, body);
   switch (body.action) {
+    case "update-metadata": {
+      const source = await ownedSource(body.id, context.userId);
+      if (!(await isShared(source.id))) throw new SlideRequestError("Choose a shared material.", 404);
+      if (body.expectedMetadataRevision !== (source.metadataRevision || 0)) throw new SlideRequestError("These details changed. Reopen them before saving.", 409);
+      enterLessonScope(await loadTaskLessons(context, source.lessonNumber));
+      if (!record(body.metadata) || body.metadata.sharingConfirmed !== true) throw new SlideRequestError("Review the public labels before saving.", 422);
+      const updated = metadata({ ...source.metadata, ...body.metadata }, source.lessonNumber, source.strategy);
+      if (source.metadata.focus && !sameFocus(updated.focus, source.metadata.focus)) throw new SlideRequestError("Keep this material's recorded focus.", 422);
+      const next: Source = { ...source, metadata: { ...source.metadata, ...updated }, creatorName: source.creatorName || creatorName(context),
+        lessonIdentity: source.lessonIdentity || galleryLessonIdentity(source.generation?.tags) || galleryLessonIdentity(source.promptTags),
+        metadataRevision: (source.metadataRevision || 0) + 1, metadataOrigin: source.generation ? "captured" : "teacher_confirmed" };
+      const rebuilt = galleryPromptTags(source.lessonNumber, source.strategy, source.format, next.metadata, source.draft, source.item?.textModes);
+      next.promptTags = tagsFromGeneration(next, { ...rebuilt, ...source.promptTags, GRADE_LEVEL: updated.gradeBand || "Not supplied", CURRENT_UNDERSTANDING: updated.quizPattern || "Not shared", LEARNER_CONTEXT: updated.teachingContext || "Not shared", CLASS_PROFILE: updated.classProfile || "Not shared", EXPERIENCE_CONTEXT: updated.experienceContext || "Not supplied", KEYWORDS: updated.keywords?.join(", ") || "" });
+      try {
+        await workspacePut([
+          { partition: PARTITION, key: `METADATA#${source.id}#${next.metadataRevision}`, createOnly: true, value: { before: source.metadata, after: next.metadata, updatedBy: context.userId, updatedAt: new Date().toISOString() } },
+          { partition: PARTITION, key: sourceKey(source.id), value: boundedSource(next) },
+          { partition: PARTITION, key: `SHARED#${source.id}`, value: { id: source.id, ownerId: source.ownerId, material: materialSummary(next) } },
+        ]);
+      } catch (error) {
+        if (await workspaceGet(PARTITION, `METADATA#${source.id}#${next.metadataRevision}`)) throw new SlideRequestError("These details changed. Reopen them before saving.", 409);
+        throw error;
+      }
+      return { material: { ...publicMaterial(next, context.userId), teacherCount: await teacherCount(source.id) } };
+    }
     case "save-private-video": return shareVideo(body, context, true);
     case "prepare-delivery": {
       const target = await authorizeSlides(request, body);
@@ -657,7 +725,7 @@ export async function galleryGet(request: Request) {
     if (!asset) throw new SlideRequestError("Gallery image not found.", 404);
     const bytes = await readGalleryBlob(asset);
     if (bytes.length > MAX_IMAGE_BYTES || digest(bytes) !== asset.digest) throw new SlideRequestError("The saved image could not be verified. Please try another material.", 503);
-    return { asset: { data: `data:${asset.mime};base64,${bytes.toString("base64")}`, width: asset.width, height: asset.height } };
+    return { asset: { data: `data:${asset.mime};base64,${bytes.toString("base64")}`, width: asset.width, height: asset.height, ...(source.assets[visualId].generation ? { generation: shareableGeneration(source.assets[visualId].generation!) } : {}) } };
   }
   if (params.has("id")) {
     const source = await sharedSource(params.get("id"));
@@ -695,7 +763,7 @@ export async function galleryGet(request: Request) {
   };
   if (recommendationTags) recommendationTags = { ...recommendationTags, ...recommendationSettings };
   if (params.has("format")) { if (!["slides", "video"].includes(params.get("format")!)) throw new SlideRequestError("Choose slides or video."); filters.format = params.get("format") as "slides" | "video"; }
-  const gradeBand = text(params.get("gradeBand") ?? undefined, "Grade band", 80).toLocaleLowerCase();
+  const gradeBand = canonicalGrade(text(params.get("gradeBand") ?? undefined, "Grade band", 80)).toLocaleLowerCase();
   const recommendedOnly = params.get("recommendedOnly") === "true";
   if (recommendedOnly && (!recommendLesson || !recommendStrategy || !filters.format)) throw new SlideRequestError("Choose a lesson, strategy and material type for recommendations.");
   const search = text(params.get("search") ?? undefined, "Search", 200).toLocaleLowerCase();
@@ -714,7 +782,7 @@ export async function galleryGet(request: Request) {
   const rank = (row: Shared) => galleryMatches({ ...row.material, isOwner: row.ownerId === context.userId }, recommendLesson, recommendStrategy, recommendFocus, recommendationTags);
   const orderKey = (row: Shared) => `${String(rank(row).score).padStart(2, "0")}|${row.material.createdAt}|${row.id}`;
   const matches = available.filter(row => (params.get("mine") !== "true" || row.ownerId === context.userId)
-    && (!gradeBand || row.material.gradeBand.toLocaleLowerCase() === gradeBand)
+    && (!gradeBand || canonicalGrade(row.material.gradeBand).toLocaleLowerCase() === gradeBand)
     && (!recommendedOnly || (!!recommendationTags && !!row.material.promptTags && rank(row).reasons.includes("Same lesson")
       && rank(row).reasons.includes("Same strategy") && (!recommendFocus || !(recommendFocus.misconceptions.length || recommendFocus.coreIdeas.length) || rank(row).reasons.includes("Same focus"))))
     && (!filters.lessonNumber || row.material.lessonNumber === filters.lessonNumber) && (!filters.strategy || row.material.strategy === filters.strategy)
@@ -733,6 +801,6 @@ export async function galleryGet(request: Request) {
       ...(image ? { previewImage: await galleryBlobUrl(image) } : {}),
       ...(recommendLesson || recommendStrategy ? { matchReasons: rank(row).reasons, matchTags: rank(row).tags } : {}) };
   })),
-    facets: { lessons: [...new Set(available.map(row => row.material.lessonNumber))].sort((a, b) => a - b), strategies: [...new Set(available.map(row => row.material.strategy))].sort(), grades: [...new Set(available.map(row => row.material.gradeBand).filter(Boolean))].sort() },
+    facets: { lessons: [...new Set(available.map(row => row.material.lessonNumber))].sort((a, b) => a - b), strategies: [...new Set(available.map(row => row.material.strategy))].sort(), grades: [...new Set(available.map(row => canonicalGrade(row.material.gradeBand)).filter(Boolean))].sort() },
     ...(!recommendedOnly && matches.length > limit && last ? { nextCursor: Buffer.from(JSON.stringify({ fingerprint, after: orderKey(last) })).toString("base64url") } : {}) };
 }

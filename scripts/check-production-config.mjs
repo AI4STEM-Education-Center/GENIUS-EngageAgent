@@ -10,6 +10,14 @@ export function productionConfigErrors(env) {
   if (value("OPENAI_IMAGE_MODEL") === "gpt-image-1") {
     errors.push("OPENAI_IMAGE_MODEL uses the retired gpt-image-1 model. Set it to gpt-image-2 or leave it unset to use the current default before deploying.");
   }
+  const contextEndpoint = value("GENIUS_CONTEXT_ENDPOINT"), contextToken = value("GENIUS_CONTEXT_TOKEN");
+  if (contextEndpoint || contextToken) {
+    try {
+      const url = new URL(contextEndpoint);
+      if (url.protocol !== "https:" || url.username || url.password || url.hash || ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error();
+    } catch { errors.push("GENIUS_CONTEXT_ENDPOINT must be a trusted HTTPS endpoint without credentials or a fragment."); }
+    if (!/^[A-Za-z0-9._~+/-]+=*$/u.test(contextToken)) errors.push("GENIUS_CONTEXT_TOKEN is required when enabling the GENIUS context adapter and must be a valid Bearer token.");
+  }
 
   const origins = {};
   for (const [name, fallback] of [

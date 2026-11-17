@@ -36,3 +36,9 @@ it("records the selected misconception parameters without adding unselected focu
   expect(tags.KNOWLEDGE_GAP).toBe(tags.MISCONCEPTION_OR_GAP);
   expect(tags.KNOWLEDGE_GAP).not.toContain("Same force always");
 });
+
+it("keeps recommendations tied to the original curriculum after a public topic label changes", () => {
+  const material = { lessonNumber: 3, strategy: "analogy", focus: { coreIdeas: [0], misconceptions: [] }, lessonIdentity: { topic: "Collisions", learningObjective: "Compare contact forces" }, promptTags: { TOPIC: "A more useful public label", LEARNING_OBJECTIVE: "Compare contact forces" } } as unknown as GalleryMaterial;
+  expect(galleryMatches(material, 3, "analogy", material.focus, { TOPIC: "Collisions", LEARNING_OBJECTIVE: "Compare contact forces" }).reasons).toEqual(["Same lesson", "Same strategy", "Same focus"]);
+  expect(galleryMatches(material, 3, "analogy", material.focus, { TOPIC: "Waves", LEARNING_OBJECTIVE: "Compare traveling waves" }).reasons).toEqual(["Same strategy"]);
+});

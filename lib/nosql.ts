@@ -94,6 +94,7 @@ type ReviewQuestionRecord = {
   assignment_id: string;
   student_id: string;
   questions: string[];
+  questionMaterials?: ({ contentItemId: string; publishedAt: string } | null)[];
   submitted_at: string;
 };
 
@@ -1732,6 +1733,7 @@ export const upsertReviewQuestions = async (
             [gsiStudentSkField]: `REVIEW_Q#ASSIGN#${input.assignment_id}`,
             assignment_id: input.assignment_id,
             questions: input.questions,
+            ...(input.questionMaterials ? { questionMaterials: input.questionMaterials } : {}),
             submitted_at: input.submitted_at,
           },
         }),
@@ -1799,6 +1801,7 @@ export const listReviewQuestions = async (
         assignment_id: (item.assignment_id as string) ?? assignmentId,
         student_id: toPlainStudentId(item.student_id as string),
         questions: (item.questions as string[]) ?? [],
+        ...(Array.isArray(item.questionMaterials) ? { questionMaterials: item.questionMaterials as ReviewQuestionRecord["questionMaterials"] } : {}),
         submitted_at: (item.submitted_at as string) ?? "",
       }));
   }

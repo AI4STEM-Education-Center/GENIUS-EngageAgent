@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { recordGeneration } from "@/lib/generation-record-server";
+import { parseTeachingContext } from "@/lib/material-teaching-context";
 import { isSlideAsset } from "@/lib/slides/model";
 import { resolveAnalogyMethod } from "@/lib/slides/analogy-methods";
 import { slideImagePrompt } from "@/lib/slides/prompts";
@@ -16,7 +19,7 @@ export async function POST(request: Request) {
     const body = await readSlideBody(request, 4_600_000);
     const authorized = await authorizeMaterialLibrary(request, body);
     enterLessonScope(await loadTaskLessons(authorized, body.lessonNumber));
-    const { strategy } = slideContext(body);
+    const { lesson, strategy } = slideContext(body);
     const draft = requestDraft(body.draft, strategy);
     requestAnalogyMethod(body.analogyMethod, strategy, draft);
     if (typeof body.visualId !== "string" || !draft.visuals.some(item => item.id === body.visualId)) throw new SlideRequestError("Unknown slide image.");
@@ -35,14 +38,17 @@ export async function POST(request: Request) {
     const model = resolveSlideModel("image", body.imageModel);
     const imageTool = { type: "image_generation" as const, model, size: "1536x1024" as const, quality: "high" as const,
       output_format: "jpeg" as const, output_compression: 85, action: reference ? "edit" as const : "generate" as const };
+    const imageInstructions = "Generate exactly one classroom image with the image generation tool. Preserve every scientific constraint, object, contact relationship, comparison and no-text requirement in the supplied image brief. Do not introduce another scene, explanation, label or decorative object. When a reference image is supplied, edit that image as directed while preserving the required apparatus and visual continuity. Return the image without a prose explanation.";
+    const imagePrompt = slideImagePrompt(draft, strategy, body.visualId, body.feedback as string | undefined);
+    const generation = await recordGeneration(authorized, { lessonNumber: lesson.lessonNumber, strategy, format: "slides", operation: body.feedback ? "image-revision" : "image", model, prompt: { system: imageInstructions, user: imagePrompt }, settings: parseTeachingContext(body.teachingContext), parentId: typeof body.generationId === "string" ? body.generationId : undefined, parameters: { visualId: body.visualId, tool: imageTool, orchestratorModel: "gpt-4.1", max_output_tokens: 2000, ...(reference ? { referenceSha256: createHash("sha256").update(Buffer.from(reference.split(",")[1], "base64")).digest("hex") } : {}) } });
     return await beginSlideJob(request, authorized, {
       model: "gpt-4.1",
-      instructions: "Generate exactly one classroom image with the image generation tool. Preserve every scientific constraint, object, contact relationship, comparison and no-text requirement in the supplied image brief. Do not introduce another scene, explanation, label or decorative object. When a reference image is supplied, edit that image as directed while preserving the required apparatus and visual continuity. Return the image without a prose explanation.",
+      instructions: imageInstructions,
       input: [{ role: "user", content: [
-        { type: "input_text", text: slideImagePrompt(draft, strategy, body.visualId, body.feedback as string | undefined) },
+        { type: "input_text", text: imagePrompt },
         ...(reference ? [{ type: "input_image" as const, image_url: reference, detail: "high" as const }] : []),
       ] }],
       tools: [imageTool], tool_choice: { type: "image_generation" }, max_output_tokens: 2000,
-    }, { kind: "image", model });
+    }, { kind: "image", model, generation });
   } catch (error) { return slideFailure(error); }
 }

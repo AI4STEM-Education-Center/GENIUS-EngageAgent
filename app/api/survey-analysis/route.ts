@@ -1,5 +1,6 @@
+import { readClassroomContext } from "@/lib/classroom-context-server";
 import { NextResponse } from "next/server";
-import { guardWorkspaceRequest } from "@/lib/workspace-access";
+import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";
 import { getTaskInterests } from "@/lib/task-interests";
 
 /**
@@ -29,6 +30,12 @@ export async function GET(request: Request) {
   }
 
   try {
+    if (process.env.GENIUS_CONTEXT_ENDPOINT) {
+      const user = await workspaceRequestUser(request);
+      if (!user) return NextResponse.json({ error: "Sign in to view class information." }, { status: 401 });
+      const context = await readClassroomContext({ userId: user.geniusId, classId, assignmentId });
+      return NextResponse.json({ interests: context.experiences.value || null, source: context.experiences }, { headers: { "Cache-Control": "no-store" } });
+    }
     const interests = await getTaskInterests(classId, assignmentId);
     return NextResponse.json({ interests }, { headers: { "Cache-Control": "no-store" } });
   } catch {

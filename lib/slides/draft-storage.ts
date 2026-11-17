@@ -1,3 +1,5 @@
+import { parseRubric, type ReviewFinding } from "./review-rubric";
+import { isGenerationRecord } from "../generation-record";
 import { parseTeachingContext } from "../material-teaching-context";
 import { isSlideAsset, parseDraft, type SlideCheck, type SlideDeck, type SlideDraft, type SlideStrategy } from "./model";
 import { isSlidePromptVersion, type SlidePromptProvenance } from "./prompt-versions";
@@ -59,7 +61,10 @@ function check(value: unknown): SlideCheck | undefined {
   if (!record(value) || !shortText(value.key, 25_000_000) || !Array.isArray(value.issues) || value.issues.length > 50
     || !value.issues.every(issue => shortText(issue, 4000)) || (value.model !== undefined && !shortText(value.model, 160))
     || (value.imageData !== undefined && !shortText(value.imageData, 12_000_000))) return;
-  return { key: value.key, issues: value.issues as string[], ...(typeof value.model === "string" ? { model: value.model } : {}),
+  let rubric;
+  try { rubric = parseRubric(value.rubric); } catch { return; }
+  const findings = Array.isArray(value.findings) && value.findings.length <= 50 && value.findings.every(f => record(f) && shortText(f.id, 160) && shortText(f.field, 160) && shortText(f.message, 4000) && (f.slideIndex === undefined || Number.isSafeInteger(f.slideIndex) && Number(f.slideIndex) >= 0) && (f.visualId === undefined || shortText(f.visualId, 160))) ? value.findings as ReviewFinding[] : undefined;
+  return { key: value.key, issues: value.issues as string[], ...(rubric ? { rubric } : {}), ...(findings ? { findings } : {}), ...(typeof value.model === "string" ? { model: value.model } : {}),
     ...(typeof value.imageData === "string" ? { imageData: value.imageData } : {}) };
 }
 
@@ -79,6 +84,7 @@ export function restoreSlideDraft(value: unknown, scope: SlideDraftScope): Slide
   }));
   const deck: SlideDeck = { id: saved.id, lessonNumber: scope.lessonNumber, strategy: scope.strategy, draft, assets };
   if (Number.isSafeInteger(saved.libraryRevision) && Number(saved.libraryRevision) >= 0) deck.libraryRevision = Number(saved.libraryRevision);
+  if (isGenerationRecord(saved.generation)) deck.generation = saved.generation;
   if (saved.teachingContext !== undefined) deck.teachingContext = parseTeachingContext(saved.teachingContext);
   if (saved.focus !== undefined && saved.focus !== null) {
     resolveStrategyFocus(scope.lessonNumber, scope.strategy, saved.focus);

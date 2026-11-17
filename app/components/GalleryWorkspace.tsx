@@ -279,7 +279,7 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
         incomingDeck={editor.copy.deck} adaptation={editor.copy.adaptation} incomingDeckSaved={editor.revision > 0} draftNamespace={`gallery:${activeId}`} compactEditor
         onSaveDraft={saveSlides} onDraftChange={changedSlides} onRequestSend={deck => { changedSlides(deck); setSending(true); }} onBusyChange={onSlideBusy} onPublished={onPublished} /></fieldset>
         : <article className="rounded-xl border border-line bg-white p-5">
-          <h2 className="text-xl font-bold">{editor.copy.item.title}</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-bold">{editor.copy.item.title}</h2><a className={button} href={`/api/download?${new URLSearchParams({ url: editor.copy.media.video, filename: "EngageAgent-video.mp4" })}`} download="EngageAgent-video.mp4">Download video</a></div>
           <div className="my-4 flex flex-wrap gap-2">
             <VideoMaterialEditor item={editor.copy.item} videoUrl={editor.copy.media.video} imageUrl={editor.copy.media.image} disabled={disabled} draftOnly onEditingChange={onVideoEditingChange}
               onChange={changedVideo} />
