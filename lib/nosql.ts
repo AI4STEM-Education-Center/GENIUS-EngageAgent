@@ -87,6 +87,7 @@ type ContentRatingRecord = {
   content_item_id: string;
   rating: number;
   rated_at: string;
+  published_at?: string;
 };
 
 type ReviewQuestionRecord = {
@@ -1686,6 +1687,7 @@ export const upsertContentRating = async (
             content_item_id: input.content_item_id,
             rating: input.rating,
             rated_at: input.rated_at,
+            ...(input.published_at ? { published_at: input.published_at } : {}),
           },
         }),
       );
@@ -2197,6 +2199,7 @@ export const listAllContentRatings = async (): Promise<ContentRatingRecord[]> =>
       content_item_id: (item.content_item_id as string) ?? "",
       rating: (item.rating as number) ?? 0,
       rated_at: (item.rated_at as string) ?? "",
+      ...(typeof item.published_at === "string" ? { published_at: item.published_at } : {}),
     }));
   }
   const store = await loadStore();
@@ -2245,6 +2248,7 @@ export const listContentRatings = async (
         content_item_id: (item.content_item_id as string) ?? "",
         rating: (item.rating as number) ?? 0,
         rated_at: (item.rated_at as string) ?? "",
+        ...(typeof item.published_at === "string" ? { published_at: item.published_at } : {}),
       }));
   }
 

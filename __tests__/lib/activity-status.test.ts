@@ -65,3 +65,12 @@ it.each(["draft", "scheduled", "closed"])("does not block a submitted quiz for a
   expect((await computeActivityStatuses("class", "task", "student")).assessment).toBe("completed");
   expect(store.listSurveyResponses).not.toHaveBeenCalled();
 });
+
+it("reopens completion for a new version of an already-rated material", async () => {
+  const published_at = "2026-11-17T13:00:00.000Z";
+  store.listPublishedContent.mockResolvedValue([{ content_item_id: "deck-a", published_at }]);
+  store.listContentRatings.mockResolvedValue([{ content_item_id: "deck-a", published_at: "2026-11-17T12:00:00.000Z", rated_at: "2026-11-17T14:00:00.000Z" }]);
+  expect((await computeActivityStatuses("class", "task", "student"))["content-rating"]).toBe("available");
+  store.listContentRatings.mockResolvedValue([{ content_item_id: "deck-a", published_at }]);
+  expect((await computeActivityStatuses("class", "task", "student"))["content-rating"]).toBe("completed");
+});

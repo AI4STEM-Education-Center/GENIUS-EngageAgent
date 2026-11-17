@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   const denied = await guardWorkspaceRequest(request);
   if (denied) return denied;
   const body = await request.json();
-  const { classId, assignmentId, studentId, contentItemId, rating } = body;
+  const { classId, assignmentId, studentId, contentItemId, rating, publishedAt } = body;
 
   if (!classId || !assignmentId || !studentId || !contentItemId || rating == null) {
     return NextResponse.json(
@@ -45,8 +45,13 @@ export async function POST(request: Request) {
   }
 
   const published = await listPublishedContent(classId, assignmentId);
-  if (!published.some(item => item.content_item_id === contentItemId)) {
+  const target = published.find(item => item.content_item_id === contentItemId && item.published
+    && [classId, `CLASS#${classId}`].includes(item.class_id) && item.assignment_id === assignmentId);
+  if (!target) {
     return NextResponse.json({ error: "Choose material published in this assignment." }, { status: 404 });
+  }
+  if (publishedAt !== undefined && publishedAt !== target.published_at) {
+    return NextResponse.json({ error: "This material has changed. Read the current version before rating it." }, { status: 409 });
   }
 
   const record = await upsertContentRating({
@@ -55,6 +60,7 @@ export async function POST(request: Request) {
     student_id: studentId,
     content_item_id: contentItemId,
     rating,
+    published_at: target.published_at,
     rated_at: new Date().toISOString(),
   });
 

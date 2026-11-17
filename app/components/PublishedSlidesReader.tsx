@@ -16,6 +16,8 @@ type Props = {
   audience: "teacher" | "student";
   onQuestion?: () => void;
   learnerId?: string;
+  initialPosition?: number;
+  onPositionChange?: (position: number) => void;
 };
 
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-[9px] border border-line bg-white px-3.5 py-2 text-sm font-semibold text-ink transition hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-45";
@@ -33,7 +35,7 @@ function SlideText({ elements }: { elements: SlideElement[] }) {
   </section>;
 }
 
-function Reader({ classId, assignmentId, publicationId, audience, onQuestion, learnerId }: Props) {
+function Reader({ classId, assignmentId, publicationId, audience, onQuestion, learnerId, initialPosition = 0, onPositionChange }: Props) {
   const predictionKey = audience === "student" && learnerId
     ? `engage:slide-prediction:${JSON.stringify([learnerId, classId, assignmentId, publicationId])}` : null;
   const [initialPrediction] = useState(() => {
@@ -48,7 +50,7 @@ function Reader({ classId, assignmentId, publicationId, audience, onQuestion, le
   const [publication, setPublication] = useState<PublishedSlideResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useState(Math.max(0, Math.floor(initialPosition)));
   const [prediction, setPrediction] = useState(initialPrediction.draft);
   const [recordedPrediction, setRecordedPrediction] = useState(initialPrediction.recorded);
   const [expanded, setExpanded] = useState(false);
@@ -59,6 +61,11 @@ function Reader({ classId, assignmentId, publicationId, audience, onQuestion, le
   const questionRequested = useRef(false);
   const refresh = useRef<() => void>(() => {});
   const lastImageRefresh = useRef(-Infinity);
+
+  useEffect(() => { onPositionChange?.(index); }, [index, onPositionChange]);
+  useEffect(() => {
+    if (publication) setIndex(current => Math.min(current, Math.max(0, publication.manifest.pages.length - 1)));
+  }, [publication]);
 
   useEffect(() => {
     if (!predictionKey) return;

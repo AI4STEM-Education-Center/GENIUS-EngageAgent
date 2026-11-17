@@ -15,9 +15,10 @@ export default function MaterialExperiencePicker(props: Props) {
   const request = useRef<AbortController | null>(null);
   const scope = JSON.stringify([props.classId, props.assignmentId, props.lessonNumber, props.strategy, props.focus, props.contextRef, props.interests?.analyzedAt]);
   const autoScope = useRef("");
-  useEffect(() => { setSuggestions(null); setError(""); setBusy(false); autoScope.current = ""; return () => request.current?.abort(); }, [scope]);
+  useEffect(() => { setSuggestions(null); setError(""); setBusy(false); autoScope.current = ""; return () => { request.current?.abort(); request.current = null; }; }, [scope]);
   async function suggest(refresh = false) {
     request.current?.abort(); const controller = new AbortController(); request.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 30_000);
     setBusy(true); setError("");
     try {
       const response = await fetch("/api/material-experiences", { method: "POST", headers: { "Content-Type": "application/json", ...scopedClientAuthHeaders(props) },
@@ -25,8 +26,10 @@ export default function MaterialExperiencePicker(props: Props) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Suggestions could not load. Try again.");
       if (!controller.signal.aborted) setSuggestions(data);
-    } catch (error) { if (!controller.signal.aborted) setError(error instanceof Error ? error.message : "Suggestions could not load."); }
-    finally { if (!controller.signal.aborted) setBusy(false); }
+    } catch (error) { if (request.current === controller) setError(controller.signal.aborted
+      ? "Suggestions took too long. Try again, choose a reported experience, or write your own."
+      : error instanceof Error ? error.message : "Suggestions could not load."); }
+    finally { clearTimeout(timeout); if (request.current === controller) { request.current = null; setBusy(false); } }
   }
   useEffect(() => {
     if (!props.interests?.activities.length || props.disabled || autoScope.current === scope) return;
@@ -36,7 +39,7 @@ export default function MaterialExperiencePicker(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, props.disabled, props.interests?.activities.length]);
   const choice = (activity: string, count?: number, reason?: string, weak?: boolean) => <button key={activity} type="button" aria-pressed={props.value === activity}
-    disabled={props.disabled || busy} onClick={() => props.onChange(props.value === activity ? "" : activity, count === undefined ? "ai_suggested" : "reported")} title={reason}
+    disabled={props.disabled} onClick={() => props.onChange(props.value === activity ? "" : activity, count === undefined ? "ai_suggested" : "reported")} title={reason}
     className={`rounded-lg border px-3 py-2 text-sm ${props.value === activity ? "border-ai bg-ai text-white" : "border-line bg-white text-ink hover:bg-canvas"}`}>
     {activity}{count !== undefined && <span className="ml-2 opacity-70">{count}</span>}{weak && <span className="ml-2 rounded bg-warn-light px-1 text-xs text-warn">weak fit</span>}</button>;
   const selectedReason = suggestions?.suggestions.find(item => item.activity === props.value)?.reason || suggestions?.fit.find(item => item.activity === props.value)?.reason;
@@ -55,7 +58,7 @@ export default function MaterialExperiencePicker(props: Props) {
     {suggestions && <div className="mt-2 flex flex-wrap gap-2">{suggestions.suggestions.map(item => choice(item.activity, undefined, item.reason))}</div>}
     {selectedReason && <p className="mt-2 text-sm text-mute">{selectedReason}</p>}
     {error && <p role="alert" className="mt-2 text-sm text-bad">{error}</p>}
-    <label className="mt-4 block text-sm font-semibold">Write your own<input aria-label="Familiar experience" value={props.value} maxLength={160} disabled={props.disabled || busy} onChange={event => props.onChange(event.target.value, "teacher_entered")}
+    <label className="mt-4 block text-sm font-semibold">Write your own<input aria-label="Familiar experience" value={props.value} maxLength={160} disabled={props.disabled} onChange={event => props.onChange(event.target.value, "teacher_entered")}
       placeholder="e.g. a ball bouncing off a goalpost" className="mt-1.5 block w-full rounded-lg border border-line px-3 py-2.5 font-normal" /></label>
     <p className="mt-2 text-xs text-mute">Used for this focus and carried into the material. AI suggestions are examples, not student survey results.</p>
   </section>;

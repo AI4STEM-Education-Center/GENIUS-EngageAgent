@@ -670,3 +670,13 @@ it("lets the owner correct historical labels once per revision without changing 
   mocks.session.mockResolvedValue({ ...teacher, geniusId: "intruder" });
   expect((await post({ ...body, expectedMetadataRevision: 1 })).status).toBe(404);
 });
+
+it("previews the actual first slide and never leaks a legacy conflict result as its cover", async () => {
+  const id = await share();
+  const listing = await (await get()).json();
+  const item = listing.items.find((value: { id: string }) => value.id === id);
+  const first = deckFixture("cognitive conflict").draft.slides[0];
+  expect(item.previewSlide).toEqual({ stage: first.stage, title: first.title, body: first.body, task: first.task });
+  expect(item.previewImage).toBeUndefined();
+  expect(item.previewSlide).not.toHaveProperty("teacherNotes");
+});

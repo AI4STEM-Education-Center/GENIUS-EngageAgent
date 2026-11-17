@@ -8,7 +8,7 @@ import { GET, POST } from "@/app/api/content-rating/route";
 vi.mock("@/lib/nosql", () => {
   let ratings: Array<Record<string, unknown>> = [];
   return {
-    listPublishedContent: vi.fn(async () => [{ content_item_id: "item-1" }, { content_item_id: "item-2" }]),
+    listPublishedContent: vi.fn(async () => ["item-1", "item-2"].map(content_item_id => ({ class_id: "c1", assignment_id: "a1", content_item_id, published: true, published_at: "2026-11-17T12:00:00.000Z" }))),
     upsertContentRating: vi.fn(async (input: Record<string, unknown>) => {
       const idx = ratings.findIndex(
         (r) => r.class_id === input.class_id && r.assignment_id === input.assignment_id && r.student_id === input.student_id && r.content_item_id === input.content_item_id,
@@ -159,4 +159,13 @@ describe("GET /api/content-rating", () => {
     expect(data.ratings).toHaveLength(1);
     expect(data.ratings[0].rating).toBe(5);
   });
+});
+
+it("rejects a stale publication version and stores the exact current version", async () => {
+  const request = (publishedAt: string) => new Request("http://localhost/api/content-rating", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ classId: "c1", assignmentId: "a1", studentId: "s1", contentItemId: "item-1", rating: 4, publishedAt }) });
+  expect((await POST(request("2026-11-17T11:00:00.000Z"))).status).toBe(409);
+  const current = await POST(request("2026-11-17T12:00:00.000Z"));
+  expect(current.status).toBe(201);
+  expect((await current.json()).rating.published_at).toBe("2026-11-17T12:00:00.000Z");
 });

@@ -6,6 +6,7 @@ import { copyGalleryMaterial, listMaterialGallery, previewGalleryMaterial, previ
 import type { GalleryCopy, GalleryFacets, GalleryFilters, GalleryMaterial, GalleryPreviewSource, GalleryScope } from "@/lib/material-gallery";
 import GalleryMetadataEditor from "./GalleryMetadataEditor";
 import GalleryMaterialDetails from "./GalleryMaterialDetails";
+import GalleryFirstSlidePreview from "./GalleryFirstSlidePreview";
 import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
 import { loadTaskLesson } from "@/lib/lesson-client";
 import SlidePreview from "./SlidePreview";
@@ -160,7 +161,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     {notice && <p role="status" className="mt-4 rounded-lg bg-ok-light p-3 text-sm text-ok">{notice}</p>}
     {!loading && !error && !items.length && <div className="py-8 text-center"><p className="font-semibold text-ink">No shared materials match yet</p><p className="mt-2 text-sm text-mute">{standalone ? "Try another filter or search. Materials shared by teachers will appear here." : "Try another filter, or generate a new material below. You can share it after reviewing."}</p></div>}
     <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4">{(recommendationsOnly ? items.slice(0, 3) : items).map(material => <article key={material.id} className="flex min-w-0 flex-col rounded-xl border border-line bg-white p-4">
-      {material.previewImage && <div className="mb-3 aspect-video max-h-40 overflow-hidden rounded-lg bg-canvas">{failedPreviews[material.id] === material.previewImage ? <p className="flex h-full items-center justify-center text-xs text-mute">Preview image unavailable</p> : <img src={material.previewImage} alt="" loading="lazy" onError={() => setFailedPreviews(current => ({ ...current, [material.id]: material.previewImage! }))} className="h-full w-full object-contain" />}</div>}
+      <GalleryFirstSlidePreview material={material} imageFailed={failedPreviews[material.id] === material.previewImage} onImageError={() => setFailedPreviews(current => ({ ...current, [material.id]: material.previewImage! }))} />
       <div className="flex justify-between gap-2 text-xs text-mute"><span>{material.format === "slides" ? `${material.slideCount ?? ""} slides` : "Animated video"}</span>{material.isOwner && <span className="font-semibold">Shared by you</span>}</div>
       <h4 className="mt-3 text-lg font-bold text-ink">{material.title}</h4>
       <GalleryMaterialDetails {...material} compact={recommendationsOnly} />
@@ -171,7 +172,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
           {material.strategy === strategy && <span className="rounded-full bg-info-light px-2.5 py-1 text-info">Same strategy</span>}
           {focusMatches(material) && <span className="rounded-full bg-ai-light px-2.5 py-1 text-ai">Same focus</span>}</>}
       </div>
-      <div className="mt-auto flex flex-wrap gap-2 pt-3"><button type="button" className={primary} disabled={disabled || !!copying || (!standalone && material.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(material, standalone ? "adapt" : "use")}>{copying === material.id ? "Opening…" : standalone ? "Open" : "Use as is"}</button>{!standalone && <button type="button" className={button} disabled={disabled || !!copying || material.lessonNumber !== lessonNumber} onClick={() => void selectMaterial(material, "adapt")}>Adapt</button>}<button type="button" className={button} onClick={() => void openPreview(material)}>Preview</button></div>
+      <div className="mt-auto flex flex-wrap gap-2 pt-3"><button type="button" className={primary} disabled={disabled || !!copying || (!standalone && material.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(material, "use")}>{copying === material.id ? "Opening…" : standalone ? "Open" : "Use as is"}</button>{!standalone && <button type="button" className={button} disabled={disabled || !!copying || material.lessonNumber !== lessonNumber} onClick={() => void selectMaterial(material, "adapt")}>Adapt</button>}<button type="button" className={button} onClick={() => void openPreview(material)}>Preview</button></div>
       {!standalone && material.lessonNumber !== lessonNumber && <p className="mt-2 text-xs text-mute">Choose Lesson {material.lessonNumber} in Assessment to use this material.</p>}
       {material.isOwner && <button type="button" className="mt-3 self-start text-xs font-semibold text-brand underline" disabled={!!copying} onClick={() => setEditDetails(material)}>Edit details</button>}
       {material.isOwner && <button type="button" className="mt-3 self-start text-xs font-semibold text-mute underline" disabled={!!copying} onClick={() => setRemoveTarget(material)}>Remove from Gallery</button>}
@@ -187,7 +188,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
       {preview?.item && <div className="mt-5 space-y-4">{preview.media?.video && <video aria-label="Shared video preview" src={preview.media.video} poster={preview.media.image} controls playsInline preload="metadata" className="max-h-96 w-full rounded-xl bg-ink" />}<p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-2">{preview.item.body}</p>{preview.item.activity?.stages.map(stage => <div key={stage.id}><h4 className="font-semibold">{stage.title}</h4><p className="mt-1 text-sm text-mute">{stage.text}</p></div>)}</div>}
       {!previewLoading && !previewSlide && !preview?.item && <p className="mt-5 text-sm text-mute">{previewItem?.description || "This material could not be previewed. Please retry."}</p>}
       {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}
-      {previewItem && <div className="mt-5 flex flex-wrap gap-2"><button type="button" className={primary} disabled={disabled || !!copying || (!standalone && previewItem.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(previewItem, standalone ? "adapt" : "use")}>{standalone ? "Open and edit" : "Use as is"}</button>{!standalone && <button type="button" className={button} disabled={disabled || !!copying || previewItem.lessonNumber !== lessonNumber} onClick={() => void selectMaterial(previewItem, "adapt")}>Adapt for my class</button>}</div>}
+      {previewItem && <div className="mt-5 flex flex-wrap gap-2"><button type="button" className={primary} disabled={disabled || !!copying || (!standalone && previewItem.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(previewItem, "use")}>{standalone ? "Open and edit" : "Use as is"}</button>{!standalone && <button type="button" className={button} disabled={disabled || !!copying || previewItem.lessonNumber !== lessonNumber} onClick={() => void selectMaterial(previewItem, "adapt")}>Adapt for my class</button>}</div>}
     </dialog>
   </section>;
 }

@@ -324,3 +324,17 @@ it("keeps a recorded prediction through refresh without sharing it with a differ
   expect((screen.getByLabelText("Your prediction") as HTMLTextAreaElement).value).toBe("");
   expect((screen.getByRole("button", { name: "Next slide" }) as HTMLButtonElement).disabled).toBe(true);
 });
+
+it("resumes the same publication at its saved reading position", async () => {
+  const onPositionChange = vi.fn();
+  const first = render(<PublishedSlidesReader {...props} learnerId="resume-reader" onPositionChange={onPositionChange} />);
+  await screen.findByText("Slide 1 of 5");
+  next();
+  fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "The ball stays round." } });
+  next();
+  const position = onPositionChange.mock.lastCall![0];
+  expect(position).toBe(2);
+  first.unmount();
+  render(<PublishedSlidesReader {...props} learnerId="resume-reader" initialPosition={position} />);
+  await screen.findByText("Slide 3 of 5");
+});

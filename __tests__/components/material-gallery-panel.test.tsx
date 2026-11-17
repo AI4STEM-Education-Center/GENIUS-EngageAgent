@@ -134,7 +134,7 @@ it.each([{ lessonNumber: 0, preview: false }, { lessonNumber: 8, preview: true }
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Open and edit" }));
   } else fireEvent.click(within(article).getByRole("button", { name: "Open" }));
   await waitFor(() => expect(onUse).toHaveBeenCalledOnce());
-  expect(mocks.copy).toHaveBeenCalledWith(scope, material.id, "adapt", expect.any(AbortSignal));
+  expect(mocks.copy).toHaveBeenCalledWith(scope, material.id, "use", expect.any(AbortSignal));
   expect(onUse.mock.calls[0][0].deck.lessonNumber).toBe(3);
   expect(onUse.mock.calls[0][0].deck.id).toBe("independent-copy");
   expect(onUse.mock.calls[0][1]).toEqual(material);

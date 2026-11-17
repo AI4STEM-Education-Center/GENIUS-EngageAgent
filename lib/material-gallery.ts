@@ -31,7 +31,7 @@ export type GalleryMetadata = {
 };
 export type GalleryFeedback = { status: "unavailable" } | {
   status: "available"; observedAt?: string; firstPublicationAt?: string; lastFeedbackAt?: string; ratingCount: number; averageRating: number | null; highRatingPercent: number | null;
-  activityCount: number; questionCount: number; questionAuthorCount: number; attributableActivities: number;
+  activityCount: number; publishedTeacherCount?: number; questionCount: number; questionAuthorCount: number; attributableActivities: number;
   analyzedQuestionCount: number; questionTypes: Record<string, number>; scienceQuestionPercent: number | null;
 };
 
@@ -51,6 +51,7 @@ export type GalleryMaterial = {
   isOwner: boolean;
   slideCount?: number;
   previewImage?: string;
+  previewSlide?: Pick<SlideDraft["slides"][number], "stage" | "title" | "body" | "task">;
   derivedFrom?: Pick<GalleryProvenance, "templateId" | "revision" | "title">;
   creatorName?: string;
   /** Distinct teachers who completed a private-copy save, not previews/opens. */
