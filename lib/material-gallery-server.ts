@@ -233,7 +233,8 @@ async function commitPrivate(body: Record<string, unknown>, context: LibraryCont
   const partition = libraryPartition(context.userId);
   const existing = await workspaceGet<Copy>(partition, `COPY#${source.privateCopyId}`);
   const copy: Copy = existing || { id: source.privateCopyId, ownerId: context.userId, classId: context.classId, assignmentId: context.assignmentId,
-    templateId: source.id, source: { templateId: source.id, revision: 1, title: source.metadata.title, mode: "use", private: true }, createdAt: source.createdAt };
+    templateId: source.id, source: { templateId: source.id, revision: 1, title: source.metadata.title, mode: "use", private: true }, createdAt: source.createdAt,
+    ...(source.metadata.focus ? { focus: source.metadata.focus } : {}) };
   if (!existing) {
     await activeStage(source.id, context.userId);
     const assets: { partition: string; key: string; value: GalleryBlob }[] = [];
@@ -482,7 +483,7 @@ async function commitCopySave(body: Record<string, unknown>, context: LibraryCon
   }
   const saved: SavedGalleryCopySummary = { copyId: copy.id, revision, savedAt: new Date().toISOString(), title: snapshot.draft?.title ?? snapshot.item!.title,
     format: source.format, lessonNumber: source.lessonNumber, strategy: source.strategy, source: copy.source,
-    ...savedCopyDetails(copy, snapshot) };
+    ...savedCopyDetails(copy, snapshot, source) };
   const pointer = { ...saved, snapshotId: snapshot.id };
   try {
     // The create-only revision record is the compare-and-swap guard. Snapshot,
@@ -501,9 +502,10 @@ async function commitCopySave(body: Record<string, unknown>, context: LibraryCon
   }
   return { saved };
 }
-function savedCopyDetails(copy: Copy, snapshot: CopySnapshot): Partial<SavedGalleryCopySummary> {
+function savedCopyDetails(copy: Copy, snapshot: CopySnapshot, source?: Source): Partial<SavedGalleryCopySummary> {
   const first = snapshot.draft?.slides[0];
-  return { ...(copy.focus ? { focus: copy.focus } : {}),
+  const focus = copy.focus ?? snapshot.item?.focus ?? (source ? copyFocus(copy, source) : undefined);
+  return { ...(focus ? { focus: { misconceptions: focus.misconceptions ?? [], coreIdeas: focus.coreIdeas ?? [] } } : {}),
     gradeBand: snapshot.teachingContext?.gradeBand || "", experienceContext: snapshot.teachingContext?.experienceContext || "", quizPattern: snapshot.teachingContext?.quizPattern || "",
     ...(snapshot.generation ? { generation: snapshot.generation } : {}),
     ...(first ? { slideCount: snapshot.draft!.slides.length, previewSlide: { stage: first.stage, title: first.title, body: first.body, task: first.task } } : {}) };
@@ -518,7 +520,10 @@ async function savedCopyListing(copy: Copy): Promise<SavedGalleryCopySummary> {
   // without a first-page image still have a useful text cover.
   const visualId = snapshot.draft && isSlideStrategy(snapshot.strategy) ? draftVisibleVisualIds(snapshot.draft, snapshot.strategy, 0).find(id => snapshot.assets[id]) : undefined;
   const cover = snapshot.format === "video" ? snapshot.videoMedia?.image : visualId ? await workspaceGet<GalleryBlob>(partition, assetKey(snapshot.id, visualId)) : undefined;
-  return { ...summary, ...savedCopyDetails(copy, snapshot), ...(cover ? { previewImage: await galleryBlobUrl(cover) } : {}) };
+  // Older generated copies omitted focus from their listing pointer. Resolve
+  // their actual saved focus, honoring the cutoff for later reviewed labels.
+  const source = copy.focus || snapshot.item?.focus ? undefined : await workspaceGet<Source>(PARTITION, sourceKey(copy.templateId));
+  return { ...summary, ...savedCopyDetails(copy, snapshot, source ?? undefined), ...(cover ? { previewImage: await galleryBlobUrl(cover) } : {}) };
 }
 async function savedSnapshot(context: LibraryContext, copyId: unknown, revision?: number) {
   const { copy, source } = await copiedSource(context, copyId);
