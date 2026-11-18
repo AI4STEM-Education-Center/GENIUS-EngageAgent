@@ -697,7 +697,47 @@ it("completes legacy focus labels without changing the content or breaking pre-e
   const save = await post({ action: "start-save", copyId: oldCopy.copyId, expectedRevision: 0, deck: oldCopy.deck,
     assets: { evidence: { width: 1, height: 1, digest: hash } } });
   expect(save.status).toBe(200);
+  const { saveId } = await save.json();
+  await post({ action: "upload-copy-asset", copyId: oldCopy.copyId, saveId, visualId: "evidence", asset: { data: tinyImage, width: 1, height: 1 } });
+  expect((await post({ action: "commit-save", copyId: oldCopy.copyId, saveId })).status).toBe(200);
+  expect((await (await get({ action: "saved-copies" })).json()).items[0].focus).toBeUndefined();
   expect((await post({ action: "update-metadata", id, expectedMetadataRevision: 1, metadata: { ...metadata, focus: { misconceptions: ["b"], coreIdeas: [] } } })).status).toBe(422);
+});
+
+it.each(["slides", "video"] as const)("keeps generated %s focus consistent in library cards and reopened copies, including older pointers", async format => {
+  const focus = { misconceptions: ["a"], coreIdeas: [] };
+  const item = { id: "generated-focused-video", lessonNumber: 3, strategy: "cognitive conflict", type: "Video", title: "Contact", body: "Observe contact.", focus };
+  let created;
+  if (format === "slides") {
+    const id = await start({ action: "start-private-save", metadata: { title: "Focused slides", focus } });
+    await upload(id);
+    created = await (await post({ action: "commit-private-save", id })).json();
+  } else {
+    mocks.media.mockImplementation(async (_c, _a, _s, id, kind) => id === item.id && kind === "video" ? {
+      class_id: scope.classId, assignment_id: scope.assignmentId, student_id: "cohort", content_item_id: id,
+      mime_type: "video/mp4", data_url: "data:video/mp4;base64,dmlkZW8=",
+    } : null);
+    created = await (await post({ action: "save-private-video", item, lessonNumber: 3, metadata: { title: item.title } })).json();
+  }
+  const payload = format === "slides" ? { deck: { ...deckFixture("cognitive conflict"), id: created.copyId, gallerySource: created.source, focus },
+    assets: { evidence: { width: 1, height: 1, digest: hash } } } : { item: { ...item, id: `gallery-copy-${created.copyId}`, gallerySource: created.source } };
+  const staged = await post({ action: "start-save", copyId: created.copyId, expectedRevision: 0, ...payload });
+  expect(staged.status).toBe(200);
+  const { saveId } = await staged.json();
+  if (format === "slides") await post({ action: "upload-copy-asset", copyId: created.copyId, saveId, visualId: "evidence", asset: { data: tinyImage, width: 1, height: 1 } });
+  const saved = await post({ action: "commit-save", copyId: created.copyId, saveId });
+  expect((await saved.json()).saved.focus).toEqual(focus);
+  // Reproduce the older persisted shape: focus existed in the source/material,
+  // but was omitted from both the private-copy row and its listing pointer.
+  const { workspaceGet, workspacePut } = await import("@/lib/workspace-store");
+  const partition = `GALLERY_LIBRARY#${createHash("sha256").update(teacher.geniusId).digest("hex")}`;
+  const key = `COPY#${created.copyId}`;
+  const row = await workspaceGet<{ focus?: typeof focus; saved: { focus?: typeof focus } }>(partition, key);
+  delete row!.focus; delete row!.saved.focus;
+  await workspacePut([{ partition, key, value: row }]);
+  expect((await (await get({ action: "saved-copies" })).json()).items[0].focus).toEqual(focus);
+  const reopened = (await (await get({ action: "saved-copy", copyId: created.copyId })).json()).copy;
+  expect((reopened.deck || reopened.item).focus).toEqual(focus);
 });
 
 it("links video and image generation to their saved artifacts and exposes a private-data-free material lineage", async () => {
