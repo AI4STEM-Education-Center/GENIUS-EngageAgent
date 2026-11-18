@@ -4,6 +4,7 @@ import { getTaskInterests, type TaskInterests } from "./task-interests";
 import { classProfileGenerationSummary, parseClassProfileAnswers, type ClassProfile } from "./class-profile";
 import type { ClassroomContextSnapshot, ContextSource } from "./classroom-context";
 import { workspaceGet, workspacePut } from "./workspace-store";
+import { GeniusContextError, geniusContextOrigin, linkedGeniusClass, liveGeniusContextEnabled, requestGeniusContext } from "./genius-context-client";
 
 type Scope = { userId: string; classId: string; assignmentId: string };
 type Payload = Omit<ClassroomContextSnapshot, "id">;
@@ -14,9 +15,8 @@ const text = (v: unknown, max = 200): v is string => typeof v === "string" && v.
 const timestamp = (v: unknown): v is string => text(v, 40) && Number.isFinite(Date.parse(v));
 const count = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0;
 
-/** Our versioned adapter contract. No upstream endpoint is assumed to exist.
- * Configure a trusted server endpoint only after GENIUS implements this contract.
- * Callers must authorize the exact teacher/class/task before using this module. */
+/** Legacy v1 adapter parser. Live class-wide GENIUS v2 data is scope-checked
+ * before conversion below. Callers must authorize the exact teacher/class/task. */
 export function parseGeniusContext(value: unknown, scope: Scope): Payload {
   if (!record(value) || value.schemaVersion !== 1 || value.classId !== scope.classId || value.assignmentId !== scope.assignmentId
     || !text(value.version, 120) || !timestamp(value.updatedAt)) throw new Error("Incompatible GENIUS class information.");
@@ -62,36 +62,44 @@ async function localContext(scope: Scope): Promise<Payload> {
 
 export async function readClassroomContext(scope: Scope): Promise<ClassroomContextSnapshot> {
   const endpoint = process.env.GENIUS_CONTEXT_ENDPOINT;
+  const geniusClassId = await linkedGeniusClass(scope);
   let payload: Payload;
-  const cacheKey = `PROVIDER#${digest([scope.classId, scope.assignmentId])}`;
-  if (!endpoint) payload = await localContext(scope);
+  const cacheKey = `PROVIDER#${digest([scope.classId, scope.assignmentId, ...(geniusClassId ? [geniusClassId] : [])])}`;
+  if (!endpoint && !geniusClassId) payload = await localContext(scope);
   else {
     try {
-      const url = new URL(endpoint);
-      if (url.protocol !== "https:" && !(process.env.NODE_ENV !== "production" && url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))) throw new Error("Invalid provider endpoint.");
-      if (url.username || url.password || !process.env.GENIUS_CONTEXT_TOKEN) throw new Error("Provider configuration is incomplete.");
-      url.searchParams.set("classId", scope.classId); url.searchParams.set("assignmentId", scope.assignmentId);
-      const response = await fetch(url, { headers: { Authorization: `Bearer ${process.env.GENIUS_CONTEXT_TOKEN}`, Accept: "application/json" }, redirect: "error", cache: "no-store", signal: AbortSignal.timeout(8000) });
-      if ([401, 403].includes(response.status)) {
-        payload = { schemaVersion: 1, classId: scope.classId, assignmentId: scope.assignmentId, geniusConnected: true, summary: "",
-          profile: { provider: "genius", status: "forbidden" }, experiences: { provider: "genius", status: "forbidden" } };
-        await workspacePut([{ partition: partition(scope.userId), key: cacheKey, value: payload }]);
+      let value: unknown;
+      if (geniusClassId) {
+        const raw = await requestGeniusContext(scope.userId, "classroom", geniusClassId);
+        if (!record(raw) || raw.schemaVersion !== 2 || raw.classId !== geniusClassId) throw new Error("Incompatible GENIUS class information.");
+        value = { ...raw, schemaVersion: 1, classId: scope.classId, assignmentId: scope.assignmentId };
       } else {
+        const url = new URL(endpoint!);
+        if (url.protocol !== "https:" && !(process.env.NODE_ENV !== "production" && url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))) throw new Error("Invalid provider endpoint.");
+        if (url.username || url.password || !process.env.GENIUS_CONTEXT_TOKEN) throw new Error("Provider configuration is incomplete.");
+        url.searchParams.set("classId", scope.classId); url.searchParams.set("assignmentId", scope.assignmentId);
+        const response = await fetch(url, { headers: { Authorization: `Bearer ${process.env.GENIUS_CONTEXT_TOKEN}`, Accept: "application/json" }, redirect: "error", cache: "no-store", signal: AbortSignal.timeout(8000) });
+        if ([401, 403].includes(response.status)) throw new GeniusContextError(response.status);
         if (!response.ok) throw new Error("Provider unavailable.");
         const raw = await response.text();
         if (raw.length > 100_000) throw new Error("Provider response is too large.");
-        payload = parseGeniusContext(JSON.parse(raw), scope);
-        const previous = await workspaceGet<Payload>(partition(scope.userId), cacheKey);
-        if (previous?.profile.updatedAt && Date.parse(previous.profile.updatedAt) > Date.parse(payload.profile.updatedAt!)) payload = previous;
-        else await workspacePut([{ partition: partition(scope.userId), key: cacheKey, value: payload }]);
+        value = JSON.parse(raw);
       }
-    } catch {
+      payload = parseGeniusContext(value, scope);
       const previous = await workspaceGet<Payload>(partition(scope.userId), cacheKey);
-      const source = <T>(s?: ContextSource<T>): ContextSource<T> => s ? { ...s, status: s.status === "forbidden" ? "forbidden" : "stale" } : { provider: "genius", status: "error" };
+      if (previous?.profile.updatedAt && Date.parse(previous.profile.updatedAt) > Date.parse(payload.profile.updatedAt!)) payload = previous;
+      else await workspacePut([{ partition: partition(scope.userId), key: cacheKey, value: payload }]);
+    } catch (error) {
+      const previous = await workspaceGet<Payload>(partition(scope.userId), cacheKey);
+      const denied = error instanceof GeniusContextError && [401, 403, 404].includes(error.status);
+      const source = <T>(s?: ContextSource<T>): ContextSource<T> => denied ? { provider: "genius", status: "forbidden" } : s ? { ...s, status: s.status === "forbidden" ? "forbidden" : "stale" } : { provider: "genius", status: "error" };
       payload = { schemaVersion: 1, classId: scope.classId, assignmentId: scope.assignmentId, geniusConnected: true,
-        profile: source(previous?.profile), experiences: source(previous?.experiences), summary: previous?.summary || "" };
+        profile: source(previous?.profile), experiences: source(previous?.experiences), summary: denied ? "" : previous?.summary || "" };
+      if (denied) await workspacePut([{ partition: partition(scope.userId), key: cacheKey, value: payload }]);
     }
   }
+  if (liveGeniusContextEnabled()) payload = { ...payload, canLinkGenius: scope.classId.startsWith("ea-class-"),
+    ...(geniusClassId ? { geniusClassId, geniusManageUrl: `${geniusContextOrigin()}/teacher/classes/${geniusClassId}/context` } : {}) };
   // Synced-at is display metadata, not a semantic version: polling unchanged
   // information must not continually prompt the teacher to accept a new version.
   const id = digest({ ...payload, profile: { ...payload.profile, syncedAt: undefined }, experiences: { ...payload.experiences, syncedAt: undefined } });
@@ -105,7 +113,13 @@ export async function acceptedClassroomContext(scope: Scope, id: string): Promis
   if (!/^[a-f0-9]{64}$/u.test(id)) throw new Error("Refresh the class information before generating.");
   const snapshot = await workspaceGet<ClassroomContextSnapshot>(partition(scope.userId), `SNAPSHOT#${id}`);
   if (!snapshot || (scope.classId && snapshot.classId !== scope.classId) || (scope.assignmentId && snapshot.assignmentId !== scope.assignmentId)) throw new Error("This class information does not belong to the selected task.");
-  const latest = await workspaceGet<Payload>(partition(scope.userId), `PROVIDER#${digest([snapshot.classId, snapshot.assignmentId])}`);
+  const sourceScope = { ...scope, classId: snapshot.classId, assignmentId: snapshot.assignmentId };
+  const linked = await linkedGeniusClass(sourceScope);
+  if ((snapshot.geniusClassId || null) !== linked) throw new Error("The connected GENIUS class changed. Refresh and accept the class information.");
+  // Revalidate current ownership before using a pinned version for generation.
+  // Fetching newer facts here does not replace the teacher-accepted snapshot.
+  if (linked) await readClassroomContext(sourceScope);
+  const latest = await workspaceGet<Payload>(partition(scope.userId), `PROVIDER#${digest([snapshot.classId, snapshot.assignmentId, ...(linked ? [linked] : [])])}`);
   if ([snapshot.profile.status, snapshot.experiences.status, latest?.profile.status, latest?.experiences.status].includes("forbidden")) throw new Error("This class information is not available to this account.");
   return snapshot;
 }

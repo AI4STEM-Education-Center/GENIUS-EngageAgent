@@ -19,6 +19,10 @@ export type ClassroomContextSnapshot = {
   experiences: ContextSource<TaskInterests>;
   summary: string;
   geniusConnected: boolean;
+  /** Present only for the verified, live GENIUS service, not the legacy adapter. */
+  geniusClassId?: string;
+  geniusManageUrl?: string;
+  canLinkGenius?: boolean;
 };
 export function contextSourceLabel(source: ContextSource<unknown>) {
   const name = source.provider === "genius" ? "GENIUS" : "EngageAgent";

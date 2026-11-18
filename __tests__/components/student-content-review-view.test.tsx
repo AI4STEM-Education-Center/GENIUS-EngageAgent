@@ -22,7 +22,7 @@ const publishedItems = [
 ];
 
 let savedRatings: { content_item_id: string; rating: number }[];
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: ReturnType<typeof vi.fn<(input: string, init?: RequestInit) => Promise<unknown>>>;
 
 beforeEach(() => {
   sessionStorage.clear();

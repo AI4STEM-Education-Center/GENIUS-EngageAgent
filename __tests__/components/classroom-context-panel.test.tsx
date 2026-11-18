@@ -36,3 +36,19 @@ it("isolates class changes from an earlier request that resolves late", async ()
   resolveOld(response(snapshot("class-a")));
   await waitFor(() => expect(screen.getByLabelText("Accepted context").textContent).toBe("class-b"));
 });
+it("automatically detects a GENIUS update on return without replacing the accepted context", async () => {
+  fetcher.mockResolvedValueOnce(response(snapshot("old"))).mockResolvedValueOnce(response(snapshot("new")));
+  render(<Harness />); await screen.findByText(/Summary old/);
+  fireEvent.focus(window);
+  await screen.findByRole("button", { name: "Use updated information" });
+  expect(screen.getByLabelText("Accepted context").textContent).toBe("old");
+  expect(screen.getByText(/Summary old/).textContent).toContain("My manual supplement");
+});
+it("does not retain an accepted snapshot when the connected GENIUS source class changes", async () => {
+  fetcher.mockResolvedValueOnce(response({ ...snapshot("old"), geniusClassId: "class-one" }))
+    .mockResolvedValueOnce(response({ ...snapshot("new"), geniusClassId: "class-two" }));
+  render(<Harness />); await screen.findByText(/Summary old/);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await waitFor(() => expect(screen.getByLabelText("Accepted context").textContent).toBe("new"));
+  expect(screen.queryByText(/Summary old/)).toBeNull();
+});
