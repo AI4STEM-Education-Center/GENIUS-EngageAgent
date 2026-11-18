@@ -44,22 +44,37 @@ export function parseGeniusContext(value: unknown, scope: Scope): Payload {
   if (value.checkIn != null) {
     const checkIn = value.checkIn;
     if (!record(checkIn) || !count(checkIn.responseCount) || !Array.isArray(checkIn.activities) || checkIn.activities.length > 100) throw new Error("Invalid GENIUS check-in.");
+    if (checkIn.classSize !== undefined && (!count(checkIn.classSize) || checkIn.classSize < checkIn.responseCount)) throw new Error("Invalid GENIUS class size.");
     const ids = new Set<string>();
     const activities = checkIn.activities.map(activity => {
       if (!record(activity) || !text(activity.id, 120) || ids.has(activity.id) || !text(activity.label, 160)
         || !count(activity.studentCount) || activity.studentCount > Number(checkIn.responseCount)
         || !count(activity.didCount) || !count(activity.watchedCount) || activity.didCount > activity.studentCount || activity.watchedCount > activity.studentCount) throw new Error("Invalid GENIUS experience.");
       ids.add(activity.id);
+      if (activity.objects !== undefined && (!Array.isArray(activity.objects) || activity.objects.length > 5 || activity.objects.some(object => !record(object) || !text(object.name, 40) || !count(object.studentCount) || object.studentCount > Number(activity.studentCount)))) throw new Error("Invalid GENIUS object counts.");
+      if (activity.incidents !== undefined && (!Array.isArray(activity.incidents) || activity.incidents.length > 3 || activity.incidents.some(incident => !text(incident, 400)))) throw new Error("Invalid GENIUS reviewed examples.");
+      const objects = (activity.objects || []) as { name: string; studentCount: number }[];
       return { activityId: `genius:${activity.id}`, activity: activity.label, category: typeof activity.category === "string" ? activity.category.slice(0, 100) : "Everyday experience",
-        studentCount: activity.studentCount, doCount: activity.didCount, watchedCount: activity.watchedCount, objects: [], incidents: [] };
+        studentCount: activity.studentCount, doCount: activity.didCount, watchedCount: activity.watchedCount,
+        objects: objects.map(object => object.name), objectCounts: objects, incidents: (activity.incidents || []) as string[] };
     }).filter(activity => activity.studentCount > 0).sort((a, b) => b.studentCount - a.studentCount);
     const interests: TaskInterests = { classId: scope.classId, assignmentId: scope.assignmentId, surveyId: `genius:${value.version}`, dailyExperienceTopic: "Experience check-in",
-      analyzedAt: value.updatedAt, responseCount: checkIn.responseCount, unclassifiedCount: 0, enoughResponses: checkIn.responseCount >= 3,
+      analyzedAt: value.updatedAt, responseCount: checkIn.responseCount, ...(checkIn.classSize === undefined ? {} : { classSize: checkIn.classSize as number }), unclassifiedCount: 0, enoughResponses: checkIn.responseCount >= 3,
       top: checkIn.responseCount >= 3 ? activities.slice(0, 2) : [], activities, stale: false };
     experiences = { ...base, status: checkIn.responseCount ? "ready" : "empty", value: interests };
   }
   return { schemaVersion: 1, classId: scope.classId, assignmentId: scope.assignmentId, profile, experiences,
-    summary: classProfileGenerationSummary(profile.value ?? null), geniusConnected: true };
+    summary: [classProfileGenerationSummary(profile.value ?? null), experienceGenerationSummary(experiences.value)].filter(Boolean).join("\n\n"), geniusConnected: true };
+}
+
+function experienceGenerationSummary(experiences?: TaskInterests) {
+  if (!experiences?.responseCount) return "";
+  return [`GENIUS experience check-in: ${experiences.responseCount}${experiences.classSize === undefined ? "" : ` of ${experiences.classSize}`} students responded. Counts describe respondents, not the whole class.`,
+    ...experiences.activities.slice(0, 5).map(activity => [
+      `${activity.activity} (${activity.category}): ${activity.doCount} did it, ${activity.watchedCount} watched.`,
+      activity.objectCounts?.length ? `Objects mentioned: ${activity.objectCounts.map(object => `${object.name} (${object.studentCount})`).join(", ")}.` : "",
+      ...activity.incidents.map(example => `Teacher-reviewed example: ${example}`),
+    ].filter(Boolean).join(" "))].join("\n");
 }
 
 async function localContext(scope: Scope): Promise<Payload> {

@@ -82,5 +82,8 @@ export type GalleryCopy = (
 export type SavedGalleryCopySummary = {
   copyId: string; revision: number; savedAt: string; title: string;
   format: "slides" | "video"; lessonNumber: number; strategy: string; source: GalleryProvenance;
+  focus?: GalleryFocus; gradeBand?: string; experienceContext?: string; quizPattern?: string;
+  generation?: import("./generation-record").GenerationRecord;
+  previewSlide?: GalleryMaterial["previewSlide"]; previewImage?: string; slideCount?: number;
 };
 export type SavedGalleryCopy = { copy: GalleryCopy; revision: number; savedAt: string };

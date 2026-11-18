@@ -90,7 +90,7 @@ it("retains edited sharing text when upload fails and allows an explicit retry",
   fireEvent.change(screen.getByLabelText("Gallery title"), { target: { value: "Retained title" } });
   fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed the shared text/ }));
   fireEvent.click(screen.getByRole("button", { name: "Share to Gallery" }));
-  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "The material library is temporarily unavailable.");
+  expect(await screen.findByText("The material library is temporarily unavailable.")).toHaveProperty("role", "alert");
   expect((screen.getByLabelText("Gallery title") as HTMLInputElement).value).toBe("Retained title");
   expect(onShared).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Share to Gallery" }));

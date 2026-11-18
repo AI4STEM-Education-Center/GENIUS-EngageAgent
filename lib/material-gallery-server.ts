@@ -468,7 +468,8 @@ async function commitCopySave(body: Record<string, unknown>, context: LibraryCon
     assets.push({ partition, key: assetKey(snapshot.id, visualId), value: asset });
   }
   const saved: SavedGalleryCopySummary = { copyId: copy.id, revision, savedAt: new Date().toISOString(), title: snapshot.draft?.title ?? snapshot.item!.title,
-    format: source.format, lessonNumber: source.lessonNumber, strategy: source.strategy, source: copy.source };
+    format: source.format, lessonNumber: source.lessonNumber, strategy: source.strategy, source: copy.source,
+    ...savedCopyDetails(copy, snapshot) };
   const pointer = { ...saved, snapshotId: snapshot.id };
   try {
     // The create-only revision record is the compare-and-swap guard. Snapshot,
@@ -486,6 +487,25 @@ async function commitCopySave(body: Record<string, unknown>, context: LibraryCon
     if (winner?.snapshotId !== snapshot.id) { if (winner) throw saveConflict(); throw error; }
   }
   return { saved };
+}
+function savedCopyDetails(copy: Copy, snapshot: CopySnapshot): Partial<SavedGalleryCopySummary> {
+  const first = snapshot.draft?.slides[0];
+  return { ...(copy.focus ? { focus: copy.focus } : {}),
+    gradeBand: snapshot.teachingContext?.gradeBand || "", experienceContext: snapshot.teachingContext?.experienceContext || "", quizPattern: snapshot.teachingContext?.quizPattern || "",
+    ...(snapshot.generation ? { generation: snapshot.generation } : {}),
+    ...(first ? { slideCount: snapshot.draft!.slides.length, previewSlide: { stage: first.stage, title: first.title, body: first.body, task: first.task } } : {}) };
+}
+
+async function savedCopyListing(copy: Copy): Promise<SavedGalleryCopySummary> {
+  const { snapshotId, ...summary } = copy.saved!;
+  const partition = copy.storagePartition || libraryPartition(copy.ownerId);
+  const snapshot = await workspaceGet<CopySnapshot>(partition, snapshotKey(snapshotId));
+  if (!snapshot || snapshot.copyId !== copy.id) return summary;
+  // Cover only the first slide's image, preserving reveal order. Legacy decks
+  // without a first-page image still have a useful text cover.
+  const visualId = snapshot.draft && isSlideStrategy(snapshot.strategy) ? draftVisibleVisualIds(snapshot.draft, snapshot.strategy, 0).find(id => snapshot.assets[id]) : undefined;
+  const cover = snapshot.format === "video" ? snapshot.videoMedia?.image : visualId ? await workspaceGet<GalleryBlob>(partition, assetKey(snapshot.id, visualId)) : undefined;
+  return { ...summary, ...savedCopyDetails(copy, snapshot), ...(cover ? { previewImage: await galleryBlobUrl(cover) } : {}) };
 }
 async function savedSnapshot(context: LibraryContext, copyId: unknown, revision?: number) {
   const { copy, source } = await copiedSource(context, copyId);
@@ -708,9 +728,15 @@ export async function galleryGet(request: Request) {
       await workspacePut([{ partition, key: "LEGACY_INDEXED_V2", value: { indexedAt: new Date().toISOString() } }]);
     }
     const entries = await workspaceQuery<Copy>(partition, "COPY#");
-    const copies = await Promise.all(entries.map(entry => entry.storagePartition ? workspaceGet<Copy>(entry.storagePartition, `COPY#${entry.id}`) : entry));
-    return { items: copies.filter((copy): copy is Copy => !!copy && copy.ownerId === context.userId && !!copy.saved)
-      .map(copy => { const { snapshotId: _id, ...summary } = copy.saved!; void _id; return summary; }).sort((a, b) => b.savedAt.localeCompare(a.savedAt)) };
+    const copies = await Promise.all(entries.map(async entry => {
+      if (!entry.storagePartition) return entry;
+      const copy = await workspaceGet<Copy>(entry.storagePartition, `COPY#${entry.id}`);
+      return copy ? { ...copy, storagePartition: entry.storagePartition } : null;
+    }));
+    const owned = copies.filter((copy): copy is Copy => !!copy && copy.ownerId === context.userId && !!copy.saved);
+    const items: SavedGalleryCopySummary[] = [];
+    for (let start = 0; start < owned.length; start += 8) items.push(...await Promise.all(owned.slice(start, start + 8).map(savedCopyListing)));
+    return { items: items.sort((a, b) => b.savedAt.localeCompare(a.savedAt)) };
   }
   if (params.get("action") === "copy-media") return copyVideoMedia(context, params.get("copyId"));
   if (params.get("action") === "copy-attribution") {

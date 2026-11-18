@@ -47,6 +47,8 @@ const ratingCard = async () => {
   return label.parentElement as HTMLElement;
 };
 
+const chooseMaterial = (id: string) => fireEvent.change(screen.getByRole("combobox", { name: "Learning material" }), { target: { value: id } });
+
 const ratingButtonsFor = (card: HTMLElement, title: string) => {
   return within(within(card).getByRole("radiogroup", { name: `Engagement rating for ${title}` })).getAllByRole("radio");
 };
@@ -61,30 +63,26 @@ it("shows the rating card below the questions, locked until questions are submit
   expect((within(card).getByRole("button", { name: "Submit rating" }) as HTMLButtonElement).disabled).toBe(true);
 });
 
-it("only saves ratings on Submit, once every material is rated, then locks them", async () => {
+it("submits one material at a time and completes only after every material is rated", async () => {
   const onRatingProgress = vi.fn();
   render(<StudentContentReviewView user={student} ratingUnlocked onRatingProgress={onRatingProgress} />);
   const card = await ratingCard();
-  const submit = within(card).getByRole("button", { name: "Submit rating" }) as HTMLButtonElement;
-
+  expect(within(card).getAllByRole("radiogroup")).toHaveLength(1);
   fireEvent.click(ratingButtonsFor(card, "Material A")[3]);
-  expect(submit.disabled).toBe(true);
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
-
+  fireEvent.click(within(card).getByRole("button", { name: "Submit rating" }));
+  await within(card).findByText("Thanks — you rated it 4 / 5.");
+  expect(savedRatings).toEqual([{ content_item_id: "item-a", rating: 4 }]);
+  expect(onRatingProgress).not.toHaveBeenCalledWith({ kind: "completed" });
+  expect(within(card).getByText("1 of 2 materials rated")).toBeTruthy();
+  fireEvent.click(within(card).getByRole("button", { name: "Next material to rate" }));
   fireEvent.click(ratingButtonsFor(card, "Material B")[1]);
-  expect(submit.disabled).toBe(false);
-  fireEvent.click(submit);
-
-  await within(card).findAllByText(/Thanks — you rated it/);
-  expect(savedRatings).toEqual(
-    expect.arrayContaining([
-      { content_item_id: "item-a", rating: 4 },
-      { content_item_id: "item-b", rating: 2 },
-    ]),
-  );
+  fireEvent.click(within(card).getByRole("button", { name: "Submit rating" }));
+  await within(card).findByText("Thanks — you rated it 2 / 5.");
+  expect(savedRatings).toEqual([{ content_item_id: "item-a", rating: 4 }, { content_item_id: "item-b", rating: 2 }]);
   expect(within(card).queryAllByRole("radio")).toHaveLength(0);
+  chooseMaterial("item-a");
   expect(within(card).getByText("Thanks — you rated it 4 / 5.")).toBeTruthy();
-  expect(within(card).getByText("Thanks — you rated it 2 / 5.")).toBeTruthy();
   await waitFor(() => expect(onRatingProgress).toHaveBeenLastCalledWith({ kind: "completed" }));
 });
 
@@ -100,6 +98,7 @@ it("shows previously saved ratings as submitted and read-only", async () => {
   expect(within(card).queryByRole("button", { name: "Submit rating" })).toBeNull();
   expect(within(card).queryAllByRole("radio")).toHaveLength(0);
   expect(within(card).getByText("Thanks — you rated it 5 / 5.")).toBeTruthy();
+  chooseMaterial("item-b");
   expect(within(card).getByText("Thanks — you rated it 3 / 5.")).toBeTruthy();
 });
 
@@ -207,12 +206,15 @@ it("refreshes submitted questions and ratings from another tab without discardin
   });
   render(<StudentContentReviewView user={student} ratingUnlocked />);
   const card = await ratingCard();
+  chooseMaterial("item-b");
   fireEvent.click(ratingButtonsFor(card, "Material B")[3]);
   questions = ["How could we test friction?"];
   savedRatings = [{ content_item_id: "item-a", rating: 5 }];
   fireEvent.focus(window);
   await screen.findByText(questions[0]);
+  chooseMaterial("item-a");
   await within(card).findByText("Thanks — you rated it 5 / 5.");
+  chooseMaterial("item-b");
   expect(ratingButtonsFor(card, "Material B")[3].getAttribute("aria-checked")).toBe("true");
   expect((within(card).getByRole("button", { name: "Submit rating" }) as HTMLButtonElement).disabled).toBe(false);
 });
@@ -232,6 +234,9 @@ it("keeps successfully submitted ratings locked when an earlier history request 
   fireEvent.focus(window);
   await waitFor(() => expect(releaseHistory).toBeTypeOf("function"));
   fireEvent.click(ratingButtonsFor(card, "Material A")[3]);
+  fireEvent.click(within(card).getByRole("button", { name: "Submit rating" }));
+  await within(card).findByText("Thanks — you rated it 4 / 5.");
+  chooseMaterial("item-b");
   fireEvent.click(ratingButtonsFor(card, "Material B")[3]);
   fireEvent.click(within(card).getByRole("button", { name: "Submit rating" }));
   await within(card).findAllByText(/Thanks — you rated it/);
@@ -249,7 +254,8 @@ it("includes the verified assignment credential on student reads and feedback wr
     fireEvent.change(screen.getByPlaceholderText("What are you wondering about?"), { target: { value: "How can we test this?" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit questions" }));
     fireEvent.click(ratingButtonsFor(card, "Material A")[3]);
-    fireEvent.click(ratingButtonsFor(card, "Material B")[3]);
+    chooseMaterial("item-b");
+  fireEvent.click(ratingButtonsFor(card, "Material B")[3]);
     fireEvent.click(within(card).getByRole("button", { name: "Submit rating" }));
     await within(card).findAllByText(/Thanks — you rated it/);
     for (const [, init] of fetchMock.mock.calls) expect(new Headers(init?.headers).get("authorization")).toBe("Bearer verified-test-token");
@@ -302,10 +308,13 @@ it("retries only failed ratings and reports completion only after all materials 
   render(<StudentContentReviewView user={student} ratingUnlocked onRatingProgress={onRatingProgress} />);
   const card = await ratingCard();
   fireEvent.click(ratingButtonsFor(card, "Material A")[4]);
+  fireEvent.click(within(card).getByRole("button", { name: "Submit rating" }));
+  await within(card).findByText("Thanks — you rated it 5 / 5.");
+  chooseMaterial("item-b");
   fireEvent.click(ratingButtonsFor(card, "Material B")[2]);
   fireEvent.click(within(card).getByRole("button", { name: "Submit rating" }));
   await within(card).findByRole("alert");
-  expect(within(card).getByText("Thanks — you rated it 5 / 5.")).toBeTruthy();
+  expect(savedRatings).toEqual([{ content_item_id: "item-a", rating: 5 }]);
   expect(onRatingProgress).not.toHaveBeenCalledWith({ kind: "completed" });
   expect(ratingButtonsFor(card, "Material B")[2].getAttribute("aria-checked")).toBe("true");
   failB = false;
@@ -479,7 +488,7 @@ it.each([false, true])("recovers an early-expired video from the latest polled U
   fireEvent.focus(window);
   await screen.findByRole("article", { name: "Recover video 2" });
   expect(video.getAttribute("src")).toBe(freshUrl);
-  fireEvent.click(screen.getByRole("button", { name: /2.*Working video/ }));
+  chooseMaterial("working-video");
   expect(screen.getByLabelText("Working video", { selector: "video" }).getAttribute("src")).toBe(workingUrl);
 });
 
@@ -561,8 +570,8 @@ it("resumes inquiry reading when switching materials without carrying progress i
   fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
   fireEvent.change(screen.getByLabelText("Your prediction"), { target: { value: "It stays round." } });
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-  fireEvent.click(screen.getByRole("button", { name: "2. Material B" }));
-  fireEvent.click(screen.getByRole("button", { name: "1. Material A" }));
+  chooseMaterial("item-b");
+  chooseMaterial("item-a");
   expect(screen.getByText("Look at the contact")).toBeTruthy();
   expect(screen.getByLabelText("Your prediction")).toHaveProperty("value", "It stays round.");
   publishedAt = "2026-11-17T13:00:00.000Z";
