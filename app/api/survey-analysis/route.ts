@@ -2,6 +2,7 @@ import { readClassroomContext } from "@/lib/classroom-context-server";
 import { NextResponse } from "next/server";
 import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";
 import { getTaskInterests } from "@/lib/task-interests";
+import { liveGeniusContextEnabled } from "@/lib/genius-context-client";
 
 /**
  * Students' common daily experiences for a learning task (#114).
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    if (process.env.GENIUS_CONTEXT_ENDPOINT) {
+    if (process.env.GENIUS_CONTEXT_ENDPOINT || liveGeniusContextEnabled()) {
       const user = await workspaceRequestUser(request);
       if (!user) return NextResponse.json({ error: "Sign in to view class information." }, { status: 401 });
       const context = await readClassroomContext({ userId: user.geniusId, classId, assignmentId });
