@@ -35,7 +35,7 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
   const classId = user.classId || "", assignmentId = user.assignmentId || "";
   const [sending, setSending] = useState(false);
   const [tab, setTab] = useState<"shared" | "saved">("shared");
-  const [format, setFormat] = useState<"slides" | "video">("slides");
+  const [format, setFormat] = useState<"all" | "slides" | "video">("all");
   const [saved, setSaved] = useState<SavedGalleryCopySummary[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
@@ -275,7 +275,7 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
         <span className="text-sm text-mute">{dirty ? "Unsaved changes" : editor.savedAt ? "Saved to your materials" : "Your editable copy"}</span>
       </div>
       <p className="text-sm text-mute">{editor.copy.source.private ? "Your private material." : `Your copy of “${editor.copy.source.title}”.`} Changes stay private until you share or send.</p>
-      {currentCopy && <GalleryCopyDetails copy={currentCopy} revision={editor.revision} savedAt={editor.savedAt} dirty={dirty} owner={user.name} source={attribution} />}
+      {currentCopy && <GalleryCopyDetails scope={{ classId, assignmentId }} copy={currentCopy} revision={editor.revision} savedAt={editor.savedAt} dirty={dirty} owner={user.name} source={attribution} />}
       {editor.copy.format === "slides" ? !slideLesson.lesson ? <p role={slideLesson.error ? "alert" : "status"} className="text-sm text-mute">{slideLesson.error || "Loading the lesson…"}</p> : <fieldset disabled={busy} className="min-w-0"><SlidesWorkspace key={activeId} user={user}
         embeddedContext={{ lessonNumber: editor.copy.deck.lessonNumber, strategy: editor.copy.deck.strategy, classroomContext: editor.copy.deck.classroomContext, focus: editor.copy.deck.focus }}
         incomingDeck={editor.copy.deck} adaptation={editor.copy.adaptation} incomingDeckSaved={editor.revision > 0} draftNamespace={`gallery:${activeId}`} compactEditor
@@ -299,7 +299,7 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
           <button type="button" className={tab === "shared" ? primary : button} aria-pressed={tab === "shared"} onClick={() => setTab("shared")}>Browse materials</button>
           <button type="button" className={tab === "saved" ? primary : button} aria-pressed={tab === "saved"} onClick={() => setTab("saved")}>My saved materials</button>
         </div>
-        <div role="group" aria-label="Gallery material type" className="flex gap-2">{(["slides", "video"] as const).map(value => <button key={value} type="button" className={format === value ? primary : button} aria-pressed={format === value} onClick={() => setFormat(value)}>{value === "slides" ? "Slides" : "Video"}</button>)}</div>
+        <div role="group" aria-label="Gallery material type" className="flex gap-2">{(["all", "slides", "video"] as const).map(value => <button key={value} type="button" className={format === value ? primary : button} aria-pressed={format === value} onClick={() => setFormat(value)}>{value === "all" ? "All types" : value === "slides" ? "Slides" : "Video"}</button>)}</div>
       </div>
       {tab === "shared" ? <MaterialGalleryPanel scope={{ classId, assignmentId }} lessonNumber={recommendation?.lessonNumber || 0} strategy={recommendation?.strategy || ""} focus={recommendation?.focus} format={format} standalone disabled={busy} onUse={copy => openEditor(copy)} />
         : <SavedMaterialsPanel key={format} items={saved} format={format} loading={listLoading} busy={busy} onOpen={id => void openSaved(id)} />}

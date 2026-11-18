@@ -64,8 +64,8 @@ export async function POST(request: Request) {
 
     const animationPrompt = buildMaterialVideoInstructions(item) || buildAnimationPrompt();
 
-    if (typeof item.lessonNumber === "number") await recordGeneration({ userId: user.geniusId, classId, assignmentId }, { lessonNumber: item.lessonNumber, strategy: item.strategy, format: "video", operation: "video", model: "grok-imagine-video", prompt: { system: "", user: animationPrompt }, settings: item.teachingContext, parentId: item.generation?.id,
-      parameters: { contentItemId: item.id, duration: 4, aspect_ratio: "1:1", resolution: "480p", referenceSha256: createHash("sha256").update(imageUrl).digest("hex") } });
+    const generation = typeof item.lessonNumber === "number" ? await recordGeneration({ userId: user.geniusId, classId, assignmentId }, { lessonNumber: item.lessonNumber, strategy: item.strategy, format: "video", operation: "video", model: "grok-imagine-video", prompt: { system: "", user: animationPrompt }, settings: item.teachingContext, parentId: item.generation?.id,
+      parameters: { contentItemId: item.id, duration: 4, aspect_ratio: "1:1", resolution: "480p", referenceSha256: createHash("sha256").update(imageUrl).digest("hex") } }) : undefined;
 
     const res = await fetch(`${XAI_VIDEO_BASE}/generations`, {
       method: "POST",
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
     if (!validVideoRequestId(data.request_id)) {
       throw new Error("x.ai did not return a request_id.");
     }
-    await saveMaterialVideoJob(data.request_id, { classId, assignmentId, studentId, contentItemId: item.id, ownerId: user.geniusId });
+    await saveMaterialVideoJob(data.request_id, { classId, assignmentId, studentId, contentItemId: item.id, ownerId: user.geniusId }, generation);
 
     return NextResponse.json({
       requestId: data.request_id,

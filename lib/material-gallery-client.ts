@@ -260,3 +260,8 @@ export async function prepareGalleryDelivery(scope: GalleryScope, copyId: string
 export async function updateGalleryMetadata(scope: GalleryScope, id: string, expectedMetadataRevision: number, metadata: GalleryMetadata) {
   return materialResult(await json<{ material: GalleryMaterial }>(scope, { action: "update-metadata", id, expectedMetadataRevision, metadata }, "POST"));
 }
+
+export type MaterialGenerationHistory = { parts: { label: string; records: import("./generation-record").GenerationRecord[]; incomplete: boolean }[] };
+export function galleryGenerationHistory(scope: GalleryScope, target: { id?: string; copyId?: string }, signal?: AbortSignal) {
+  return json<MaterialGenerationHistory>(scope, { action: "generation-history", ...target }, "GET", signal);
+}

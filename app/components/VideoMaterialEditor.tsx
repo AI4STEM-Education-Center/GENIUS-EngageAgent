@@ -96,7 +96,7 @@ export default function VideoMaterialEditor({ item, onChange, disabled, videoUrl
     }
     // Preserve the parent's current identity, focus and provenance metadata.
     // Media lives separately and is never regenerated or replaced by this editor.
-    onChange({ ...item, title, body,
+    onChange({ ...item, title, body, ...(draft.teacherNotes !== undefined ? { teacherNotes: draft.teacherNotes } : {}),
       ...(draft.visualBrief !== undefined ? { visualBrief: draft.visualBrief } : {}),
       ...(activity ? { activity } : {}),
     });
@@ -116,6 +116,7 @@ export default function VideoMaterialEditor({ item, onChange, disabled, videoUrl
       </div>
       <fieldset disabled={disabled} className="mt-5 grid min-w-0 gap-4">
         <label className="text-sm font-semibold">Material title<input className={input} value={draft.title} maxLength={160} onChange={event => setDraft(value => ({ ...value, title: event.target.value }))} /></label>
+        <TextField label="Teacher notes (private)" value={draft.teacherNotes || ""} maxLength={8000} rows={2} onChange={teacherNotes => setDraft(value => ({ ...value, teacherNotes }))} />
         <TextField label="Activity text" value={draft.body} maxLength={16_000} rows={4} onChange={body => setDraft(value => ({ ...value, body }))} />
         {draft.activity?.stages.map((stage, index) => {
           const isCompare = draft.strategy === "cognitive conflict" && stage.id === "compare";

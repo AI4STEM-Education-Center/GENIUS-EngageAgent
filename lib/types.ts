@@ -17,6 +17,8 @@ export type Plan = {
 export type TextMode = "questions" | "phenomenon" | "dialogue";
 
 export type ContentItem = {
+  /** Private teaching notes; excluded from every student publication. */
+  teacherNotes?: string;
   id: string;
   publishedAt?: string;
   lessonNumber?: number;

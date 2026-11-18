@@ -16,7 +16,7 @@ import type { StrategyFocus } from "@/lib/strategy-focus";
 
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50";
 const primary = `${button} !border-brand !bg-brand !text-white hover:!bg-brand-dark`;
-type Props = { scope: GalleryScope; lessonNumber: number; strategy: string; format: "slides" | "video"; focus?: StrategyFocus; disabled?: boolean; onUse: (copy: GalleryCopy, material: GalleryMaterial) => void; refreshKey?: number; browseRequest?: number; standalone?: boolean; recommendationsOnly?: boolean; onBrowse?: () => void; teachingContext?: MaterialTeachingContext; classroomContext?: string };
+type Props = { scope: GalleryScope; lessonNumber: number; strategy: string; format: "all" | "slides" | "video"; focus?: StrategyFocus; disabled?: boolean; onUse: (copy: GalleryCopy, material: GalleryMaterial) => void; refreshKey?: number; browseRequest?: number; standalone?: boolean; recommendationsOnly?: boolean; onBrowse?: () => void; teachingContext?: MaterialTeachingContext; classroomContext?: string };
 
 export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, format, focus, disabled, onUse, refreshKey = 0, browseRequest = 0, standalone = false, recommendationsOnly = false, onBrowse, teachingContext, classroomContext = "" }: Props) {
   const [filter, setFilter] = useState<"topic" | "strategy" | "all" | "mine">(standalone ? "all" : "topic");
@@ -54,7 +54,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     request.current?.abort();
     const controller = new AbortController(); request.current = controller;
     setLoading(true); setError("");
-    const filters: GalleryFilters = { format, recommendGrade: teachingContext?.gradeBand, recommendQuiz: teachingContext?.quizPattern, recommendExperience: teachingContext?.experienceContext, ...(selectedGrade ? { gradeBand: selectedGrade } : {}), search: query || undefined, limit: recommendationsOnly ? 3 : expanded ? 12 : 6, cursor: nextCursor,
+    const filters: GalleryFilters = { ...(format === "all" ? {} : { format }), recommendGrade: teachingContext?.gradeBand, recommendQuiz: teachingContext?.quizPattern, recommendExperience: teachingContext?.experienceContext, ...(selectedGrade ? { gradeBand: selectedGrade } : {}), search: query || undefined, limit: recommendationsOnly ? 3 : expanded ? 12 : 6, cursor: nextCursor,
       ...(filter === "topic" && lessonNumber > 0 ? { lessonNumber } : filter === "strategy" && strategy ? { strategy } : filter === "mine" ? { mine: true } : {}),
       ...(standalone && selectedLesson ? { lessonNumber: Number(selectedLesson) } : {}),
       ...(standalone && selectedStrategy ? { strategy: selectedStrategy } : {}),
@@ -164,7 +164,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
       <GalleryFirstSlidePreview material={material} imageFailed={failedPreviews[material.id] === material.previewImage} onImageError={() => setFailedPreviews(current => ({ ...current, [material.id]: material.previewImage! }))} />
       <div className="flex justify-between gap-2 text-xs text-mute"><span>{material.format === "slides" ? `${material.slideCount ?? ""} slides` : "Animated video"}</span>{material.isOwner && <span className="font-semibold">Shared by you</span>}</div>
       <h4 className="mt-3 text-lg font-bold text-ink">{material.title}</h4>
-      <GalleryMaterialDetails {...material} compact={recommendationsOnly} />
+      <GalleryMaterialDetails scope={scope} {...material} compact={recommendationsOnly} />
       {material.description && <p className="mt-3 text-sm leading-6 text-ink-2">{material.description}</p>}
       <div className="my-3 flex flex-wrap gap-2 text-xs font-semibold">
         {(standalone || recommendationsOnly) ? material.matchReasons?.map(reason => <span key={reason} className="rounded-full bg-ok-light px-2.5 py-1 text-ok">{reason}</span>) : <>
@@ -182,7 +182,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     {removeTarget && <div role="alertdialog" aria-label="Remove shared material" className="mt-4 rounded-lg border border-warn bg-warn-light p-4 text-sm"><p>Remove “{removeTarget.title}” from the Gallery? Teachers who already copied it keep their copies.</p><div className="mt-3 flex gap-2"><button className={button} type="button" onClick={() => setRemoveTarget(null)}>Keep shared</button><button className={button} type="button" disabled={!!copying} onClick={() => void remove()}>Remove shared material</button></div></div>}
     <dialog ref={dialog} aria-label="Gallery material preview" onCancel={closePreview} className="fixed inset-0 m-auto max-h-[90vh] w-[94vw] max-w-3xl overflow-auto rounded-2xl border border-line bg-white p-6 backdrop:bg-ink/50">
       <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-mute">Gallery preview</p><h3 className="mt-1 text-xl font-bold">{previewItem?.title}</h3></div><button type="button" className={button} aria-label="Close Gallery preview" onClick={closePreview}><X size={18} /></button></div>
-      {previewItem && <GalleryMaterialDetails {...(preview?.material || previewItem)} showTags />}
+      {previewItem && <GalleryMaterialDetails scope={scope} {...(preview?.material || previewItem)} showTags />}
       {previewLoading && <p role="status" className="py-10 text-mute">Loading preview…</p>}
       {previewSlide && <>{previewDeck ? <div className="mt-5"><SlidePreview deck={previewDeck} index={previewIndex} /></div> : <div className="mt-5 rounded-xl border border-line bg-canvas p-6"><p className="text-xs font-semibold uppercase text-mute">{previewSlide.stage}</p><h4 className="mt-3 text-2xl font-bold">{previewSlide.title}</h4><p className="mt-4 whitespace-pre-wrap text-lg leading-relaxed">{previewSlide.body}</p><p className="mt-6 font-semibold text-ok">{previewSlide.task}</p></div>}<div className="mt-3 flex items-center justify-between"><button type="button" className={button} disabled={previewIndex === 0} onClick={() => setPreviewIndex(value => value - 1)}><ChevronLeft size={16} />Previous</button><span className="text-sm text-mute">Slide {previewIndex + 1} of {preview?.draft?.slides.length}</span><button type="button" className={button} disabled={previewIndex >= (preview?.draft?.slides.length ?? 0) - 1} onClick={() => setPreviewIndex(value => value + 1)}>Next<ChevronRight size={16} /></button></div></>}
       {preview?.item && <div className="mt-5 space-y-4">{preview.media?.video && <video aria-label="Shared video preview" src={preview.media.video} poster={preview.media.image} controls playsInline preload="metadata" className="max-h-96 w-full rounded-xl bg-ink" />}<p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-2">{preview.item.body}</p>{preview.item.activity?.stages.map(stage => <div key={stage.id}><h4 className="font-semibold">{stage.title}</h4><p className="mt-1 text-sm text-mute">{stage.text}</p></div>)}</div>}

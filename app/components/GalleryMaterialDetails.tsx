@@ -1,8 +1,9 @@
+import MaterialGenerationHistory from "./MaterialGenerationHistory";
 import { GALLERY_TAG_LABELS, type GalleryMaterial } from "@/lib/material-gallery";
 import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
 import { toMisconceptionIds } from "@/lib/misconceptions";
 
-type Props = Partial<GalleryMaterial> & { showTags?: boolean; compact?: boolean; privateMaterial?: boolean };
+type Props = Partial<GalleryMaterial> & { showTags?: boolean; compact?: boolean; privateMaterial?: boolean; scope?: import("@/lib/material-gallery").GalleryScope };
 const meaningful = (value?: string) => value && !/^(Not shared|Not supplied|Not selected|Unknown)/iu.test(value) ? value : undefined;
 const short = (value: string) => value.length > 44 ? `${value.slice(0, 41)}…` : value;
 export default function GalleryMaterialDetails(material: Props) {
@@ -36,7 +37,7 @@ export default function GalleryMaterialDetails(material: Props) {
     {result?.publishedTeacherCount !== undefined && <p className="mt-1 text-xs text-mute" title="Distinct teachers with a currently published classroom copy. Saving or previewing alone does not count.">{result.publishedTeacherCount} {result.publishedTeacherCount === 1 ? "teacher using" : "teachers using"} with students</p>}
     {matchTags && <p className="mt-2 text-xs font-semibold text-ok">{matchTags.filter(tag => tag.matched).length} of 7 match</p>}
     <ul aria-label="Material tags" className="mt-3 flex flex-wrap gap-1.5">
-      {(compact ? tags.slice(0, 7) : tags).map(([label, value], i) => <li key={`${label}-${i}`} title={`${label}: ${value}`}
+      {tags.slice(0, 7).map(([label, value], i) => <li key={`${label}-${i}`} title={`${label}: ${value}`}
         className={`max-w-full truncate rounded-md px-2 py-1 text-xs ${matchTags?.find(tag => tag.label === label)?.matched ? "bg-ok-light text-ok" : label === "Strategy" || label === "Focus" ? "bg-info-light text-info" : "bg-line-2 text-ink-2"}`}>
         {matchTags?.find(tag => tag.label === label)?.matched && <span aria-label="Matches current task">✓ </span>}<span className="font-normal opacity-75">{label}:</span> <span className="font-semibold">{short(value)}</span>
       </li>)}
@@ -51,7 +52,10 @@ export default function GalleryMaterialDetails(material: Props) {
     </div>}
     {showTags && !compact && <details className="mt-3 rounded-lg border border-line p-3">
       <summary className="cursor-pointer font-semibold text-ink">Teaching tags</summary>
+      {tags.length > 7 && <ul className="mt-2 flex flex-wrap gap-1.5">{tags.slice(7).map(([label, value], i) => <li key={i} className="rounded-md bg-canvas px-2 py-1 text-xs">{label}: {value}</li>)}</ul>}
       <p className="mt-2 text-xs">{privateMaterial ? "Settings for your current copy. The captured AI inputs below describe the last AI operation; later manual edits do not change that record." : "Teacher-reviewed tags for this shared version. Class context contains only author-reviewed summaries."}</p>
+      {material.scope && material.id && <MaterialGenerationHistory scope={material.scope} id={material.id} revision={material.metadataRevision} />}
+      {material.metadataReviewedAt && <p className="mt-2 text-xs">Suitability tags confirmed by {material.metadataReviewedBy || "the sharing teacher"} on {new Date(material.metadataReviewedAt).toLocaleString()}. This does not recreate missing original generation inputs.</p>}
       {material.generation ? <details className="mt-3"><summary className="cursor-pointer font-medium">Recorded generation inputs</summary><p className="mt-2 text-xs">Captured {new Date(material.generation.capturedAt).toLocaleString()} · {material.generation.model} · {material.generation.operation.replaceAll("-", " ")}. Private classroom inputs stay private. Sharing tags may describe a later teacher edit.</p><dl className="mt-2 grid gap-2 sm:grid-cols-2">{Object.entries(material.generation.tags).map(([key, value]) => <div key={key}><dt className="font-medium">{GALLERY_TAG_LABELS[key] || key}</dt><dd className="break-words">{value}</dd></div>)}</dl></details>
         : <p className="mt-2 text-xs">Original generation inputs were not recorded. {material.metadataOrigin === "teacher_confirmed" ? "Tags were confirmed by the teacher." : "Some legacy details may be missing."}</p>}
       <dl className="mt-3 grid gap-3 sm:grid-cols-2">{Object.entries(promptTags).map(([key, value]) => <div key={key} className="min-w-0">

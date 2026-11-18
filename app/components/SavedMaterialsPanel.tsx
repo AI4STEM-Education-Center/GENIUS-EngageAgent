@@ -8,14 +8,14 @@ import GalleryMaterialDetails from "./GalleryMaterialDetails";
 
 const field = "min-h-10 rounded-lg border border-line bg-white px-3 text-sm text-ink";
 export default function SavedMaterialsPanel({ items, format, loading, busy, onOpen }: {
-  items: SavedGalleryCopySummary[]; format: "slides" | "video"; loading: boolean; busy: boolean; onOpen(id: string): void;
+  items: SavedGalleryCopySummary[]; format: "all" | "slides" | "video"; loading: boolean; busy: boolean; onOpen(id: string): void;
 }) {
   const [search, setSearch] = useState("");
   const [lesson, setLesson] = useState("");
   const [strategy, setStrategy] = useState("");
   const [grade, setGrade] = useState("");
   const [failed, setFailed] = useState<Record<string, string>>({});
-  const available = items.filter(item => item.format === format);
+  const available = items.filter(item => format === "all" || item.format === format);
   const visible = available.filter(item => (!lesson || item.lessonNumber === Number(lesson)) && (!strategy || item.strategy === strategy) && (!grade || item.gradeBand === grade)
     && (!search.trim() || [item.title, item.source.title, item.strategy, getEngagementStrategyLabel(item.strategy), item.experienceContext, item.gradeBand, ...Object.values(item.generation?.tags || {})].join(" ").toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())));
   return <section aria-label="Saved materials" className="rounded-xl border border-line bg-canvas/60 p-4 sm:p-5">
@@ -32,7 +32,7 @@ export default function SavedMaterialsPanel({ items, format, loading, busy, onOp
       <GalleryFirstSlidePreview material={item} imageFailed={failed[item.copyId] === item.previewImage} onImageError={() => setFailed(current => ({ ...current, [item.copyId]: item.previewImage! }))} />
       <div className="flex justify-between gap-2 text-xs text-mute"><span>{item.format === "slides" ? `${item.slideCount || ""} slides` : "Animated video"}</span><span>Private · Version {item.revision}</span></div>
       <h4 className="mt-3 text-lg font-bold">{item.title}</h4>
-      <GalleryMaterialDetails {...item} privateMaterial compact promptTags={item.generation?.tags} />
+      <GalleryMaterialDetails {...item} privateMaterial promptTags={item.generation?.tags} />
       <p className="mt-3 text-xs text-mute">Saved {new Date(item.savedAt).toLocaleDateString()}{!item.source.private && ` · From ${item.source.title}`}</p>
       <button type="button" disabled={busy} onClick={() => onOpen(item.copyId)} className="mt-4 min-h-10 self-start rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Open</button>
     </article>)}</div>

@@ -680,3 +680,43 @@ it("previews the actual first slide and never leaks a legacy conflict result as 
   expect(item.previewImage).toBeUndefined();
   expect(item.previewSlide).not.toHaveProperty("teacherNotes");
 });
+
+it("completes legacy focus labels without changing the content or breaking pre-existing copies", async () => {
+  const id = await share();
+  const oldCopy = await (await post({ action: "copy", id, mode: "use" })).json();
+  const focus = { misconceptions: ["a"], coreIdeas: [] };
+  const result = await post({ action: "update-metadata", id, expectedMetadataRevision: 0,
+    metadata: { ...metadata, focus, teachingContext: "Short observation prompts", classProfile: "Visual supports" } });
+  expect(result.status).toBe(200);
+  const updated = (await result.json()).material;
+  expect(updated).toMatchObject({ focus, metadataReviewedBy: "Owner", promptTags: { FOCUS_ITEMS: "MC08", CLASS_PROFILE: "Visual supports", LEARNER_CONTEXT: "Short observation prompts" } });
+  expect(updated.metadataReviewedAt).toEqual(expect.any(String));
+  expect(updated.generation).toBeUndefined();
+  const nextCopy = await (await post({ action: "copy", id, mode: "use" })).json();
+  expect(nextCopy.deck.focus).toEqual(focus);
+  const save = await post({ action: "start-save", copyId: oldCopy.copyId, expectedRevision: 0, deck: oldCopy.deck,
+    assets: { evidence: { width: 1, height: 1, digest: hash } } });
+  expect(save.status).toBe(200);
+  expect((await post({ action: "update-metadata", id, expectedMetadataRevision: 1, metadata: { ...metadata, focus: { misconceptions: ["b"], coreIdeas: [] } } })).status).toBe(422);
+});
+
+it("links video and image generation to their saved artifacts and exposes a private-data-free material lineage", async () => {
+  const { recordGeneration } = await import("@/lib/generation-record-server");
+  const input = { lessonNumber: 3, strategy: "cognitive conflict", format: "video" as const, operation: "generate", model: "test-text", prompt: { system: "", user: "PRIVATE full prompt" }, settings: { experienceContext: "PRIVATE check-in" } };
+  const text = await recordGeneration({ ...scope, userId: teacher.geniusId }, input);
+  const image = await recordGeneration({ ...scope, userId: teacher.geniusId }, { ...input, operation: "image", parentId: text.id });
+  const video = await recordGeneration({ ...scope, userId: teacher.geniusId }, { ...input, operation: "video", parentId: text.id, parameters: { duration: 4 } });
+  mocks.media.mockImplementation(async (classId, assignmentId, studentId, contentItemId, kind) => ({ class_id: classId, assignment_id: assignmentId, student_id: studentId, content_item_id: contentItemId,
+    media_type: kind, mime_type: kind === "video" ? "video/mp4" : "image/png", data_url: kind === "video" ? "data:video/mp4;base64,YQ==" : tinyImage, generation: kind === "video" ? video : image }));
+  const response = await post({ action: "share-video", lessonNumber: 3, metadata, item: { id: "source-video", title: "Ball", body: "Observe contact", strategy: "cognitive conflict", lessonNumber: 3, generation: text } });
+  expect(response.status).toBe(200);
+  const material = (await response.json()).material;
+  expect(material.mediaGenerations).toEqual(expect.arrayContaining([expect.objectContaining({ label: "Video", generation: expect.objectContaining({ id: video.id }) }), expect.objectContaining({ label: "Accompanying image", generation: expect.objectContaining({ id: image.id }) })]));
+  const history = await (await get({ action: "generation-history", id: material.id })).json();
+  expect(history.parts.find((p: { label: string }) => p.label === "Video").records.map((r: { id: string }) => r.id)).toEqual([video.id, text.id]);
+  expect(JSON.stringify(history)).not.toContain("PRIVATE");
+  const copy = await (await post({ action: "copy", id: material.id, mode: "use" })).json();
+  expect((await get({ action: "generation-history", copyId: copy.copyId })).status).toBe(200);
+  mocks.session.mockResolvedValue({ ...teacher, geniusId: "intruder" });
+  expect((await get({ action: "generation-history", copyId: copy.copyId })).status).toBe(404);
+});

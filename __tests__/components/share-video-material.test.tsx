@@ -48,7 +48,7 @@ it("previews real media and shares only the edited copy while the class material
   fireEvent.change(screen.getByLabelText("Image panel 1 caption"), { target: { value: "Before contact" } });
   fireEvent.change(screen.getByLabelText("Teaching context (optional)"), { target: { value: "Reusable video setting" } });
   fireEvent.change(screen.getByLabelText("Quiz pattern (optional)"), { target: { value: "55–70% correct" } });
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed/ }));
   fireEvent.click(share);
   await waitFor(() => expect(onShared).toHaveBeenCalledOnce());
   expect(mocks.share).toHaveBeenCalledOnce();
@@ -71,13 +71,13 @@ it("requires reconfirmation after edits and keeps emptied optional fields availa
   render(<ShareVideoMaterial scope={scope} item={itemFixture()} lessonNumber={1} focus={focus} onShared={vi.fn()} />);
   const modal = openShare();
   const share = within(modal).getByRole("button", { name: "Share video material" }) as HTMLButtonElement;
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed/ }));
   expect(share.disabled).toBe(false);
   fireEvent.change(screen.getByLabelText("Video scene description"), { target: { value: "" } });
   expect(share.disabled).toBe(true);
   expect(screen.getByLabelText("Video scene description")).toHaveProperty("value", "");
   fireEvent.change(screen.getByLabelText("Video scene description"), { target: { value: "A neutral scene" } });
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed/ }));
   fireEvent.change(screen.getByLabelText("Observed outcome"), { target: { value: "" } });
   expect(share.disabled).toBe(true);
   expect(screen.getByLabelText("Observed outcome")).toHaveProperty("value", "");
@@ -105,7 +105,7 @@ it("exposes every analogy source text for review and saves edited mapping and im
   }
   fireEvent.change(screen.getByLabelText("Mapping 1 relationship"), { target: { value: "The two arrangements have repeated units." } });
   fireEvent.change(screen.getByLabelText("Image panel 1 alt"), { target: { value: "A neutral drawing of the spring." } });
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed/ }));
   fireEvent.click(screen.getByRole("button", { name: "Share video material" }));
   await waitFor(() => expect(onShared).toHaveBeenCalledOnce());
   const copy = mocks.share.mock.calls[0][1];
@@ -120,7 +120,7 @@ it("retains the edited copy when sharing fails and retries only after a delibera
   render(<ShareVideoMaterial scope={scope} item={itemFixture()} lessonNumber={1} focus={focus} onShared={onShared} />);
   openShare();
   fireEvent.change(screen.getByLabelText("Shared title"), { target: { value: "My reviewed copy" } });
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed/ }));
   fireEvent.click(screen.getByRole("button", { name: "Share video material" }));
   expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Video storage is unavailable.");
   expect(onShared).not.toHaveBeenCalled();
@@ -137,7 +137,7 @@ it("aborts an in-flight share on unmount and ignores a late success", async () =
   const onShared = vi.fn();
   const view = render(<ShareVideoMaterial scope={scope} item={itemFixture()} lessonNumber={1} focus={focus} onShared={onShared} />);
   const modal = openShare();
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed/ }));
   fireEvent.click(screen.getByRole("button", { name: "Share video material" }));
   expect(screen.getByRole("button", { name: "Sharing…" })).toHaveProperty("disabled", true);
   const cancel = new Event("cancel", { cancelable: true });
@@ -154,7 +154,7 @@ it("does not invent focus metadata for a legacy video with no saved focus", asyn
   const onShared = vi.fn();
   render(<ShareVideoMaterial scope={scope} item={itemFixture()} lessonNumber={1} onShared={onShared} />);
   openShare();
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed/ }));
   fireEvent.click(screen.getByRole("button", { name: "Share video material" }));
   await waitFor(() => expect(onShared).toHaveBeenCalledOnce());
   expect(mocks.share.mock.calls[0][3]).not.toHaveProperty("focus");
@@ -168,8 +168,22 @@ it("updates the app-owned comparison text when the reviewed observed outcome cha
   expect(compare.readOnly).toBe(true);
   fireEvent.change(screen.getByLabelText("Observed outcome"), { target: { value: "The ball changes shape during contact." } });
   expect(compare.value).toContain("The ball changes shape during contact.");
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed/ }));
   fireEvent.click(screen.getByRole("button", { name: "Share video material" }));
   await waitFor(() => expect(onShared).toHaveBeenCalledOnce());
   expect(mocks.share.mock.calls[0][1].activity.stages[3].text).toBe("What we observed in the activity: The ball changes shape during contact.\nHow did what we observed match or differ from your recorded prediction?");
+});
+
+it("excludes optional teacher notes and requires a fresh review after toggling them", async () => {
+  const item = { ...itemFixture(), teacherNotes: "Private scaffolding notes" };
+  render(<ShareVideoMaterial scope={scope} item={item} lessonNumber={3} videoUrl={videoUrl} onShared={vi.fn()} />);
+  openShare();
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed/ }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Include teacher notes" }));
+  expect((screen.getByRole("button", { name: "Share video material" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("checkbox", { name: /I reviewed/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Share video material" }));
+  await waitFor(() => expect(mocks.share).toHaveBeenCalledOnce());
+  expect(mocks.share.mock.calls[0][1].teacherNotes).toBe("");
+  expect(item.teacherNotes).toBe("Private scaffolding notes");
 });
