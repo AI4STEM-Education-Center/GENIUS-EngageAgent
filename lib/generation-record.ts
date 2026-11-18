@@ -20,3 +20,5 @@ export function isGenerationRecord(v: unknown): v is GenerationRecord {
     && typeof r.model === "string" && !!r.tags && typeof r.tags === "object" && !Array.isArray(r.tags)
     && Object.keys(r.tags).length <= 40 && Object.values(r.tags).every(x => typeof x === "string" && x.length <= 4000);
 }
+
+export type MaterialGenerationPart = { label: string; generation?: GenerationRecord };

@@ -2,10 +2,10 @@ import type { GalleryMaterial } from "@/lib/material-gallery";
 
 /** The cover follows slide 1's reveal order, including text-only legacy decks. */
 export default function GalleryFirstSlidePreview({ material, imageFailed, onImageError }: {
-  material: Pick<GalleryMaterial, "previewSlide" | "previewImage">; imageFailed: boolean; onImageError: () => void;
+  material: Pick<GalleryMaterial, "previewSlide" | "previewImage" | "format">; imageFailed: boolean; onImageError: () => void;
 }) {
   const slide = material.previewSlide;
-  if (!slide && !material.previewImage) return null;
+  if (!slide && !material.previewImage) return <div className="mb-3 flex aspect-video max-h-44 items-center justify-center rounded-lg bg-canvas text-sm text-mute">{material.format === "video" ? "▶ Video preview" : "Slide preview"}</div>;
   const image = material.previewImage && !imageFailed
     ? <img src={material.previewImage} alt="" loading="lazy" onError={onImageError} className="h-full w-full object-contain" /> : null;
   if (!slide) return <div className="mb-3 aspect-video max-h-44 overflow-hidden rounded-lg bg-canvas">{image || <p className="flex h-full items-center justify-center text-xs text-mute">Preview image unavailable</p>}</div>;

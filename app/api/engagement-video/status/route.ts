@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMedia, upsertMedia } from "@/lib/nosql";
 import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";
-import { matchesMaterialVideoJob, validVideoRequestId, validVideoScopeId } from "@/lib/material-video-jobs";
+import { materialVideoGeneration, matchesMaterialVideoJob, validVideoRequestId, validVideoScopeId } from "@/lib/material-video-jobs";
 
 export const maxDuration = 60; // Poll + return URL (no download in request)
 
@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "This video request does not belong to this material, or it has expired. Generate the video again." },
         { status: 404, headers: { "Cache-Control": "no-store" } });
     }
+    const generation = await materialVideoGeneration(requestId, { classId: classId!, assignmentId: assignmentId!, studentId: studentId!, contentItemId: contentItemId!, ownerId: user.geniusId });
     const res = await fetch(`${XAI_VIDEO_BASE}/${requestId}`, {
       headers: {
         Authorization: `Bearer ${xaiKey}`,
@@ -124,6 +125,7 @@ export async function GET(request: NextRequest) {
           assignmentId,
           studentId,
           contentItemId,
+          generation,
           mediaType: "video",
           mimeType: "video/mp4",
           dataUrl,

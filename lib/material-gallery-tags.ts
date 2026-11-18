@@ -1,4 +1,5 @@
 import { canonicalGrade } from "./material-teaching-context";
+import { sameExperience } from "./experience-identity";
 import { GALLERY_TAG_LABELS, type GalleryMaterial, type GalleryMetadata } from "./material-gallery";
 import { toMisconceptionIds } from "./misconceptions";
 import { getLesson } from "./quiz-data";
@@ -66,7 +67,7 @@ export function galleryMatches(material: GalleryMaterial, lesson: number, strate
     { label: "Focus", value: material.promptTags?.FOCUS_ITEMS || (material.focus ? [...material.focus.misconceptions.map(id => `Target ${id}`), ...material.focus.coreIdeas.map(i => `Core idea ${i + 1}`)].join(" · ") : "Not recorded"), matched: overlappingFocus > 0 },
     { label: "Grade", value: material.gradeBand || "Not provided", matched: equal(canonicalGrade(material.gradeBand), canonicalGrade(contextTags?.GRADE_LEVEL || "")) },
     { label: "Prior quiz", value: material.quizPattern || "Not recorded", matched: equal(material.quizPattern, contextTags?.CURRENT_UNDERSTANDING) },
-    { label: "Experience", value: material.experienceContext || "Not provided", matched: equal(material.experienceContext, contextTags?.EXPERIENCE_CONTEXT) },
+    { label: "Experience", value: material.experienceContext || "Not provided", matched: sameExperience(material.experienceContext, contextTags?.EXPERIENCE_CONTEXT) },
     { label: "Format", value: material.format === "video" ? "Animated video" : "Slide deck", matched: equal(material.format, contextTags?.FORMAT) },
   ];
   if (sameLesson) reasons.push("Same lesson");

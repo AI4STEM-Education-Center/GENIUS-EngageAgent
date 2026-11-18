@@ -37,6 +37,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const teacher = (await workspaceRequestUser(request))?.role === "teacher";
+    const visible = <T extends { generation?: unknown; versions?: { generation?: unknown }[] }>(record: T): T => teacher ? record : { ...record, generation: undefined, versions: record.versions?.map(v => ({ ...v, generation: undefined })) };
     // Single record lookup
     if (contentItemId && mediaType) {
       const record = await getMedia(
@@ -49,7 +51,7 @@ export async function GET(request: NextRequest) {
       if (!record) {
         return NextResponse.json({ found: false }, { status: 404 });
       }
-      return NextResponse.json({ found: true, media: record });
+      return NextResponse.json({ found: true, media: visible(record) });
     }
 
     // List media
@@ -60,7 +62,7 @@ export async function GET(request: NextRequest) {
       contentItemId ?? undefined,
       mediaType ?? undefined,
     );
-    return NextResponse.json({ results: records });
+    return NextResponse.json({ results: records.map(visible) });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to retrieve media.";
@@ -108,4 +110,4 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-import { guardWorkspaceRequest } from "@/lib/workspace-access";
+import { guardWorkspaceRequest, workspaceRequestUser } from "@/lib/workspace-access";

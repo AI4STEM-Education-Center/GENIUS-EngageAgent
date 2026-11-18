@@ -1,0 +1,21 @@
+import { afterEach, expect, it, vi } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+let directory = "";
+afterEach(async () => { vi.unstubAllEnvs(); if (directory) await fs.rm(directory, { recursive: true, force: true }); });
+it("keeps generation provenance with the selected media version, including a legacy version with no record", async () => {
+  directory = await fs.mkdtemp(path.join(os.tmpdir(), "ea-media-generation-qa-"));
+  vi.stubEnv("DYNAMODB_TABLE", ""); vi.stubEnv("ENGAGE_LOCAL_DATA_DIR", directory); vi.resetModules();
+  const { upsertMedia, getMedia, setActiveMediaVersion } = await import("@/lib/nosql");
+  const base = { classId: "qa", assignmentId: "a", studentId: "cohort", contentItemId: "image", mediaType: "image" as const, mimeType: "image/png" };
+  const generation = { id: "00000000-0000-4000-8000-000000000001", capturedAt: "2026-11-18T00:00:00Z", lessonNumber: 3, strategy: "analogy", format: "video" as const, operation: "image", model: "test", promptHash: "0".repeat(64), tags: {} };
+  await upsertMedia({ ...base, dataUrl: "data:image/png;base64,YQ==" });
+  await upsertMedia({ ...base, dataUrl: "data:image/png;base64,Yg==", generation });
+  const args = [base.classId, base.assignmentId, base.studentId, base.contentItemId, base.mediaType] as const;
+  expect((await getMedia(...args))?.generation?.id).toBe(generation.id);
+  await setActiveMediaVersion(...args, 0);
+  expect((await getMedia(...args))?.generation).toBeUndefined();
+  await setActiveMediaVersion(...args, 1);
+  expect((await getMedia(...args))?.generation?.id).toBe(generation.id);
+});

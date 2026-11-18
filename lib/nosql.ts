@@ -1,3 +1,4 @@
+import type { GenerationRecord } from "./generation-record";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
@@ -28,6 +29,7 @@ type StrategyCacheRecord = {
 };
 
 type MediaVersion = {
+  generation?: GenerationRecord;
   data_url?: string;
   s3_bucket?: string;
   s3_key?: string;
@@ -36,6 +38,7 @@ type MediaVersion = {
 };
 
 type MediaRecord = {
+  generation?: GenerationRecord;
   media_id: string;
   content_item_id: string;
   media_type: "image" | "video";
@@ -782,6 +785,7 @@ export const recordTeacherAnnotation = async (
 /* ------------------------------------------------------------------ */
 
 export type UpsertMediaInput = {
+  generation?: GenerationRecord;
   classId: string;
   assignmentId: string;
   studentId: string;
@@ -844,7 +848,7 @@ export const upsertMedia = async (input: UpsertMediaInput) => {
           new PutObjectCommand({ Bucket: s3Bucket, Key: s3Key, Body: body, ContentType: mimeType }),
         );
 
-        const newVersion: MediaVersion = { s3_bucket: s3Bucket, s3_key: s3Key, refinement_prompt: refinementPrompt, created_at: createdAt };
+        const newVersion: MediaVersion = { s3_bucket: s3Bucket, s3_key: s3Key, refinement_prompt: refinementPrompt, ...(input.generation ? { generation: input.generation } : {}), created_at: createdAt };
         const allVersions = [...existingVersions, newVersion];
         const cappedVersions = allVersions.length > MAX_VERSIONS ? allVersions.slice(allVersions.length - MAX_VERSIONS) : allVersions;
         const activeVersion = cappedVersions.length - 1;
@@ -881,7 +885,7 @@ export const upsertMedia = async (input: UpsertMediaInput) => {
       return { media_id: mediaId, content_item_id: contentItemId, media_type: mediaType, mime_type: mimeType, class_id: classId, assignment_id: assignmentId, student_id: studentId, created_at: createdAt };
     }
 
-    const newVersion: MediaVersion = { data_url: dataUrl, refinement_prompt: refinementPrompt, created_at: createdAt };
+    const newVersion: MediaVersion = { data_url: dataUrl, refinement_prompt: refinementPrompt, ...(input.generation ? { generation: input.generation } : {}), created_at: createdAt };
     const allVersions = [...existingVersions, newVersion];
     const cappedVersions = allVersions.length > MAX_VERSIONS ? allVersions.slice(allVersions.length - MAX_VERSIONS) : allVersions;
     const activeVersion = cappedVersions.length - 1;
@@ -907,7 +911,7 @@ export const upsertMedia = async (input: UpsertMediaInput) => {
   }
 
   // Local JSON: store data_url with version history
-  const newVersion: MediaVersion = { data_url: dataUrl, refinement_prompt: refinementPrompt, created_at: createdAt };
+  const newVersion: MediaVersion = { data_url: dataUrl, refinement_prompt: refinementPrompt, ...(input.generation ? { generation: input.generation } : {}), created_at: createdAt };
   let record: MediaRecord;
 
   await withWriteLock(async () => {
@@ -977,7 +981,8 @@ async function resolveMediaUrl(record: MediaRecord): Promise<MediaRecord> {
 
 /** Resolve presigned URLs for a record and all its versions. */
 async function resolveMediaWithVersions(record: MediaRecord): Promise<MediaRecord> {
-  const resolved = await resolveMediaUrl(record);
+  const active = record.versions?.[record.active_version ?? (record.versions.length - 1)];
+  const resolved = await resolveMediaUrl({ ...record, generation: active?.generation });
   if (resolved.versions?.length) {
     resolved.versions = await Promise.all(
       resolved.versions.map(async (v) => {
@@ -1180,7 +1185,7 @@ export const listMedia = async (
     if (mediaType && m.media_type !== mediaType) return false;
     return true;
   });
-  return Promise.all(records.map(resolveMediaUrl));
+  return Promise.all(records.map(resolveMediaWithVersions));
 };
 
 /* ------------------------------------------------------------------ */

@@ -3,6 +3,7 @@ import type { MaterialAdaptation, MaterialTeachingContext } from "./material-tea
 import type { ContentItem } from "./types";
 
 export const GALLERY_TAG_LABELS: Record<string, string> = {
+  IMAGE_SIZE: "Image size", IMAGE_QUALITY: "Image quality", ASPECT_RATIO: "Aspect ratio", RESOLUTION: "Resolution", MEDIA_ENCODING: "Media encoding",
   MODEL: "Generation model", INPUT_CAPTURED_AT: "Inputs captured", FOCUS_ITEMS: "Selected focus", GRADE_LEVEL: "Grade level", SUBJECT: "Subject", TOPIC: "Topic", LEARNING_OBJECTIVE: "Learning objective",
   TARGET_CONCEPT: "Target concept", CURRENT_UNDERSTANDING: "Prior understanding / quiz pattern",
   MISCONCEPTION_OR_GAP: "Misconception or gap", KNOWLEDGE_GAP: "Knowledge gap", TARGET_UNDERSTANDING: "Target understanding",
@@ -42,6 +43,7 @@ export type GalleryMaterial = {
   description: string;
   gradeBand: string;
   experienceContext: string;
+  experienceKey?: string;
   quizPattern: string;
   lessonNumber: number;
   strategy: string;
@@ -57,8 +59,11 @@ export type GalleryMaterial = {
   /** Distinct teachers who completed a private-copy save, not previews/opens. */
   teacherCount?: number;
   generation?: import("./generation-record").GenerationRecord;
+  mediaGenerations?: import("./generation-record").MaterialGenerationPart[];
   metadataOrigin?: "captured" | "teacher_confirmed" | "legacy";
   metadataRevision?: number;
+  metadataReviewedAt?: string;
+  metadataReviewedBy?: string;
   promptTags?: Record<string, string>;
   /** Original curriculum identity, independent of editable public topic labels. */
   lessonIdentity?: { topic: string; learningObjective: string };
@@ -77,7 +82,7 @@ export type GalleryPreviewSource = {
 };
 export type GalleryCopy = (
   | { format: "slides"; deck: SlideDeck & { gallerySource: GalleryProvenance }; source: GalleryProvenance }
-  | { format: "video"; item: ContentItem & { gallerySource: GalleryProvenance }; media: { video: string; image?: string }; source: GalleryProvenance }) & { adaptation?: MaterialAdaptation; teachingContext?: MaterialTeachingContext };
+  | { format: "video"; item: ContentItem & { gallerySource: GalleryProvenance }; media: { video: string; image?: string }; source: GalleryProvenance }) & { mediaGenerations?: import("./generation-record").MaterialGenerationPart[]; adaptation?: MaterialAdaptation; teachingContext?: MaterialTeachingContext };
 
 export type SavedGalleryCopySummary = {
   copyId: string; revision: number; savedAt: string; title: string;

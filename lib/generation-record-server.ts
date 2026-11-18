@@ -42,6 +42,10 @@ export async function recordGeneration(scope: Scope, input: Input): Promise<Gene
     GRADE_LEVEL: input.settings?.gradeBand || "Not supplied", EXPERIENCE_CONTEXT: input.settings?.experienceContext || "Not supplied",
     CURRENT_UNDERSTANDING: input.settings?.quizPattern || "Not shared", LEARNER_CONTEXT: "Private class context retained with generation",
     MODEL: input.model, INPUT_CAPTURED_AT: new Date().toISOString() });
+  for (const [parameter, label] of [["duration", "DURATION"], ["size", "IMAGE_SIZE"], ["quality", "IMAGE_QUALITY"], ["aspect_ratio", "ASPECT_RATIO"], ["resolution", "RESOLUTION"], ["output_format", "MEDIA_ENCODING"]]) {
+    const value = input.parameters?.[parameter];
+    if (typeof value === "string" || typeof value === "number") tags[label] = `${value}${parameter === "duration" ? " seconds" : ""}`;
+  }
   const summary: GenerationRecord = { id: randomUUID(), capturedAt: tags.INPUT_CAPTURED_AT, lessonNumber: input.lessonNumber, strategy: input.strategy,
     format: input.format, operation: input.operation, model: input.model, promptHash: createHash("sha256").update(JSON.stringify(input.prompt)).digest("hex"),
     ...(input.parentId ? { parentId: input.parentId } : {}), tags };
@@ -61,4 +65,20 @@ export async function resolveGeneration(userId: string, value: unknown, lessonNu
   const stored = await workspaceGet<Stored>(partition(userId), id);
   if (!stored || stored.ownerId !== userId || stored.summary.lessonNumber !== lessonNumber || stored.summary.strategy !== strategy || (format && stored.summary.format !== format)) throw new SlideRequestError("Generation record does not belong to this material.", 422);
   return stored.summary;
+}
+
+/** Call only with heads loaded from an authorized material, never a client ID. */
+export async function generationLineage(owners: string[], head: GenerationRecord) {
+  const records: GenerationRecord[] = [];
+  const seen = new Set<string>();
+  let current: GenerationRecord | undefined = head;
+  while (current && records.length < 50 && !seen.has(current.id)) {
+    records.push(current); seen.add(current.id);
+    if (!current.parentId) return { records, incomplete: false };
+    const candidates = await Promise.all([...new Set(owners)].map(owner => workspaceGet<Stored>(partition(owner), current!.parentId!)));
+    const parent = candidates.find(value => value && owners.includes(value.ownerId) && value.summary.lessonNumber === head.lessonNumber && value.summary.strategy === head.strategy && value.summary.format === head.format);
+    if (!parent) return { records, incomplete: true };
+    current = parent.summary;
+  }
+  return { records, incomplete: !!current };
 }

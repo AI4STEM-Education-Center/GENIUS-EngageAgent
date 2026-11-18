@@ -2092,7 +2092,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                   { name: "Lesson", title: selectedLessonData?.lesson_title || "Choose in Step 1", detail: selectedLessonData ? `${selectedLessonData.core_ideas?.length ?? 0} core ideas` : "" },
                   { name: "Strategy", title: selectedStrategies[0] ? getStrategyLabel(selectedStrategies[0]) : "Choose in Step 2", detail: selectedFocusKind ? `${selectedFocus[selectedFocusKind].length} selected ${selectedFocusKind === "misconceptions" ? "misconceptions" : "core ideas"}` : "" },
                   classProfileCard,
-                  { name: "Students’ experiences", title: selectedExperience || (["analogy", "experience bridging"].includes(selectedStrategies[0] ?? "") ? "Choose an experience in Step 2" : "Add familiar examples in classroom context"), detail: selectedExperience ? "Selected for this focus" : "No experience selected" },
+                  { name: "Students’ experiences", title: selectedExperience || classInformation.accepted?.experiences.value?.activities.slice(0, 2).map(activity => activity.activity).join(" · ") || "No reported activities yet",
+                    detail: [selectedExperience ? "Selected for this material" : "Reported by the class · choose a focus experience in Step 2 when needed", classInformation.accepted?.experiences.value && `${classInformation.accepted.experiences.value.responseCount}${classInformation.accepted.experiences.value.classSize === undefined ? " responses" : ` of ${classInformation.accepted.experiences.value.classSize} students responded`} · ${classInformation.accepted.experiences.value.activities.length} reported activities`].filter(Boolean).join(" · ") },
                 ].map((card: { name: string; title: string; detail: string; edit?: string }) => (
                   <div key={card.name} className="rounded-xl bg-canvas p-4">
                     <p className="text-xs font-bold uppercase tracking-wider text-faint">{card.name}</p>
@@ -2124,8 +2125,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                 </div>
                 <div className="grid gap-3">
                   <ClassroomContextPanel context={classInformation} disabled={generationBusy} supplement={classroomContext} />
-                  <label className="grid gap-2 text-sm font-semibold text-slate-700">Classroom context (optional)
-                    <textarea aria-label="Classroom context (optional)" maxLength={1200} rows={4} disabled={generationBusy} value={classroomContext} onChange={event => setClassroomContext(event.target.value)}
+                  <label className="grid gap-2 text-sm font-semibold text-slate-700">Additional classroom context (optional)
+                    <textarea aria-label="Classroom context (optional)" maxLength={1200} rows={3} disabled={generationBusy} value={classroomContext} onChange={event => setClassroomContext(event.target.value)}
                       placeholder="Prior knowledge, classroom needs and constraints" className="rounded-xl border border-line px-3 py-2 font-normal text-ink" />
                     <span className="text-xs font-normal leading-relaxed text-mute">Your saved class profile and selected experience are included when generating or revising. Add any task-specific needs here.</span>
                   </label>

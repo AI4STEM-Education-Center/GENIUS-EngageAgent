@@ -102,8 +102,8 @@ export default function ClassroomContextPanel({ context, disabled, supplement }:
           {source.updatedAt && <p className="text-xs text-mute">Updated {new Date(source.updatedAt).toLocaleString()}</p>}</div>;
       })}</div>
       {accepted.experiences.value && <p className="mt-2 text-mute">{accepted.experiences.value.responseCount}{accepted.experiences.value.classSize === undefined ? " student responses" : ` of ${accepted.experiences.value.classSize} students responded`} · {accepted.experiences.value.activities.length} reported activities</p>}
-      <details className="mt-3"><summary className="cursor-pointer font-medium">Context used for generation</summary>
-        <p className="mt-2 whitespace-pre-wrap text-mute">{[accepted.summary, supplement].filter(Boolean).join("\n\n") || "No class summary supplied. The lesson and your teaching choices will be used."}</p>
+      <details open className="mt-3"><summary className="cursor-pointer font-medium">Context used for generation</summary>
+        <p className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas p-3 text-mute">{[accepted.summary, supplement].filter(Boolean).join("\n\n") || "No class summary supplied. The lesson and your teaching choices will be used."}</p>
         <p className="mt-2 text-xs text-mute">Your selected grade, focus and familiar experience are included too.</p></details>
     </>}
     {context.candidate && [context.candidate.profile.status, context.candidate.experiences.status].some(status => status === "stale" || status === "error") && <p role="alert" className="mt-3 text-warn">The latest class information could not be loaded. Any displayed information is from the last successful update. Your additional context is unchanged.</p>}

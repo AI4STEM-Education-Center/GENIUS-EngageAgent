@@ -27,3 +27,14 @@ it("links only owned, compatible parents and prevents format substitution", asyn
   expect(other.parentId).toBeUndefined(); expect(other.tags.TOPIC).toBeUndefined();
   await expect(resolveGeneration("t1", original, 1, "analogy", undefined, "video")).rejects.toThrow();
 });
+
+it("returns the actual compatible lineage and safe media parameters without substituting a different teacher's parent", async () => {
+  const { generationLineage } = await import("@/lib/generation-record-server");
+  const input = { lessonNumber: 3, strategy: "cognitive conflict", format: "video" as const, operation: "generate", model: "text", prompt: { system: "", user: "PRIVATE input" } };
+  const text = await recordGeneration(scope, input);
+  const video = await recordGeneration(scope, { ...input, operation: "video", model: "video-model", parentId: text.id, parameters: { duration: 4, resolution: "480p", contentItemId: "PRIVATE item" } });
+  expect(video.tags).toMatchObject({ DURATION: "4 seconds", RESOLUTION: "480p" });
+  expect(JSON.stringify(video)).not.toContain("PRIVATE");
+  expect((await generationLineage([scope.userId], video)).records.map(r => r.id)).toEqual([video.id, text.id]);
+  expect(await generationLineage(["other-teacher"], video)).toMatchObject({ incomplete: true, records: [video] });
+});
