@@ -79,3 +79,10 @@ it("keeps native class linking optional and provides an explicit rollout rollbac
   vi.stubEnv("GENIUS_CONTEXT_MODE", "disabled"); expect(liveGeniusContextEnabled()).toBe(false);
   vi.stubEnv("GENIUS_CONTEXT_MODE", ""); vi.stubEnv("NODE_ENV", "production"); expect(liveGeniusContextEnabled()).toBe(true);
 });
+it("accepts a reduced current aggregate after removing the most recent respondent", async () => {
+  const embedded = { ...scope, classId };
+  const first = await readClassroomContext(embedded);
+  fetcher.mockImplementation(async () => new Response(JSON.stringify({ ...provider(), version: "removed", updatedAt: "2026-11-17T00:00:00Z", checkIn: { responseCount: 0, activities: [] } })));
+  const next = await readClassroomContext(embedded);
+  expect(next.id).not.toBe(first.id); expect(next.experiences.value?.responseCount).toBe(0);
+});

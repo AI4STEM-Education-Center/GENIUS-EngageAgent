@@ -87,7 +87,9 @@ export async function readClassroomContext(scope: Scope): Promise<ClassroomConte
       }
       payload = parseGeniusContext(value, scope);
       const previous = await workspaceGet<Payload>(partition(scope.userId), cacheKey);
-      if (previous?.profile.updatedAt && Date.parse(previous.profile.updatedAt) > Date.parse(payload.profile.updatedAt!)) payload = previous;
+      // Live v2 versions hash the exported facts. Removing the most recent
+      // respondent can lower updatedAt, so it is not a monotonic v2 revision.
+      if (!geniusClassId && previous?.profile.updatedAt && Date.parse(previous.profile.updatedAt) > Date.parse(payload.profile.updatedAt!)) payload = previous;
       else await workspacePut([{ partition: partition(scope.userId), key: cacheKey, value: payload }]);
     } catch (error) {
       const previous = await workspaceGet<Payload>(partition(scope.userId), cacheKey);
