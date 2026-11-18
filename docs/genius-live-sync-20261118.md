@@ -41,6 +41,11 @@ GENIUS provider PR: https://github.com/AI4STEM-Education-Center/GENIUS_Learning_
   experiences or reported-experience generation evidence. Unanswered, skipped and
   `neither` options are not presented as students' lived experiences. A response
   still contributes once to the class response count.
+- Recovery of identical inputs refreshes connection metadata automatically,
+  including after DynamoDB returns map keys in a different order. Actual changes
+  still require teacher acceptance. Concurrent idempotent cache/snapshot writes
+  retry transaction conflicts up to twice instead of misreporting a provider
+  outage; other failures retain the existing explicit error/cache behavior.
 
 ## Configuration and rollback
 
@@ -54,7 +59,7 @@ provider. Secrets are never sent to the browser or committed.
 ## Verification
 
 GENIUS: 45 root tests, 62 server tests and production build passed. EngageAgent:
-the full regression suite passed (3,023 tests, 38 skipped), including ten new
+the full regression suite passed (3,028 tests, 38 skipped), including twelve new
 live-provider integration tests. Additional API and component tests verify automatic
 refresh, connected-class changes and class-overview source consistency. TypeScript, changed-file lint and production
 build passed. An existing broad Vitest mock type was narrowed to a callable mock

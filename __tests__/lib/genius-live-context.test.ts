@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { jwtVerify } from "jose";
 const rows = vi.hoisted(() => new Map<string, unknown>());
-vi.mock("@/lib/workspace-store", () => ({
+vi.mock("@/lib/workspace-store", async original => ({
+  ...await original<typeof import("@/lib/workspace-store")>(),
   workspaceGet: vi.fn(async (p, k) => rows.get(`${p}:${k}`) || null),
   workspacePut: vi.fn(async records => { for (const r of records) { if (r.remove) rows.delete(`${r.partition}:${r.key}`); else rows.set(`${r.partition}:${r.key}`, structuredClone(r.value)); } }),
 }));
@@ -13,6 +14,7 @@ import { readClassroomContext, acceptedClassroomContext } from "@/lib/classroom-
 import { materialClassroomContext } from "@/lib/material-classroom-context";
 import { EMPTY_CLASS_PROFILE } from "@/lib/class-profile";
 import { resolveExperienceSelection } from "@/lib/material-experiences";
+import { workspacePut } from "@/lib/workspace-store";
 const teacher = "111111111111111111111111", classId = "aaaaaaaaaaaaaaaaaaaaaaaa", otherClass = "bbbbbbbbbbbbbbbbbbbbbbbb";
 const scope = { userId: teacher, classId: "ea-class-synthetic", assignmentId: "ea-task-synthetic" };
 const provider = () => ({ schemaVersion: 2, classId, version: "v1", updatedAt: "2026-11-18T00:00:00Z", profile: { ...EMPTY_CLASS_PROFILE, locale: "rural" }, checkIn: { responseCount: 1, activities: [{ id: "bike", label: "Riding a bicycle", studentCount: 1, didCount: 1, watchedCount: 0 }] } });
@@ -94,4 +96,16 @@ it("does not describe unanswered or skipped questionnaire options as reported ex
   expect(context.experiences.value?.responseCount).toBe(1);
   expect(context.experiences.value?.activities.map(a => a.activity)).toEqual(["Riding a bicycle"]);
   expect(resolveExperienceSelection("Skipped example", "reported", "genius:skipped", [{ activityId: "genius:skipped", activity: "Skipped example", category: "Everyday", studentCount: 0, doCount: 0, watchedCount: 0, objects: [], incidents: [] }]).missing).toBe(true);
+});
+
+it.each(["cache", "snapshot"])("retries an idempotent %s transaction conflict without reporting a GENIUS outage", async target => {
+  const put = vi.mocked(workspacePut);
+  const conflict = Object.assign(new Error("Transaction cancelled"), { name: "TransactionCanceledException", CancellationReasons: [{ Code: "TransactionConflict" }] });
+  if (target === "snapshot") put.mockImplementationOnce(put.getMockImplementation()!);
+  put.mockRejectedValueOnce(conflict);
+  const context = await readClassroomContext({ ...scope, classId });
+  expect(context.profile.status).toBe("ready");
+  expect(context.experiences.value?.responseCount).toBe(1);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(put).toHaveBeenCalledTimes(3);
 });

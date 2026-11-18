@@ -52,3 +52,38 @@ it("does not retain an accepted snapshot when the connected GENIUS source class 
   await waitFor(() => expect(screen.getByLabelText("Accepted context").textContent).toBe("new"));
   expect(screen.queryByText(/Summary old/)).toBeNull();
 });
+
+it("clears a stale label automatically after the same inputs are recovered", async () => {
+  const original = { ...snapshot("original"), geniusClassId: "class-one", profile: { provider: "genius", status: "ready", value: { locale: "rural", englishLearners: true } } };
+  fetcher.mockResolvedValueOnce(response({ ...original, id: "cached", profile: { ...original.profile, status: "stale" }, experiences: { ...original.experiences, status: "stale" } }))
+    .mockResolvedValueOnce(response({ ...original, id: "recovered", profile: { ...original.profile, syncedAt: "later", value: { englishLearners: true, locale: "rural" } } }));
+  render(<Harness />); await screen.findByRole("alert");
+  fireEvent.focus(window);
+  await waitFor(() => expect(screen.getByLabelText("Accepted context").textContent).toBe("recovered"));
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByText(/using the last available/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "Use updated information" })).toBeNull();
+  expect(screen.getByText(/Summary original/).textContent).toContain("My manual supplement");
+});
+
+it("retains the accepted inputs during a failure and clears the warning on recovery", async () => {
+  const original = snapshot("original");
+  fetcher.mockResolvedValueOnce(response(original))
+    .mockResolvedValueOnce(response({ ...original, id: "stale", profile: { ...original.profile, status: "stale" } }))
+    .mockResolvedValueOnce(response({ ...original, id: "recovered" }));
+  render(<Harness />); await screen.findByText(/Summary original/);
+  fireEvent.focus(window); await screen.findByRole("alert");
+  expect(screen.getByLabelText("Accepted context").textContent).toBe("original");
+  fireEvent.focus(window);
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(screen.queryByRole("button", { name: "Use updated information" })).toBeNull();
+});
+
+it("still requires acceptance when recovered data contains changed experience counts", async () => {
+  const original = { ...snapshot("original", "stale"), experiences: { provider: "genius", status: "stale", value: { responseCount: 1, activities: [] } } };
+  fetcher.mockResolvedValueOnce(response(original)).mockResolvedValueOnce(response({ ...original, id: "changed", profile: { ...original.profile, status: "ready" }, experiences: { ...original.experiences, status: "ready", value: { responseCount: 2, activities: [] } } }));
+  render(<Harness />); await screen.findByRole("alert");
+  fireEvent.focus(window);
+  await screen.findByRole("button", { name: "Use updated information" });
+  expect(screen.getByLabelText("Accepted context").textContent).toBe("original");
+});

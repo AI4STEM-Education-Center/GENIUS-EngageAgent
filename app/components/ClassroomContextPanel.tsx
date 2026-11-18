@@ -3,6 +3,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
 import { contextSourceLabel, type ClassroomContextSnapshot } from "@/lib/classroom-context";
 
+// Refresh transport metadata automatically when the inputs are unchanged. A
+// recovered connection is not a new teaching decision; changed facts still need
+// the teacher's acceptance before they replace the generation context.
+function sameInputs(a: ClassroomContextSnapshot, b: ClassroomContextSnapshot) {
+  const inputs = (s: ClassroomContextSnapshot) => ({ classId: s.classId, assignmentId: s.assignmentId,
+    geniusClassId: s.geniusClassId, geniusConnected: s.geniusConnected, summary: s.summary,
+    sources: [s.profile, s.experiences].map(source => ({ provider: source.provider, version: source.version,
+      updatedAt: source.updatedAt, value: source.value })) });
+  // DynamoDB maps can return keys in a different order after a cached read.
+  const encode = (s: ClassroomContextSnapshot) => JSON.stringify(inputs(s), (_key, value) =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) : value);
+  return [b.profile.status, b.experiences.status].every(status => status === "ready" || status === "empty")
+    && encode(a) === encode(b);
+}
+
 export function useClassroomContext(classId: string, assignmentId: string, enabled: boolean) {
   const scope = `${classId}:${assignmentId}`;
   const [state, setState] = useState<{ scope: string; accepted?: ClassroomContextSnapshot; candidate?: ClassroomContextSnapshot; loading: boolean; error?: string }>({ scope, loading: false });
@@ -15,7 +31,12 @@ export function useClassroomContext(classId: string, assignmentId: string, enabl
       const response = await fetch(`/api/classroom-context?${new URLSearchParams({ classId, assignmentId })}`, { headers: scopedClientAuthHeaders({ classId, assignmentId }), signal: controller.signal, cache: "no-store" });
       const data = await response.json();
       if (!response.ok || !data.context?.id) throw new Error(data.error || "Class information could not load.");
-      if (!controller.signal.aborted) setState(s => ({ scope, loading: false, accepted: s.scope === scope && s.accepted && s.accepted.geniusClassId === data.context.geniusClassId && ![data.context.profile?.status, data.context.experiences?.status].includes("forbidden") ? s.accepted : data.context, candidate: data.context }));
+      if (!controller.signal.aborted) setState(s => {
+        const accepted = s.scope === scope && s.accepted && s.accepted.geniusClassId === data.context.geniusClassId
+          && ![data.context.profile?.status, data.context.experiences?.status].includes("forbidden")
+          && !sameInputs(s.accepted, data.context) ? s.accepted : data.context;
+        return { scope, loading: false, accepted, candidate: data.context };
+      });
     } catch (e) { if (!controller.signal.aborted) setState(s => ({ ...s, loading: false, error: e instanceof Error ? e.message : "Class information could not load." })); }
   }, [classId, assignmentId, enabled, scope]);
   useEffect(() => { void refresh(); return () => request.current?.abort(); }, [refresh]);

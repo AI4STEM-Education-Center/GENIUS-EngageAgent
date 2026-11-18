@@ -3,7 +3,7 @@ import { getClassProfile } from "./nosql";
 import { getTaskInterests, type TaskInterests } from "./task-interests";
 import { classProfileGenerationSummary, parseClassProfileAnswers, type ClassProfile } from "./class-profile";
 import type { ClassroomContextSnapshot, ContextSource } from "./classroom-context";
-import { workspaceGet, workspacePut } from "./workspace-store";
+import { isWorkspaceConflict, workspaceGet, workspacePut } from "./workspace-store";
 import { GeniusContextError, geniusContextOrigin, linkedGeniusClass, liveGeniusContextEnabled, requestGeniusContext } from "./genius-context-client";
 
 type Scope = { userId: string; classId: string; assignmentId: string };
@@ -14,6 +14,19 @@ const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v ===
 const text = (v: unknown, max = 200): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 const timestamp = (v: unknown): v is string => text(v, 40) && Number.isFinite(Date.parse(v));
 const count = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0;
+
+// The profile, experience picker and context panel can refresh concurrently.
+// Their idempotent cache/snapshot writes must not turn a transaction collision
+// into a misleading provider outage. Retry conflicts only, with a small bound.
+async function saveContext(records: Parameters<typeof workspacePut>[0]) {
+  for (let attempt = 0; ; attempt++) {
+    try { await workspacePut(records); return; }
+    catch (error) {
+      if (attempt >= 2 || !isWorkspaceConflict(error)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+}
 
 /** Legacy v1 adapter parser. Live class-wide GENIUS v2 data is scope-checked
  * before conversion below. Callers must authorize the exact teacher/class/task. */
@@ -90,14 +103,14 @@ export async function readClassroomContext(scope: Scope): Promise<ClassroomConte
       // Live v2 versions hash the exported facts. Removing the most recent
       // respondent can lower updatedAt, so it is not a monotonic v2 revision.
       if (!geniusClassId && previous?.profile.updatedAt && Date.parse(previous.profile.updatedAt) > Date.parse(payload.profile.updatedAt!)) payload = previous;
-      else await workspacePut([{ partition: partition(scope.userId), key: cacheKey, value: payload }]);
+      else await saveContext([{ partition: partition(scope.userId), key: cacheKey, value: payload }]);
     } catch (error) {
       const previous = await workspaceGet<Payload>(partition(scope.userId), cacheKey);
       const denied = error instanceof GeniusContextError && [401, 403, 404].includes(error.status);
       const source = <T>(s?: ContextSource<T>): ContextSource<T> => denied ? { provider: "genius", status: "forbidden" } : s ? { ...s, status: s.status === "forbidden" ? "forbidden" : "stale" } : { provider: "genius", status: "error" };
       payload = { schemaVersion: 1, classId: scope.classId, assignmentId: scope.assignmentId, geniusConnected: true,
         profile: source(previous?.profile), experiences: source(previous?.experiences), summary: denied ? "" : previous?.summary || "" };
-      if (denied) await workspacePut([{ partition: partition(scope.userId), key: cacheKey, value: payload }]);
+      if (denied) await saveContext([{ partition: partition(scope.userId), key: cacheKey, value: payload }]);
     }
   }
   if (liveGeniusContextEnabled()) payload = { ...payload, canLinkGenius: scope.classId.startsWith("ea-class-"),
@@ -106,7 +119,7 @@ export async function readClassroomContext(scope: Scope): Promise<ClassroomConte
   // information must not continually prompt the teacher to accept a new version.
   const id = digest({ ...payload, profile: { ...payload.profile, syncedAt: undefined }, experiences: { ...payload.experiences, syncedAt: undefined } });
   const snapshot = JSON.parse(JSON.stringify({ ...payload, id })) as ClassroomContextSnapshot;
-  await workspacePut([{ partition: partition(scope.userId), key: `SNAPSHOT#${id}`, value: snapshot }]);
+  await saveContext([{ partition: partition(scope.userId), key: `SNAPSHOT#${id}`, value: snapshot }]);
   return snapshot;
 }
 
