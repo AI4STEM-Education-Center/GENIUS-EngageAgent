@@ -39,7 +39,7 @@ export function parseGeniusContext(value: unknown, scope: Scope): Payload {
       ids.add(activity.id);
       return { activityId: `genius:${activity.id}`, activity: activity.label, category: typeof activity.category === "string" ? activity.category.slice(0, 100) : "Everyday experience",
         studentCount: activity.studentCount, doCount: activity.didCount, watchedCount: activity.watchedCount, objects: [], incidents: [] };
-    }).sort((a, b) => b.studentCount - a.studentCount);
+    }).filter(activity => activity.studentCount > 0).sort((a, b) => b.studentCount - a.studentCount);
     const interests: TaskInterests = { classId: scope.classId, assignmentId: scope.assignmentId, surveyId: `genius:${value.version}`, dailyExperienceTopic: "Experience check-in",
       analyzedAt: value.updatedAt, responseCount: checkIn.responseCount, unclassifiedCount: 0, enoughResponses: checkIn.responseCount >= 3,
       top: checkIn.responseCount >= 3 ? activities.slice(0, 2) : [], activities, stale: false };

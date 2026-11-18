@@ -49,7 +49,35 @@ beforeEach(async () => {
   await workspace.joinWorkspaceClass(student, classroom.joinCode);
   signedIn.user = teacher;
 });
-afterEach(async () => { await rm(dir, { recursive: true, force: true }); vi.unstubAllEnvs(); });
+afterEach(async () => { await rm(dir, { recursive: true, force: true }); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+it("uses the linked GENIUS profile on the class overview and refuses unused local edits", async () => {
+  await post({ classId, profile: answers });
+  vi.stubEnv("GENIUS_CONTEXT_MODE", "live"); vi.stubEnv("GENIUS_CONTEXT_ENDPOINT", "");
+  vi.stubEnv("SSO_SECRET", "unit-context-secret"); vi.stubEnv("GENIUS_URL", "https://learn.ai4genius.org");
+  const sourceId = "aaaaaaaaaaaaaaaaaaaaaaaa";
+  const fetcher = vi.fn(async (url: URL) => new Response(JSON.stringify(url.pathname.endsWith("/classes")
+    ? { classes: [{ id: sourceId, name: "Owned class" }] }
+    : { schemaVersion: 2, classId: sourceId, version: "v1", updatedAt: "2026-11-18T00:00:00Z",
+        profile: { ...answers, locale: "city" }, checkIn: { responseCount: 0, activities: [] } })));
+  vi.stubGlobal("fetch", fetcher);
+  const { linkGeniusClass } = await import("@/lib/genius-context-client");
+  await linkGeniusClass({ userId: teacher.geniusId, classId, assignmentId: taskId }, sourceId);
+  for (const query of [`classId=${classId}`, `classId=${classId}&assignmentId=${taskId}`]) {
+    const response = await get(query);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({ classProfile: { locale: "city" }, source: { provider: "genius", status: "ready" }, manageUrl: `https://learn.ai4genius.org/teacher/classes/${sourceId}/context` });
+  }
+  expect((await post({ classId, profile: { ...answers, locale: "town" } })).status).toBe(409);
+  const { getClassProfile } = await import("@/lib/nosql");
+  expect((await getClassProfile(classId))?.locale).toBe("rural");
+  fetcher.mockClear();
+  for (const user of [student, otherTeacher]) {
+    signedIn.user = user;
+    expect((await get(`classId=${classId}`)).status).toBe(403);
+  }
+  expect(fetcher).not.toHaveBeenCalled();
+});
 
 it("lets the class's teacher set it up on the class page, then see it inside any task", async () => {
   expect(await (await get(`classId=${classId}`)).json()).toEqual({ classProfile: null });

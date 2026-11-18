@@ -26,7 +26,7 @@ export async function recordGeneration(scope: Scope, input: Input): Promise<Gene
   }
   if (input.settings?.contextRef) {
     const context = await acceptedClassroomContext(scope, input.settings.contextRef);
-    const experience = context.experiences.value?.activities.find(a => input.settings?.experienceId ? a.activityId === input.settings.experienceId && a.activity === input.settings.experienceContext : a.activity === input.settings?.experienceContext);
+    const experience = context.experiences.value?.activities.find(a => a.studentCount > 0 && (input.settings?.experienceId ? a.activityId === input.settings.experienceId && a.activity === input.settings.experienceContext : a.activity === input.settings?.experienceContext));
     const settings = { ...input.settings };
     if (settings.experienceSource === "reported") {
       if (experience) settings.experienceId = experience.activityId;

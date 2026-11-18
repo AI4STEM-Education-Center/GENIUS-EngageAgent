@@ -12,6 +12,7 @@ import { linkedGeniusClass, linkGeniusClass, listGeniusClasses, liveGeniusContex
 import { readClassroomContext, acceptedClassroomContext } from "@/lib/classroom-context-server";
 import { materialClassroomContext } from "@/lib/material-classroom-context";
 import { EMPTY_CLASS_PROFILE } from "@/lib/class-profile";
+import { resolveExperienceSelection } from "@/lib/material-experiences";
 const teacher = "111111111111111111111111", classId = "aaaaaaaaaaaaaaaaaaaaaaaa", otherClass = "bbbbbbbbbbbbbbbbbbbbbbbb";
 const scope = { userId: teacher, classId: "ea-class-synthetic", assignmentId: "ea-task-synthetic" };
 const provider = () => ({ schemaVersion: 2, classId, version: "v1", updatedAt: "2026-11-18T00:00:00Z", profile: { ...EMPTY_CLASS_PROFILE, locale: "rural" }, checkIn: { responseCount: 1, activities: [{ id: "bike", label: "Riding a bicycle", studentCount: 1, didCount: 1, watchedCount: 0 }] } });
@@ -85,4 +86,12 @@ it("accepts a reduced current aggregate after removing the most recent responden
   fetcher.mockImplementation(async () => new Response(JSON.stringify({ ...provider(), version: "removed", updatedAt: "2026-11-17T00:00:00Z", checkIn: { responseCount: 0, activities: [] } })));
   const next = await readClassroomContext(embedded);
   expect(next.id).not.toBe(first.id); expect(next.experiences.value?.responseCount).toBe(0);
+});
+it("does not describe unanswered or skipped questionnaire options as reported experiences", async () => {
+  fetcher.mockImplementation(async () => new Response(JSON.stringify({ ...provider(), checkIn: { responseCount: 1,
+    activities: [...provider().checkIn.activities, { id: "skipped", label: "Skipped example", studentCount: 0, didCount: 0, watchedCount: 0 }] } })));
+  const context = await readClassroomContext({ ...scope, classId });
+  expect(context.experiences.value?.responseCount).toBe(1);
+  expect(context.experiences.value?.activities.map(a => a.activity)).toEqual(["Riding a bicycle"]);
+  expect(resolveExperienceSelection("Skipped example", "reported", "genius:skipped", [{ activityId: "genius:skipped", activity: "Skipped example", category: "Everyday", studentCount: 0, doCount: 0, watchedCount: 0, objects: [], incidents: [] }]).missing).toBe(true);
 });
