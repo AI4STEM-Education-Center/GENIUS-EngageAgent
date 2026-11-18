@@ -173,24 +173,25 @@ function CheckInEvidence({ classId, assignmentId, onLoaded, snapshot, onRefresh 
   }
   if (source && ["error", "forbidden"].includes(source.status)) return <>{title}<p role="alert" className="mt-2 text-sm text-mute">{contextSourceLabel(source)}</p><button type="button" onClick={() => snapshot && onRefresh ? onRefresh() : void load()} className="mt-2 text-sm text-brand">Refresh</button></>;
   if (!interests || interests.responseCount === 0) return <>{title}<p className="mt-2 text-sm text-mute">No responses yet</p></>;
-  const others = interests.activities.filter((a) => !interests.top.includes(a) && !interests.top.some((t) => t.activity === a.activity));
+  const featured = interests.enoughResponses ? interests.top : interests.activities.slice(0, 2);
+  const others = interests.activities.filter((a) => !featured.some((t) => t.activity === a.activity));
   return (
     <>
-      <div className="flex items-center gap-2">{title}<span className={`ml-auto ${pill}`}>{plural(interests.responseCount, "response")}</span></div>
+      <div className="flex items-center gap-2">{title}<span className={`ml-auto ${pill}`}>{interests.classSize === undefined ? plural(interests.responseCount, "response") : `${interests.responseCount} of ${interests.classSize} students`}</span></div>
       <p className="mt-2 text-xs text-mute">{source ? contextSourceLabel(source) : "From EngageAgent"} · Updated {new Date(interests.analyzedAt).toLocaleString()}</p>
       {interests.stale && <p role="status" className="mt-2 text-sm text-warn">New responses are available, but analysis could not update. These are the last available results.</p>}
       {!interests.enoughResponses && <p className="mt-2 text-sm text-mute">Common experiences appear after 3 responses.</p>}
-      {interests.top.map((activity, rank) => (
+      {featured.map((activity, rank) => (
         <div key={activity.activity} className="mt-3 rounded-lg border border-line-2 p-3.5">
-          <div className="flex items-center gap-2"><span className={eyebrow}>{RANKS[rank]}</span><span className={pill}>{activity.category}</span></div>
+          <div className="flex items-center gap-2"><span className={eyebrow}>{interests.enoughResponses ? RANKS[rank] : "Reported activity"}</span><span className={pill}>{activity.category}</span></div>
           <div className="mt-1 flex flex-wrap items-baseline gap-x-3">
             <b className="text-[15.5px]">{activity.activity}</b>
             <span className="ml-auto text-sm text-mute">
               {plural(activity.studentCount, "student")} · {activity.doCount} do it{activity.watchedCount ? ` · ${activity.watchedCount} watched` : ""}
             </span>
           </div>
-          {activity.objects.length > 0 && <p className="mt-1 text-xs text-mute">Objects: {activity.objects.join(", ")}</p>}
-          {activity.incidents[0] && <p className="mt-1 text-sm text-ink-2">“{activity.incidents[0]}”</p>}
+          {activity.objects.length > 0 && <p className="mt-1 text-xs text-mute">Objects: {activity.objectCounts?.length ? activity.objectCounts.map(object => `${object.name} (${object.studentCount})`).join(", ") : activity.objects.join(", ")}</p>}
+          {activity.incidents[0] && <p className="mt-1 text-sm text-ink-2">{source?.provider === "genius" && <span className="text-xs text-mute">Teacher-reviewed example: </span>}“{activity.incidents[0]}”</p>}
         </div>
       ))}
       {(others.length > 0 || interests.unclassifiedCount > 0) && (

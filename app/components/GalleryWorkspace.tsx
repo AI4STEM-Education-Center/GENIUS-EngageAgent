@@ -1,16 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, LoaderCircle, Save, Send } from "lucide-react";
+import { ArrowLeft, Save, Send } from "lucide-react";
 import type { UserContext } from "@/lib/auth";
 import type { GalleryCopy, GalleryMaterial, SavedGalleryCopySummary } from "@/lib/material-gallery";
 import { galleryCopyAttribution, prepareGalleryDelivery, listSavedGalleryCopies, loadSavedGalleryCopy, refreshGalleryCopyMedia, saveGalleryCopy } from "@/lib/material-gallery-client";
-import GalleryMaterialDetails from "./GalleryMaterialDetails";
+import GalleryCopyDetails from "./GalleryCopyDetails";
+import SavedMaterialsPanel from "./SavedMaterialsPanel";
 import type { StrategyFocus } from "@/lib/strategy-focus";
 import { scopedTaskFetch } from "@/lib/client-auth";
 import { useTaskLesson } from "@/lib/lesson-client";
 import type { SlideDeck } from "@/lib/slides/model";
-import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
 import MaterialGalleryPanel from "./MaterialGalleryPanel";
 import SlidesWorkspace from "./SlidesWorkspace";
 import VideoMaterialEditor from "./VideoMaterialEditor";
@@ -44,6 +44,7 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
   const [attribution, setAttribution] = useState<Partial<GalleryMaterial> | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const working = useRef<GalleryCopy | null>(null);
+  const [currentCopy, setCurrentCopy] = useState<GalleryCopy | null>(null);
   const baseline = useRef<SlideDeck | GalleryCopy | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -142,11 +143,11 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
     approvedLeave.current = false;
     const value = { copy, revision, savedAt };
     editorRef.current = value; working.current = copy; baseline.current = copy.format === "slides" ? copy.deck : copy;
-    setEditor(value); setDirty(revision === 0); setError(""); setNotice("");
+    setCurrentCopy(copy); setEditor(value); setDirty(revision === 0); setError(""); setNotice("");
   }
   function closeEditor() {
     editorRef.current = null; working.current = null; baseline.current = null;
-    setEditor(null); setDirty(false); setError(""); setNotice(""); setTab("saved");
+    setCurrentCopy(null); setEditor(null); setDirty(false); setError(""); setNotice(""); setTab("saved");
   }
   async function openSaved(id: string) {
     const controller = new AbortController(); requests.current.add(controller); setBusy(true); setError("");
@@ -170,7 +171,7 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
       working.current = savedCopy;
       const next = { copy: savedCopy, revision: result.revision, savedAt: result.savedAt };
       editorRef.current = next; baseline.current = savedCopy.format === "slides" ? savedCopy.deck : savedCopy;
-      setEditor(next); setDirty(false); setNotice("Saved to your materials. Students see it only when you send it."); setRefresh(value => value + 1);
+      setCurrentCopy(savedCopy); setEditor(next); setDirty(false); setNotice("Saved to your materials. Students see it only when you send it."); setRefresh(value => value + 1);
     } catch (reason) {
       if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Your changes could not be saved.");
       throw reason;
@@ -188,6 +189,7 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
     if (!copy || copy.format !== "slides" || copy.deck.id !== deck.id) return;
     approvedLeave.current = false;
     working.current = { ...copy, deck: { ...deck, gallerySource: copy.source } };
+    setCurrentCopy(working.current);
     setDirty(editorRef.current?.revision === 0 || baseline.current !== deck);
   }, []);
   const onSlideBusy = useCallback((_strategy: string, value: boolean) => setSlideBusy(value), []);
@@ -201,7 +203,7 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
     if (current?.format !== "video" || current.item.id !== item.id || !item.gallerySource) return;
     approvedLeave.current = false;
     const next: GalleryCopy = { ...current, item: item as typeof current.item };
-    working.current = next; setEditor(previous => previous ? { ...previous, copy: next } : previous); setDirty(true); setNotice("");
+    working.current = next; setCurrentCopy(next); setEditor(previous => previous ? { ...previous, copy: next } : previous); setDirty(true); setNotice("");
   }, []);
 
   // An unpublished copy still needs fresh signed media after restoration or returning to this tab.
@@ -273,7 +275,7 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
         <span className="text-sm text-mute">{dirty ? "Unsaved changes" : editor.savedAt ? "Saved to your materials" : "Your editable copy"}</span>
       </div>
       <p className="text-sm text-mute">{editor.copy.source.private ? "Your private material." : `Your copy of “${editor.copy.source.title}”.`} Changes stay private until you share or send.</p>
-      {attribution && <details className="rounded-lg border border-line bg-white px-4 py-3"><summary className="cursor-pointer text-sm font-semibold">Material details · {attribution.creatorName || "Author not recorded"}</summary><GalleryMaterialDetails {...attribution} showTags /></details>}
+      {currentCopy && <GalleryCopyDetails copy={currentCopy} revision={editor.revision} savedAt={editor.savedAt} dirty={dirty} owner={user.name} source={attribution} />}
       {editor.copy.format === "slides" ? !slideLesson.lesson ? <p role={slideLesson.error ? "alert" : "status"} className="text-sm text-mute">{slideLesson.error || "Loading the lesson…"}</p> : <fieldset disabled={busy} className="min-w-0"><SlidesWorkspace key={activeId} user={user}
         embeddedContext={{ lessonNumber: editor.copy.deck.lessonNumber, strategy: editor.copy.deck.strategy, classroomContext: editor.copy.deck.classroomContext, focus: editor.copy.deck.focus }}
         incomingDeck={editor.copy.deck} adaptation={editor.copy.adaptation} incomingDeckSaved={editor.revision > 0} draftNamespace={`gallery:${activeId}`} compactEditor
@@ -300,14 +302,7 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
         <div role="group" aria-label="Gallery material type" className="flex gap-2">{(["slides", "video"] as const).map(value => <button key={value} type="button" className={format === value ? primary : button} aria-pressed={format === value} onClick={() => setFormat(value)}>{value === "slides" ? "Slides" : "Video"}</button>)}</div>
       </div>
       {tab === "shared" ? <MaterialGalleryPanel scope={{ classId, assignmentId }} lessonNumber={recommendation?.lessonNumber || 0} strategy={recommendation?.strategy || ""} focus={recommendation?.focus} format={format} standalone disabled={busy} onUse={copy => openEditor(copy)} />
-        : <div className="grid gap-4 sm:grid-cols-2">
-          {listLoading && <p role="status" className="flex items-center gap-2 text-sm text-mute"><LoaderCircle size={16} className="animate-spin" />Loading saved materials…</p>}
-          {saved.filter(item => item.format === format).map(item => <article key={item.copyId} className="rounded-xl border border-line bg-white p-5">
-            <h2 className="text-lg font-bold">{item.title}</h2><p className="my-3 text-sm text-mute">Lesson {item.lessonNumber} · {getEngagementStrategyLabel(item.strategy)}</p>
-            <button type="button" className={primary} disabled={busy} onClick={() => void openSaved(item.copyId)}>Open</button>
-          </article>)}
-          {!listLoading && !saved.some(item => item.format === format) && <p className="py-6 text-sm text-mute">No saved {format === "slides" ? "slide decks" : "videos"} yet. Open a shared material, edit it, and save your copy.</p>}
-        </div>}
+        : <SavedMaterialsPanel key={format} items={saved} format={format} loading={listLoading} busy={busy} onOpen={id => void openSaved(id)} />}
     </>}
     {sending && <SendMaterialDialog current={classId && assignmentId ? { classId, assignmentId } : undefined} className={user.className} taskTitle={taskTitle} onClose={() => setSending(false)} onSend={sendMaterial} />}
     <dialog ref={leaveDialog} role="alertdialog" aria-label="Save your Gallery changes" aria-modal="true"

@@ -41,6 +41,7 @@ export type InterestActivity = {
   watchedCount: number;
   /** Most-mentioned objects/equipment, most common first (up to 5). */
   objects: string[];
+  objectCounts?: { name: string; studentCount: number }[];
   /** Example "something fell, broke, got hurt or went wrong" moments (up to 3), third person, no names. */
   incidents: string[];
 };
@@ -54,6 +55,8 @@ export type TaskInterests = {
   analyzedAt: string;
   /** Submitted responses included in the analysis. */
   responseCount: number;
+  /** Active, non-guest students eligible for the GENIUS check-in. */
+  classSize?: number;
   /** Students whose answers had no clear activity (blank or off-topic). */
   unclassifiedCount: number;
   /** False with fewer than 3 responses; `top` is then empty. */

@@ -109,3 +109,16 @@ it.each(["cache", "snapshot"])("retries an idempotent %s transaction conflict wi
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(put).toHaveBeenCalledTimes(3);
 });
+
+it("keeps class participation, object counts and reviewed examples in generation context", async () => {
+  const rich = { ...provider(), checkIn: { responseCount: 1, classSize: 24, activities: [{ ...provider().checkIn.activities[0], category: "Travel and transport", objects: [{ name: "wheel", studentCount: 1 }], incidents: ["A bicycle slowed when its brakes were applied."] }] } };
+  fetcher.mockImplementation(async () => new Response(JSON.stringify(rich)));
+  const context = await readClassroomContext({ ...scope, classId });
+  expect(context.experiences.value).toMatchObject({ classSize: 24, responseCount: 1, activities: [{ category: "Travel and transport", objectCounts: [{ name: "wheel", studentCount: 1 }], incidents: ["A bicycle slowed when its brakes were applied."] }] });
+  expect(context.summary).toContain("1 of 24 students responded");
+  expect(context.summary).toContain("wheel (1)");
+  expect(context.summary).toContain("Teacher-reviewed example");
+  rich.checkIn.activities[0].objects[0].studentCount = 99;
+  const rejected = await readClassroomContext({ ...scope, classId, assignmentId: "invalid-count-scope" });
+  expect(rejected.experiences.status).toBe("error");
+});

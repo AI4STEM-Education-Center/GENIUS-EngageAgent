@@ -358,9 +358,10 @@ function ContentReview({
   const submitRatings = async () => {
     if (!classId || !assignmentId || !ratingUnlocked || ratingSubmitting) return;
 
-    const pending = contentItems.filter((item) => savedRatings[item.id] == null);
+    const pending = activeMaterial && savedRatings[activeMaterial.id] == null ? [activeMaterial] : [];
+    if (!pending.length) return;
     if (pending.some((item) => ratings[materialVersion(item)] == null)) {
-      setRatingError("Rate every material before submitting.");
+      setRatingError("Choose a rating for this material before submitting.");
       return;
     }
 
@@ -434,7 +435,10 @@ function ContentReview({
   }
 
   const allRatingsSubmitted = contentItems.every((item) => savedRatings[item.id] != null);
-  const allRatingsSelected = contentItems.every((item) => savedRatings[item.id] != null || ratings[materialVersion(item)] != null);
+  const currentRatingSelected = activeMaterial && ratings[materialVersion(activeMaterial)] != null;
+  const ratedCount = contentItems.filter(item => savedRatings[item.id] != null).length;
+  const activeIndex = contentItems.findIndex(item => item.id === activeMaterial?.id);
+  const nextUnrated = contentItems.find(item => item.id !== activeMaterial?.id && savedRatings[item.id] == null);
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -452,7 +456,11 @@ function ContentReview({
         </button>
       </div>}
 
-      {contentItems.length > 1 && <nav aria-label="Choose learning material" className="flex flex-wrap gap-2">{contentItems.map((item, index) => <button key={item.id} type="button" aria-pressed={activeMaterial?.id === item.id} onClick={() => setActiveMaterialId(item.id)} className={activeMaterial?.id === item.id ? primaryButton : secondaryButton}>{index + 1}. {item.title}</button>)}</nav>}
+      {contentItems.length > 1 && <nav aria-label="Choose learning material" className="flex min-w-0 items-end gap-2 rounded-xl border border-line bg-white p-3">
+        <button type="button" className={secondaryButton} aria-label="Previous material" disabled={activeIndex <= 0} onClick={() => setActiveMaterialId(contentItems[activeIndex - 1].id)}>Previous</button>
+        <label className="min-w-0 flex-1 text-xs font-semibold text-mute">Material {activeIndex + 1} of {contentItems.length}<select aria-label="Learning material" value={activeMaterial?.id || ''} onChange={event => setActiveMaterialId(event.target.value)} className="mt-1 block min-h-10 w-full min-w-0 rounded-lg border border-line bg-white px-2 text-sm text-ink">{contentItems.map((item, index) => <option key={item.id} value={item.id}>{index + 1}. {item.title}{savedRatings[item.id] != null ? ' · Rated' : ''}</option>)}</select></label>
+        <button type="button" className={secondaryButton} aria-label="Next material" disabled={activeIndex >= contentItems.length - 1} onClick={() => setActiveMaterialId(contentItems[activeIndex + 1].id)}>Next</button>
+      </nav>}
       {contentItems.filter(item => item.id === activeMaterial?.id).map((item) => {
         const itemMedia = media[item.id];
         return <article key={item.id} aria-label={item.title} className={`${cardStyle} ${item.slides ? "!p-4" : ""}`}>
@@ -532,7 +540,7 @@ function ContentReview({
           {ratingUnlocked ? "1 = not engaging · 5 = extremely engaging" : "Submit your questions first"}
         </p>
         <div className="mt-3 space-y-4">
-          {contentItems.map((item) => {
+          {contentItems.filter(item => item.id === activeMaterial?.id).map((item) => {
             const currentRating = ratings[materialVersion(item)];
             const saved = savedRatings[item.id];
             const locked = !ratingUnlocked || saved != null || ratingSubmitting;
@@ -561,8 +569,10 @@ function ContentReview({
             </div>;
           })}
         </div>
-        {!allRatingsSubmitted && <div className="mt-3 flex justify-end">
-          <button type="button" onClick={submitRatings} disabled={!ratingUnlocked || ratingSubmitting || !allRatingsSelected} className={primaryButton}>
+        {contentItems.length > 1 && <p className="mt-3 text-xs text-mute" role="status">{ratedCount} of {contentItems.length} materials rated</p>}
+        {activeMaterial && savedRatings[activeMaterial.id] != null && nextUnrated && <button type="button" className={`${secondaryButton} mt-3`} onClick={() => setActiveMaterialId(nextUnrated.id)}>Next material to rate</button>}
+        {!allRatingsSubmitted && activeMaterial && savedRatings[activeMaterial.id] == null && <div className="mt-3 flex justify-end">
+          <button type="button" onClick={submitRatings} disabled={!ratingUnlocked || ratingSubmitting || !currentRatingSelected} className={primaryButton}>
             {ratingSubmitting && <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />}
             {ratingSubmitting ? "Submitting…" : "Submit rating"}
           </button>

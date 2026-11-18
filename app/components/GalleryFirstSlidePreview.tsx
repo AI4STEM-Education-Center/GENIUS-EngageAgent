@@ -2,7 +2,7 @@ import type { GalleryMaterial } from "@/lib/material-gallery";
 
 /** The cover follows slide 1's reveal order, including text-only legacy decks. */
 export default function GalleryFirstSlidePreview({ material, imageFailed, onImageError }: {
-  material: GalleryMaterial; imageFailed: boolean; onImageError: () => void;
+  material: Pick<GalleryMaterial, "previewSlide" | "previewImage">; imageFailed: boolean; onImageError: () => void;
 }) {
   const slide = material.previewSlide;
   if (!slide && !material.previewImage) return null;
