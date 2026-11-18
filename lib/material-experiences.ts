@@ -16,6 +16,6 @@ export function parseExperienceSuggestions(value: unknown, activities: string[])
 }
 export function resolveExperienceSelection(value: string, source: "reported" | "ai_suggested" | "teacher_entered" | undefined, activityId: string | undefined, activities: import("./task-interests").TaskInterests["activities"] = []) {
   const reported = source === "ai_suggested" || source === "teacher_entered" ? undefined
-    : activities.find(item => activityId ? item.activityId === activityId : item.activity === value);
+    : activities.find(item => item.studentCount > 0 && (activityId ? item.activityId === activityId : item.activity === value));
   return { value: reported?.activity || value, reported, missing: Boolean(value && source === "reported" && !reported) };
 }

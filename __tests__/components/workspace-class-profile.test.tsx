@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import Workspace from "@/app/components/Workspace";
 
 // The class profile is part of adding a class, and shown and edited on the class page (#173).
-const mocks = vi.hoisted(() => ({ query: "", role: "teacher", profile: null as unknown, adds: [] as Record<string, unknown>[], saves: [] as unknown[], addReply: null as null | (() => unknown), profileReadFails: false, push: vi.fn() }));
+const mocks = vi.hoisted(() => ({ query: "", role: "teacher", profile: null as unknown, profileMeta: {} as Record<string, unknown>, adds: [] as Record<string, unknown>[], saves: [] as unknown[], addReply: null as null | (() => unknown), profileReadFails: false, push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push, replace: vi.fn() }), useSearchParams: () => new URLSearchParams(mocks.query) }));
 const teacher = { geniusId: "teacher", userId: "teacher", role: "teacher", name: "Teacher", email: null };
 const student = { ...teacher, geniusId: "student", userId: "student", role: "student" };
@@ -16,7 +16,7 @@ const classDetail = { classroom: { id: "ea-class-a", name: "Physics", joinCode: 
 const saved = { class_id: "ea-class-a", status: "saved", locale: "rural", groups: ["hispanic_latino", "white"], groupAlternative: null, classType: "honors", englishLearners: true, iepOr504: false, updated_at: "" };
 
 beforeEach(() => {
-  mocks.query = ""; mocks.role = "teacher"; mocks.profile = null; mocks.adds = []; mocks.saves = []; mocks.addReply = null; mocks.profileReadFails = false; mocks.push.mockReset();
+  mocks.query = ""; mocks.role = "teacher"; mocks.profile = null; mocks.profileMeta = {}; mocks.adds = []; mocks.saves = []; mocks.addReply = null; mocks.profileReadFails = false; mocks.push.mockReset();
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const reply = (body: unknown, ok = true) => ({ ok, json: async () => body });
     if (input.startsWith("/api/class-profile")) {
@@ -26,7 +26,7 @@ beforeEach(() => {
         mocks.profile = { ...saved, ...body.profile };
       }
       if (mocks.profileReadFails) return reply({ error: "Storage unavailable" }, false);
-      return reply({ classProfile: mocks.profile });
+      return reply({ classProfile: mocks.profile, ...mocks.profileMeta });
     }
     if (input.startsWith("/api/workspace?classId=ea-class-a&assignmentId")) return reply({ user: { ...teacher, classId: "ea-class-a", assignmentId: "ea-task-a" } });
     if (input === "/api/workspace" && init?.method === "POST") {
@@ -188,6 +188,22 @@ it("shows a saved profile above the tasks, and Edit opens it filled in", async (
   const dialog = await screen.findByRole("dialog", { name: "Tell EngageAgent about this class" });
   expect(within(dialog).getByRole("button", { name: /^Rural/ }).getAttribute("aria-pressed")).toBe("true");
   expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeTruthy();
+});
+
+it("shows the GENIUS profile and its editor, and refreshes it when the teacher returns", async () => {
+  mocks.query = "classId=ea-class-a"; mocks.profile = saved;
+  const manageUrl = "https://learn.ai4genius.org/teacher/classes/aaaaaaaaaaaaaaaaaaaaaaaa/context";
+  mocks.profileMeta = { source: { provider: "genius", status: "ready" }, manageUrl };
+  render(<Workspace />);
+  const section = await screen.findByRole("region", { name: "Class profile" });
+  const edit = await within(section).findByRole("link", { name: "Edit in GENIUS" });
+  expect(edit.getAttribute("href")).toBe(manageUrl);
+  expect(within(section).getByText("From GENIUS")).toBeTruthy();
+  expect(within(section).queryByRole("button", { name: "Edit class profile" })).toBeNull();
+  mocks.profile = { ...saved, locale: "city" };
+  fireEvent(window, new Event("focus"));
+  await within(section).findByText("City");
+  expect(within(section).queryByText("Rural")).toBeNull();
 });
 
 it("treats an older skipped profile as not set", async () => {

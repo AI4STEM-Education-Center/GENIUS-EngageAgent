@@ -13,17 +13,21 @@ import {
   type ClassProfile,
   type ClassProfileAnswers,
 } from "@/lib/class-profile";
+import type { ContextSource } from "@/lib/classroom-context";
 
 /** The class, plus the task when it is opened from inside one (the class page has no task). */
 type Scope = ClientAuthScope & { classId: string };
 
 /** Loads the class profile; null when the teacher hasn't been asked yet. */
 export async function loadClassProfile(scope: Scope): Promise<ClassProfile | null> {
+  return (await loadClassProfileRecord(scope)).classProfile;
+}
+async function loadClassProfileRecord(scope: Scope): Promise<{ classProfile: ClassProfile | null; source?: ContextSource<ClassProfile>; manageUrl?: string }> {
   const params = new URLSearchParams({ classId: scope.classId });
   if (scope.assignmentId) params.set("assignmentId", scope.assignmentId);
   const res = await scopedTaskFetch(scope, `/api/class-profile?${params}`);
   if (!res.ok) throw new Error("Couldn't load the class profile.");
-  return ((await res.json()) as { classProfile: ClassProfile | null }).classProfile;
+  return res.json();
 }
 
 /**
@@ -37,19 +41,34 @@ export function useClassProfile({ classId, assignmentId, enabled }: Scope & { en
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [source, setSource] = useState<ContextSource<ClassProfile>>();
+  const [manageUrl, setManageUrl] = useState<string>();
+  const [error, setError] = useState("");
 
   useEffect(() => {
+    setProfile(null); setSource(undefined); setManageUrl(undefined); setLoaded(false); setOpen(false); setError("");
     if (!enabled) return;
     let cancelled = false;
-    loadClassProfile({ classId, assignmentId })
+    let sequence = 0;
+    const refresh = () => {
+      const request = ++sequence;
+      void loadClassProfileRecord({ classId, assignmentId })
       .then((loaded) => {
-        if (cancelled) return;
-        setProfile(loaded ?? null);
-        setLoaded(true);
+        if (cancelled || request !== sequence) return;
+        setProfile(loaded.classProfile ?? null);
+        setSource(loaded.source); setManageUrl(loaded.manageUrl);
+        setLoaded(true); setError("");
       })
-      .catch(() => {});
+      .catch(() => { if (!cancelled && request === sequence) setError("Couldn't refresh the class profile. Please try again."); });
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    refresh();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [classId, assignmentId, enabled]);
 
@@ -82,7 +101,7 @@ export function useClassProfile({ classId, assignmentId, enabled }: Scope & { en
     </>
   );
 
-  return { profile, loaded, openEditor: () => setOpen(true), element };
+  return { profile, loaded, source, manageUrl, error, openEditor: () => setOpen(true), element };
 }
 
 type Props = {

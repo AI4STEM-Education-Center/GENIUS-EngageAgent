@@ -34,6 +34,13 @@ GENIUS provider PR: https://github.com/AI4STEM-Education-Center/GENIUS_Learning_
   Revoked access clears cached data; transient failures retain clearly marked
   last-known information. Public sharing still requires the teacher-reviewed
   summary; demographics are excluded from generation prompts.
+- The independent class overview reads the same connected GENIUS profile and
+  links to its GENIUS editor. Returning to the page refreshes it. Local profile
+  writes are rejected while connected, avoiding an unused second profile.
+- Only activities with at least one `did` or `watched` response become reported
+  experiences or reported-experience generation evidence. Unanswered, skipped and
+  `neither` options are not presented as students' lived experiences. A response
+  still contributes once to the class response count.
 
 ## Configuration and rollback
 
@@ -47,12 +54,18 @@ provider. Secrets are never sent to the browser or committed.
 ## Verification
 
 GENIUS: 45 root tests, 62 server tests and production build passed. EngageAgent:
-the full regression suite passed (3,017 tests, 38 skipped), including eight new
-live-provider integration tests. Additional component tests verify automatic
-refresh and connected-class changes. TypeScript, changed-file lint and production
+the full regression suite passed (3,023 tests, 38 skipped), including ten new
+live-provider integration tests. Additional API and component tests verify automatic
+refresh, connected-class changes and class-overview source consistency. TypeScript, changed-file lint and production
 build passed. An existing broad Vitest mock type was narrowed to a callable mock
 to resolve the main branch's three TypeScript call errors.
 
-Production acceptance is performed with existing synthetic QA accounts and the
-dedicated GENIUS class; no real student responses are created or modified. Exact
-deployment versions and browser evidence are recorded after acceptance.
+Production acceptance uses existing synthetic QA accounts and the dedicated
+GENIUS class; no real student responses are created or modified. GENIUS PR #93
+and session-isolation followup #94 deployed successfully; EngageAgent PR #226
+reached Amplify deployment 122. Browser checks confirmed optimistic-write conflict
+protection, student denial of the teacher API/page, saved student answers after
+reload, automatic detection of 0→1 and 1→1 response updates, retained manual
+teacher context, and real AI Gallery adaptation followed by a successful save.
+Exact release versions and screenshots for the final followup are recorded in the
+local acceptance artifact.
