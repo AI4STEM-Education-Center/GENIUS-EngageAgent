@@ -24,10 +24,12 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: cspFrameAncestors,
           },
-          {
-            key: "X-Frame-Options",
-            value: allowedOrigins.length > 0 ? "ALLOWALL" : "SAMEORIGIN",
-          },
+          // frame-ancestors alone controls embedding. X-Frame-Options has no
+          // value that allows a list of sites ("ALLOWALL" is not valid), so it
+          // is sent only when no other site may embed EngageAgent.
+          ...(allowedOrigins.length > 0
+            ? []
+            : [{ key: "X-Frame-Options", value: "SAMEORIGIN" }]),
         ],
       },
     ];
