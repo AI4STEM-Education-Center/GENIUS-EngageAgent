@@ -10,7 +10,7 @@ import { notifyTaskCreated, notifyTaskDeleted, notifyTaskUpdated } from "@/lib/g
 import type { AgentTask, AgentTaskLink } from "@/lib/agent-tasks";
 
 export type AgentTaskMode = "create" | "edit" | "view" | "delete" | "launch";
-type Props = { mode: AgentTaskMode; taskId: string | null; geniusOrigin: string | null };
+type Props = { mode: AgentTaskMode; taskId: string | null; geniusOrigins: readonly string[] };
 type TaskSummary = Pick<AgentTask, "agentTaskId" | "title"> & Partial<AgentTask>;
 
 async function call(body: Record<string, unknown>) {
@@ -61,7 +61,7 @@ function TitleForm({ initial, submitLabel, onSave }: { initial: string; submitLa
   );
 }
 
-export default function AgentTaskPage({ mode, taskId, geniusOrigin }: Props) {
+export default function AgentTaskPage({ mode, taskId, geniusOrigins }: Props) {
   const { user, loading, error: authError } = useAuth();
   const [task, setTask] = useState<TaskSummary | null>(null);
   const [links, setLinks] = useState<AgentTaskLink[]>([]);
@@ -96,7 +96,7 @@ export default function AgentTaskPage({ mode, taskId, geniusOrigin }: Props) {
         <TitleForm initial="" submitLabel="Create activity" onSave={async title => {
           const { task: created } = await call({ action: "create", title });
           setTask(created);
-          notifyTaskCreated(created, geniusOrigin);
+          notifyTaskCreated(created, geniusOrigins);
         }} />
       </Shell>
     );
@@ -119,7 +119,7 @@ export default function AgentTaskPage({ mode, taskId, geniusOrigin }: Props) {
           try {
             const { task: archived } = await call({ action: "archive", taskId: task.agentTaskId });
             setTask(archived);
-            notifyTaskDeleted(archived, geniusOrigin);
+            notifyTaskDeleted(archived, geniusOrigins);
           } catch (err) { setNotice(err instanceof Error ? err.message : "Unable to archive."); }
           finally { setArchiving(false); }
         }}>{archiving ? "Archiving..." : "Archive activity"}</button>
@@ -133,7 +133,7 @@ export default function AgentTaskPage({ mode, taskId, geniusOrigin }: Props) {
         const { task: updated } = await call({ action: "update", taskId: task.agentTaskId, title });
         setTask(updated);
         setNotice("Saved.");
-        notifyTaskUpdated(updated, geniusOrigin);
+        notifyTaskUpdated(updated, geniusOrigins);
       }} />
       {notice && <div className="mt-3"><Status message={notice} /></div>}
       {!hasClass && <p className="mt-6 text-sm text-gray-600">Open this activity from a GENIUS class to prepare materials and see results.</p>}
