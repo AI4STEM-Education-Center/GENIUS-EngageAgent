@@ -30,7 +30,7 @@ const message = (type: string, title = "Forces") => [{ type, version: 1, agentId
 describe("/create", () => {
   it("posts genius.task-created to the GENIUS origin only after the save succeeds", async () => {
     mocks.fetch.mockResolvedValueOnce(reply(503, { error: "Storage unavailable." })).mockResolvedValueOnce(reply(201, { task }));
-    render(<AgentTaskPage mode="create" taskId={null} geniusOrigin={GENIUS} />);
+    render(<AgentTaskPage mode="create" taskId={null} geniusOrigins={[GENIUS]} />);
     fireEvent.change(screen.getByLabelText("Activity title"), { target: { value: "Forces" } });
     fireEvent.click(screen.getByRole("button", { name: "Create activity" }));
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Storage unavailable.");
@@ -42,7 +42,7 @@ describe("/create", () => {
   });
   it("never broadcasts when no valid GENIUS origin is configured", async () => {
     mocks.fetch.mockResolvedValue(reply(201, { task }));
-    render(<AgentTaskPage mode="create" taskId={null} geniusOrigin={null} />);
+    render(<AgentTaskPage mode="create" taskId={null} geniusOrigins={[]} />);
     fireEvent.change(screen.getByLabelText("Activity title"), { target: { value: "Forces" } });
     fireEvent.click(screen.getByRole("button", { name: "Create activity" }));
     await screen.findByText(/is ready/);
@@ -50,7 +50,7 @@ describe("/create", () => {
   });
   it("is teacher-only", () => {
     mocks.auth.mockReturnValue({ user: student, loading: false, error: null });
-    render(<AgentTaskPage mode="create" taskId={null} geniusOrigin={GENIUS} />);
+    render(<AgentTaskPage mode="create" taskId={null} geniusOrigins={[GENIUS]} />);
     expect(screen.getByRole("heading").textContent).toBe("Teacher access required");
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
@@ -59,7 +59,7 @@ describe("/create", () => {
 describe("/edit", () => {
   it("posts genius.task-updated after saving, and shows setup only without a class", async () => {
     mocks.fetch.mockResolvedValueOnce(reply(200, { task, links: [] })).mockResolvedValueOnce(reply(200, { task: { ...task, title: "Motion" } }));
-    render(<AgentTaskPage mode="edit" taskId="ea-agent-task-1" geniusOrigin={GENIUS} />);
+    render(<AgentTaskPage mode="edit" taskId="ea-agent-task-1" geniusOrigins={[GENIUS]} />);
     const input = await screen.findByLabelText("Activity title");
     expect(mocks.fetch).toHaveBeenCalledWith({ action: "open", allowArchived: false, taskId: "ea-agent-task-1" });
     expect(screen.queryByLabelText("Teacher workflow")).toBeNull();
@@ -72,15 +72,15 @@ describe("/edit", () => {
   it("opens the class workflow when GENIUS signs a class", async () => {
     mocks.auth.mockReturnValue({ user: { ...teacher, classId: "class-a", assignmentId: "assign-a" }, loading: false, error: null });
     mocks.fetch.mockResolvedValue(reply(200, { task, links: [] }));
-    render(<AgentTaskPage mode="edit" taskId="ea-agent-task-1" geniusOrigin={GENIUS} />);
+    render(<AgentTaskPage mode="edit" taskId="ea-agent-task-1" geniusOrigins={[GENIUS]} />);
     expect(await screen.findByLabelText("Teacher workflow")).toBeTruthy();
   });
   it("shows ownership and missing-task errors without messaging GENIUS", async () => {
     mocks.fetch.mockResolvedValue(reply(403, { error: "You do not have access to this activity." }));
-    render(<AgentTaskPage mode="edit" taskId="ea-agent-task-1" geniusOrigin={GENIUS} />);
+    render(<AgentTaskPage mode="edit" taskId="ea-agent-task-1" geniusOrigins={[GENIUS]} />);
     expect((await screen.findByRole("alert")).textContent).toBe("You do not have access to this activity.");
     cleanup();
-    render(<AgentTaskPage mode="edit" taskId={null} geniusOrigin={GENIUS} />);
+    render(<AgentTaskPage mode="edit" taskId={null} geniusOrigins={[GENIUS]} />);
     expect(screen.getByRole("alert").textContent).toBe("This link is missing its task_id.");
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -89,12 +89,12 @@ describe("/edit", () => {
 describe("/view", () => {
   it("shows class results only when GENIUS signs a class", async () => {
     mocks.fetch.mockResolvedValue(reply(200, { task, links: [{ classId: "class-a" }] }));
-    render(<AgentTaskPage mode="view" taskId="ea-agent-task-1" geniusOrigin={GENIUS} />);
+    render(<AgentTaskPage mode="view" taskId="ea-agent-task-1" geniusOrigins={[GENIUS]} />);
     await screen.findByText("Used by 1 GENIUS class.");
     expect(screen.queryByLabelText("Class results")).toBeNull();
     cleanup();
     mocks.auth.mockReturnValue({ user: { ...teacher, classId: "class-a", assignmentId: "assign-a" }, loading: false, error: null });
-    render(<AgentTaskPage mode="view" taskId="ea-agent-task-1" geniusOrigin={GENIUS} />);
+    render(<AgentTaskPage mode="view" taskId="ea-agent-task-1" geniusOrigins={[GENIUS]} />);
     expect(await screen.findByLabelText("Class results")).toBeTruthy();
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -103,7 +103,7 @@ describe("/view", () => {
 describe("/delete", () => {
   it("asks for confirmation, archives, then posts genius.task-deleted", async () => {
     mocks.fetch.mockResolvedValueOnce(reply(200, { task, links: [] })).mockResolvedValueOnce(reply(200, { task: { ...task, archived: true } }));
-    render(<AgentTaskPage mode="delete" taskId="ea-agent-task-1" geniusOrigin={GENIUS} />);
+    render(<AgentTaskPage mode="delete" taskId="ea-agent-task-1" geniusOrigins={[GENIUS]} />);
     const button = await screen.findByRole("button", { name: "Archive activity" });
     expect(mocks.fetch).toHaveBeenCalledWith({ action: "open", allowArchived: true, taskId: "ea-agent-task-1" });
     expect(postMessage).not.toHaveBeenCalled();
@@ -114,7 +114,7 @@ describe("/delete", () => {
   });
   it("does not message GENIUS when archiving fails", async () => {
     mocks.fetch.mockResolvedValueOnce(reply(200, { task, links: [] })).mockResolvedValueOnce(reply(503, { error: "Storage unavailable." }));
-    render(<AgentTaskPage mode="delete" taskId="ea-agent-task-1" geniusOrigin={GENIUS} />);
+    render(<AgentTaskPage mode="delete" taskId="ea-agent-task-1" geniusOrigins={[GENIUS]} />);
     fireEvent.click(await screen.findByRole("button", { name: "Archive activity" }));
     expect((await screen.findByRole("alert")).textContent).toBe("Storage unavailable.");
     expect(postMessage).not.toHaveBeenCalled();
@@ -125,14 +125,14 @@ describe("/launch", () => {
   it("opens the student activity for a launchable task", async () => {
     mocks.auth.mockReturnValue({ user: student, loading: false, error: null });
     mocks.fetch.mockResolvedValue(reply(200, { task: { agentTaskId: "ea-agent-task-1", title: "Forces" } }));
-    render(<AgentTaskPage mode="launch" taskId="ea-agent-task-1" geniusOrigin={GENIUS} />);
+    render(<AgentTaskPage mode="launch" taskId="ea-agent-task-1" geniusOrigins={[GENIUS]} />);
     expect(await screen.findByLabelText("Student activity")).toBeTruthy();
     expect(mocks.fetch).toHaveBeenCalledWith({ action: "launch", taskId: "ea-agent-task-1" });
   });
   it("tells students when the activity was archived", async () => {
     mocks.auth.mockReturnValue({ user: student, loading: false, error: null });
     mocks.fetch.mockResolvedValue(reply(410, { error: "This activity is no longer available." }));
-    render(<AgentTaskPage mode="launch" taskId="ea-agent-task-1" geniusOrigin={GENIUS} />);
+    render(<AgentTaskPage mode="launch" taskId="ea-agent-task-1" geniusOrigins={[GENIUS]} />);
     expect((await screen.findByRole("alert")).textContent).toBe("This activity is no longer available.");
     expect(screen.queryByLabelText("Student activity")).toBeNull();
   });

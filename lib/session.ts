@@ -17,6 +17,24 @@ export const geniusEmbedOrigin = () => {
     return ["https:", "http:"].includes(url.protocol) ? url.origin : null;
   } catch { return null; }
 };
+/** Every GENIUS window that may host the standard URLs: the configured embed
+ * origin first, then the other sites allowed to embed EngageAgent
+ * (ALLOWED_ORIGINS), such as staging. Never a wildcard, never EngageAgent itself. */
+export const geniusEmbedOrigins = () => {
+  const origins: string[] = [];
+  const primary = geniusEmbedOrigin();
+  if (primary) origins.push(primary);
+  let app: string | null = null;
+  try { app = new URL(appOrigin()).origin; } catch { app = null; }
+  for (const entry of (process.env.ALLOWED_ORIGINS ?? "").split(",").map(o => o.trim()).filter(Boolean)) {
+    try {
+      const url = new URL(entry);
+      const allowed = url.protocol === "https:" || (process.env.NODE_ENV !== "production" && url.protocol === "http:");
+      if (allowed && url.origin !== app && !origins.includes(url.origin)) origins.push(url.origin);
+    } catch { /* Not an origin. */ }
+  }
+  return origins;
+};
 export const callbackUrl =() => `${appOrigin()}/api/auth/callback`;
 export const randomValue = () => randomBytes(32).toString("base64url");
 export const challengeFor = (value: string) => createHash("sha256").update(value).digest("base64url");
