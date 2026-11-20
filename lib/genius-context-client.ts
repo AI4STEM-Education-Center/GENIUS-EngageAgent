@@ -15,12 +15,28 @@ export function geniusContextOrigin() {
   if (url.username || url.password || (url.protocol !== "https:" && !(process.env.NODE_ENV !== "production" && url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname)))) throw new Error("Invalid GENIUS origin.");
   return url.origin;
 }
-export async function requestGeniusContext(userId: string, action: "classes" | "classroom", classId?: string): Promise<unknown> {
+/** Every GENIUS that may host an embedded class: GENIUS_URL first, then the other
+ * GENIUS sites allowed to embed EngageAgent (ALLOWED_ORIGINS), such as staging. */
+export function geniusContextOrigins() {
+  const primary = geniusContextOrigin();
+  let app: string | null = null;
+  try { app = process.env.ENGAGE_APP_URL ? new URL(process.env.ENGAGE_APP_URL).origin : null; } catch { app = null; }
+  const origins = [primary];
+  for (const entry of (process.env.ALLOWED_ORIGINS ?? "").split(",").map(o => o.trim()).filter(Boolean)) {
+    try {
+      const url = new URL(entry);
+      const allowed = url.protocol === "https:" || (process.env.NODE_ENV !== "production" && url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname));
+      if (allowed && !url.username && !url.password && url.origin !== app && !origins.includes(url.origin)) origins.push(url.origin);
+    } catch { /* Not an origin; it cannot host a GENIUS class. */ }
+  }
+  return origins;
+}
+export async function requestGeniusContext(userId: string, action: "classes" | "classroom", classId?: string, origin = geniusContextOrigin()): Promise<unknown> {
   if (!liveGeniusContextEnabled()) throw new GeniusContextError(503);
   const key = createHash("sha256").update(`genius-classroom-context-v1\0${process.env.SSO_SECRET}`).digest();
   const token = await new SignJWT({ action, ...(classId ? { classId } : {}) }).setProtectedHeader({ alg: "HS256" })
     .setIssuer("engageagent").setAudience("genius-classroom-context").setSubject(userId).setIssuedAt().setExpirationTime("60s").sign(key);
-  const url = new URL(`/api/sso/engage/context/${action}`, geniusContextOrigin());
+  const url = new URL(`/api/sso/engage/context/${action}`, origin);
   if (classId) url.searchParams.set("classId", classId);
   const response = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     signal: AbortSignal.timeout(8000), redirect: "error", cache: "no-store" });
@@ -28,6 +44,21 @@ export async function requestGeniusContext(userId: string, action: "classes" | "
   const text = await response.text();
   if (text.length > 100_000) throw new GeniusContextError(502);
   return JSON.parse(text);
+}
+/** A GENIUS class lives on exactly one GENIUS (learn or staging have separate
+ * classes). Ask each in turn; the first that recognizes the teacher's class
+ * answers. Each GENIUS still checks that this teacher may see the class. */
+export async function requestGeniusClassroom(userId: string, classId: string): Promise<{ value: unknown; origin: string }> {
+  let failure: unknown = null, denied: GeniusContextError | null = null;
+  for (const origin of geniusContextOrigins()) {
+    try { return { value: await requestGeniusContext(userId, "classroom", classId, origin), origin }; }
+    catch (error) {
+      if (error instanceof GeniusContextError && [401, 403, 404].includes(error.status)) denied ??= error;
+      else failure ??= error;
+    }
+  }
+  // Report an outage before a denial: a GENIUS that could not answer may own the class.
+  throw failure ?? denied ?? new GeniusContextError(503);
 }
 export async function listGeniusClasses(userId: string): Promise<{ id: string; name: string }[]> {
   const raw = await requestGeniusContext(userId, "classes") as { classes?: unknown };

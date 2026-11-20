@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { jwtVerify } from "jose";
 const rows = vi.hoisted(() => new Map<string, unknown>());
@@ -9,7 +9,7 @@ vi.mock("@/lib/workspace-store", async original => ({
 }));
 vi.mock("@/lib/nosql", () => ({ getClassProfile: vi.fn(async () => null) }));
 vi.mock("@/lib/task-interests", () => ({ getTaskInterests: vi.fn(async () => null) }));
-import { linkedGeniusClass, linkGeniusClass, listGeniusClasses, liveGeniusContextEnabled } from "@/lib/genius-context-client";
+import { geniusContextOrigins, linkedGeniusClass, linkGeniusClass, listGeniusClasses, liveGeniusContextEnabled } from "@/lib/genius-context-client";
 import { readClassroomContext, acceptedClassroomContext } from "@/lib/classroom-context-server";
 import { materialClassroomContext } from "@/lib/material-classroom-context";
 import { EMPTY_CLASS_PROFILE } from "@/lib/class-profile";
@@ -121,4 +121,38 @@ it("keeps class participation, object counts and reviewed examples in generation
   rich.checkIn.activities[0].objects[0].studentCount = 99;
   const rejected = await readClassroomContext({ ...scope, classId, assignmentId: "invalid-count-scope" });
   expect(rejected.experiences.status).toBe("error");
+});
+
+describe("classes hosted on another GENIUS (staging)", () => {
+  const learn = "https://learn.ai4genius.org", staging = "https://staging.ai4genius.org";
+  beforeEach(() => { vi.stubEnv("ALLOWED_ORIGINS", `${learn}, ${staging}`); vi.stubEnv("ENGAGE_APP_URL", "https://engageagent.ai4genius.org"); });
+  const answerFrom = (host: string) => fetcher.mockImplementation(async (url: URL) => url.origin === host
+    ? new Response(JSON.stringify({ ...provider(), classId: url.searchParams.get("classId") })) : new Response("Not found", { status: 404 }));
+
+  it("asks GENIUS_URL first, then the other GENIUS sites allowed to embed EngageAgent", () => {
+    vi.stubEnv("ALLOWED_ORIGINS", `https://engageagent.ai4genius.org,${learn},${staging}/,http://insecure.example,not a url`);
+    expect(geniusContextOrigins()).toEqual([learn, staging]);
+  });
+  it("reads a staging class from staging after learn does not recognize it", async () => {
+    answerFrom(staging);
+    const context = await readClassroomContext({ ...scope, classId });
+    expect(context).toMatchObject({ geniusConnected: true, profile: { status: "ready" }, geniusManageUrl: `${staging}/teacher/classes/${classId}/context` });
+    expect(fetcher.mock.calls.map(([url]) => url.origin)).toEqual([learn, staging]);
+    await expect(acceptedClassroomContext({ ...scope, classId }, context.id)).resolves.toMatchObject({ id: context.id });
+  });
+  it("keeps learn classes on a single request to learn", async () => {
+    const context = await readClassroomContext({ ...scope, classId });
+    expect(context.geniusManageUrl).toBe(`${learn}/teacher/classes/${classId}/context`);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("marks the class unavailable only when every GENIUS denies it", async () => {
+    fetcher.mockImplementation(async () => new Response(null, { status: 403 }));
+    const context = await readClassroomContext({ ...scope, classId });
+    expect(context.profile.status).toBe("forbidden"); expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it("reports an outage, not a denial, when one GENIUS cannot answer", async () => {
+    fetcher.mockImplementation(async (url: URL) => new Response(null, { status: url.origin === learn ? 503 : 404 }));
+    const context = await readClassroomContext({ ...scope, classId });
+    expect(context.profile.status).toBe("error");
+  });
 });
