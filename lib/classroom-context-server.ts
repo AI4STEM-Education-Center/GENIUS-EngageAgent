@@ -4,7 +4,7 @@ import { getTaskInterests, type TaskInterests } from "./task-interests";
 import { classProfileGenerationSummary, parseClassProfileAnswers, type ClassProfile } from "./class-profile";
 import type { ClassroomContextSnapshot, ContextSource } from "./classroom-context";
 import { isWorkspaceConflict, workspaceGet, workspacePut } from "./workspace-store";
-import { GeniusContextError, geniusContextOrigin, linkedGeniusClass, liveGeniusContextEnabled, requestGeniusContext } from "./genius-context-client";
+import { GeniusContextError, geniusContextOrigin, linkedGeniusClass, liveGeniusContextEnabled, requestGeniusClassroom } from "./genius-context-client";
 
 type Scope = { userId: string; classId: string; assignmentId: string };
 type Payload = Omit<ClassroomContextSnapshot, "id">;
@@ -92,13 +92,15 @@ export async function readClassroomContext(scope: Scope): Promise<ClassroomConte
   const endpoint = process.env.GENIUS_CONTEXT_ENDPOINT;
   const geniusClassId = await linkedGeniusClass(scope);
   let payload: Payload;
+  let geniusOrigin: string | null = null;
   const cacheKey = `PROVIDER#${digest([scope.classId, scope.assignmentId, ...(geniusClassId ? [geniusClassId] : [])])}`;
   if (!endpoint && !geniusClassId) payload = await localContext(scope);
   else {
     try {
       let value: unknown;
       if (geniusClassId) {
-        const raw = await requestGeniusContext(scope.userId, "classroom", geniusClassId);
+        const { value: raw, origin } = await requestGeniusClassroom(scope.userId, geniusClassId);
+        geniusOrigin = origin;
         if (!record(raw) || raw.schemaVersion !== 2 || raw.classId !== geniusClassId) throw new Error("Incompatible GENIUS class information.");
         value = { ...raw, schemaVersion: 1, classId: scope.classId, assignmentId: scope.assignmentId };
       } else {
@@ -129,7 +131,7 @@ export async function readClassroomContext(scope: Scope): Promise<ClassroomConte
     }
   }
   if (liveGeniusContextEnabled()) payload = { ...payload, canLinkGenius: scope.classId.startsWith("ea-class-"),
-    ...(geniusClassId ? { geniusClassId, geniusManageUrl: `${geniusContextOrigin()}/teacher/classes/${geniusClassId}/context` } : {}) };
+    ...(geniusClassId ? { geniusClassId, geniusManageUrl: `${geniusOrigin ?? geniusContextOrigin()}/teacher/classes/${geniusClassId}/context` } : {}) };
   // Synced-at is display metadata, not a semantic version: polling unchanged
   // information must not continually prompt the teacher to accept a new version.
   const id = digest({ ...payload, profile: { ...payload.profile, syncedAt: undefined }, experiences: { ...payload.experiences, syncedAt: undefined } });
