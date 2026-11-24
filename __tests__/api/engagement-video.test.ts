@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextResponse } from "next/server";
-import { conflictActivity, bridgingActivity, critiquingActivity } from "../fixtures/material-activities";
+import { analogyActivity, conflictActivity, bridgingActivity, critiquingActivity } from "../fixtures/material-activities";
 import { buildMaterialVideoInstructions } from "@/lib/material-video";
 
 vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null), workspaceRequestUser: vi.fn(async () => ({ role: "teacher", geniusId: "teacher" })) }));
@@ -22,6 +22,37 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe("strategy-aware material videos", () => {
+  it("sends a timed analogy comparison grounded in the teacher's two panels and one correspondence", async () => {
+    const item = { id: "spring", strategy: "analogy", activity: analogyActivity };
+    const imageUrl = "https://example.org/spring-and-paper.webp";
+    expect((await POST(request({ item, imageUrl }))).status).toBe(200);
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent).toMatchObject({ duration: 4, image: { url: imageUrl } });
+    expect(sent.prompt).toMatch(/0–1 s: Show the target alone[\s\S]*1–2 s: Cut to the familiar analogue alone[\s\S]*2–4 s: Cut to a fixed side-by-side view/);
+    const { target, analogue, correspondences } = analogyActivity.analogyMapping!;
+    for (const value of [target, analogue, ...analogyActivity.image.panels!.map(panel => panel.description),
+      analogyActivity.mappingDepth, correspondences[0].relationship, analogyActivity.stages.find(stage => stage.id === "limits")!.text]) {
+      expect(sent.prompt).toContain(value);
+    }
+    expect(sent.prompt).not.toContain(correspondences[1].relationship);
+    expect(sent.prompt).not.toContain("camera drift");
+  });
+  it("uses saved stage wording to animate structured analogies that predate panel and correspondence fields", async () => {
+    const activity = { ...analogyActivity, analogyMapping: undefined, image: { revealAt: 2, scene: "A spring and folded paper" } };
+    const result = await POST(request({ item: { id: "old-spring", strategy: "analogy", activity }, imageUrl: "https://example.org/spring.webp" }));
+    expect(result.status).toBe(200);
+    const { prompt } = JSON.parse(fetchMock.mock.calls[0][1].body);
+    for (const stage of activity.stages.slice(0, 3)) expect(prompt).toContain(stage.text);
+    expect(prompt).toContain(activity.image.scene);
+  });
+  it("keeps an unstructured analogy on its original illustration without inventing a mapping", async () => {
+    const result = await POST(request({ item: { id: "legacy", strategy: "analogy" }, imageUrl: "https://example.org/old.webp" }));
+    expect(result.status).toBe(200);
+    const { prompt } = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(prompt).toContain("Keep the camera stable");
+    expect(prompt).toContain("Do not invent a second object");
+    expect(prompt).not.toContain("camera drift");
+  });
   it.each([["cognitive conflict", conflictActivity], ["experience bridging", bridgingActivity], ["engaged critiquing", critiquingActivity]] as const)("passes the actual %s activity to the video provider", async (strategy, activity) => {
     const item = { id: "material-1", type: "Inquiry activity", title: "Look closely", body: "Student task", strategy, activity };
     const response = await POST(request({ item, imageUrl: "https://example.org/source.webp" }));
@@ -54,6 +85,7 @@ describe("strategy-aware material videos", () => {
     for (const body of [
       { item: null, imageUrl: "https://example.org/image.webp" },
       { item: { id: "bad" }, imageUrl: {} },
+      { item: { id: "bad", strategy: "analogy", activity: { ...analogyActivity, mappingDepth: "all" } }, imageUrl: "https://example.org/image.webp" },
       { item: { id: "bad", strategy: "cognitive conflict", activity: { ...conflictActivity, image: { ...conflictActivity.image, revealAt: 0 } } }, imageUrl: "https://example.org/image.webp" },
       { item: { id: "bad", strategy: "engaged critiquing", activity: { ...critiquingActivity, image: { ...critiquingActivity.image, revealAt: 0 } } }, imageUrl: "https://example.org/image.webp" },
     ]) expect((await POST(request(body))).status).toBe(400);
