@@ -38,3 +38,35 @@ it("returns the actual compatible lineage and safe media parameters without subs
   expect((await generationLineage([scope.userId], video)).records.map(r => r.id)).toEqual([video.id, text.id]);
   expect(await generationLineage(["other-teacher"], video)).toMatchObject({ incomplete: true, records: [video] });
 });
+
+it("preserves the originally selected lesson labels and identifiers and distinguishes a derived asset from a new selection", async () => {
+  const input = { lessonNumber: 3, strategy: "analogy", format: "video" as const, operation: "generate", model: "test",
+    prompt: { system: "", user: "PRIVATE lesson context" },
+    focus: { kind: "coreIdeas" as const, items: ["Original third idea", "Original first idea"] },
+    focusSelection: { coreIdeas: [2, 0] } };
+  const first = await recordGeneration(scope, input);
+  expect(first.focus).toEqual({ kind: "coreIdeas", origin: "operation", items: [
+    { id: "Core idea 3", label: "Original third idea" }, { id: "Core idea 1", label: "Original first idea" }] });
+  const media = await recordGeneration(scope, { ...input, operation: "video", parentId: first.id, focus: undefined, focusSelection: undefined });
+  expect(media.focus).toEqual({ ...first.focus, origin: "source-material" });
+  const adapted = await recordGeneration(scope, { ...input, parentId: first.id, operation: "adapt", focus: { kind: "coreIdeas", items: ["New second idea"] }, focusSelection: { coreIdeas: [1] } });
+  expect(adapted.focus?.items).toEqual([{ id: "Core idea 2", label: "New second idea" }]);
+  const other = await recordGeneration({ ...scope, userId: "other" }, { ...input, operation: "video", parentId: first.id, focus: undefined });
+  expect(other.focus).toBeUndefined();
+  expect(JSON.stringify(media)).not.toContain("PRIVATE");
+});
+
+it("recovers a retained legacy focus from its own receipt without assigning it today's curriculum IDs", async () => {
+  const { generationLineage } = await import("@/lib/generation-record-server");
+  const original = await recordGeneration(scope, { lessonNumber: 3, strategy: "cognitive conflict", format: "video", operation: "generate", model: "test",
+    prompt: { system: "", user: "" }, focus: { kind: "misconceptions", items: ["Original lesson wording"] }, focusSelection: { misconceptions: ["a"] } });
+  expect(original.focus?.items[0].id).toBe("MC08");
+  const stored = [...store.values()][0] as { summary: typeof original; input: { focusSelection?: unknown; focus?: unknown } };
+  delete stored.summary.focus; delete stored.input.focusSelection;
+  const { focus: _newField, ...legacy } = original;
+  expect(_newField).toBeDefined();
+  expect((await generationLineage([scope.userId], legacy)).records[0].focus?.items).toEqual([{ label: "Original lesson wording" }]);
+  expect((await generationLineage(["someone-else"], legacy)).records[0].focus).toBeUndefined();
+  delete stored.input.focus;
+  expect((await generationLineage([scope.userId], legacy)).records[0].focus).toBeUndefined();
+});

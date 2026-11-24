@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     if (operation === "review-slide" && draft) {
       const slideIndex = Number(body.slideIndex);
       const prompt = slideRevisionPrompt(lesson, strategy, draft, slideIndex, body.feedback as string | undefined, classroomContext, focus);
-      const generation = await recordGeneration(authorized, { lessonNumber: lesson.lessonNumber, strategy, format: "slides", operation, model, prompt, settings, focus, parameters: { slideIndex, analogyMethod, ...slideTextSettings(model), max_output_tokens: slideTextRequestLimits(model, "generate").maxCompletionTokens, outputSchema: slideRevisionOutputFormat(draft, strategy, slideIndex).json_schema }, parentId: typeof body.generationId === "string" ? body.generationId : undefined });
+      const generation = await recordGeneration(authorized, { lessonNumber: lesson.lessonNumber, strategy, format: "slides", operation, model, prompt, settings, focus, focusSelection: body.focus, parameters: { slideIndex, analogyMethod, ...slideTextSettings(model), max_output_tokens: slideTextRequestLimits(model, "generate").maxCompletionTokens, outputSchema: slideRevisionOutputFormat(draft, strategy, slideIndex).json_schema }, parentId: typeof body.generationId === "string" ? body.generationId : undefined });
       const format = slideRevisionOutputFormat(draft, strategy, slideIndex).json_schema;
       const { reasoning_effort } = slideTextSettings(model);
       return await beginSlideJob(request, authorized, {
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     const diagnostic = await slideDiagnosticContext(authorized, lesson.lessonNumber);
     const source = await loadSlideSource(strategy, analogyMethod);
     const prompt = slidePrompt(lesson, strategy, draft, body.feedback as string | undefined, diagnostic, { version: promptVersion, referenceText: source.text, classroomContext, analogyMethod, focus });
-    const generation = await recordGeneration(authorized, { lessonNumber: lesson.lessonNumber, strategy, format: "slides", operation, model, prompt, settings, focus, parameters: { promptVersion, sourceSha256: source.sha256, analogyMethod, ...slideTextSettings(model), max_output_tokens: slideTextRequestLimits(model, "generate").maxCompletionTokens, outputSchema: slideOutputFormat(strategy, analogyMethod).json_schema }, parentId: typeof body.generationId === "string" ? body.generationId : undefined });
+    const generation = await recordGeneration(authorized, { lessonNumber: lesson.lessonNumber, strategy, format: "slides", operation, model, prompt, settings, focus, focusSelection: body.focus, parameters: { promptVersion, sourceSha256: source.sha256, analogyMethod, ...slideTextSettings(model), max_output_tokens: slideTextRequestLimits(model, "generate").maxCompletionTokens, outputSchema: slideOutputFormat(strategy, analogyMethod).json_schema }, parentId: typeof body.generationId === "string" ? body.generationId : undefined });
     const limits = slideTextRequestLimits(model, "generate");
     const format = slideOutputFormat(strategy, analogyMethod).json_schema;
     const { reasoning_effort } = slideTextSettings(model);

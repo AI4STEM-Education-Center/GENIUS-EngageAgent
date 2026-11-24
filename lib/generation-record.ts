@@ -1,4 +1,10 @@
 /** Safe provenance shown to the teacher; full inputs stay on the server. */
+export type GenerationFocus = {
+  kind: "coreIdeas" | "misconceptions";
+  origin: "operation" | "source-material";
+  items: { label: string; id?: string }[];
+};
+
 export type GenerationRecord = {
   id: string;
   capturedAt: string;
@@ -9,6 +15,7 @@ export type GenerationRecord = {
   model: string;
   promptHash: string;
   parentId?: string;
+  focus?: GenerationFocus;
   tags: Record<string, string>;
 };
 export function isGenerationRecord(v: unknown): v is GenerationRecord {
