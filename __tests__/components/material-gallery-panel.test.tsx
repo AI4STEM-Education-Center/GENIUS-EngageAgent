@@ -90,11 +90,60 @@ it("keeps current-task match indicators when a shared preview finishes loading",
   fireEvent.click(within(await card()).getByRole("button", { name: "Preview" }));
   await screen.findByLabelText("Rendered shared slide");
   expect(within(screen.getByRole("dialog")).getByText("1 of 7 match")).toBeTruthy();
+  expect(within(screen.getByRole("dialog")).getByText("Matches class check-in")).toBeTruthy();
+});
+
+it.each([false, true])("adapts an identified task match from Browse all using the same private settings (preview: %s)", async preview => {
+  const tagged = { ...material, lessonIdentity: { topic: "Forces", learningObjective: "Observe deformation" },
+    matchReasons: ["Same lesson", "Same strategy", "Matches class check-in"] };
+  mocks.list.mockResolvedValue({ items: [tagged] });
+  mocks.preview.mockResolvedValue({ ...detail, material: tagged });
+  const focus = { misconceptions: ["a"], coreIdeas: [] };
+  const teachingContext = { gradeBand: "Middle school", quizPattern: "Under 55% correct", contextRef: "a".repeat(64) };
+  const classroomContext = "Use one short instruction per slide";
+  render(<MaterialGalleryPanel {...props({ standalone: true, teachingContext, focus, classroomContext })} />);
+  const article = await card();
+  if (preview) {
+    fireEvent.click(within(article).getByRole("button", { name: "Preview" }));
+    await screen.findByLabelText("Rendered shared slide");
+  }
+  fireEvent.click(within(preview ? screen.getByRole("dialog") : article).getByRole("button", { name: "Adapt to my class" }));
+  await waitFor(() => expect(mocks.copy).toHaveBeenCalledWith(scope, material.id, "adapt", expect.any(AbortSignal), { focus, teachingContext, classroomContext }));
+  expect(mocks.list.mock.lastCall?.[1]).not.toHaveProperty("classroomContext");
+});
+
+it("drops task match signals and automatic adaptation when a preview returns revised metadata", async () => {
+  const tagged = { ...material, metadataRevision: 1, lessonIdentity: { topic: "Forces", learningObjective: "Observe deformation" },
+    matchReasons: ["Same lesson", "Matches class check-in"] };
+  mocks.list.mockResolvedValue({ items: [tagged] });
+  mocks.preview.mockResolvedValue({ ...detail, material: { ...material, metadataRevision: 2 } });
+  render(<MaterialGalleryPanel {...props({ standalone: true, focus: { misconceptions: ["a"], coreIdeas: [] } })} />);
+  expect(within(await card()).getByRole("button", { name: "Adapt to my class" })).toBeTruthy();
+  fireEvent.click(within(await card()).getByRole("button", { name: "Preview" }));
+  await screen.findByLabelText("Rendered shared slide");
+  const dialog = within(screen.getByRole("dialog"));
+  expect(dialog.queryByText("Matches class check-in")).toBeNull();
+  expect(dialog.queryByRole("button", { name: "Adapt to my class" })).toBeNull();
+  expect(dialog.getByRole("button", { name: "Open and edit" })).toBeTruthy();
+});
+
+it("keeps global, unknown-origin, different-strategy and same-number unrelated materials out of task adaptation", async () => {
+  const focus = { misconceptions: ["a"], coreIdeas: [] };
+  const lessonIdentity = { topic: "Forces", learningObjective: "Observe deformation" };
+  mocks.list.mockResolvedValue({ items: [{ ...material, lessonIdentity, matchReasons: [] }, { ...material, id: "another", title: "Analogy", lessonIdentity, strategy: "analogy", matchReasons: ["Same lesson"] },
+    { ...material, id: "unknown", title: "Unknown curriculum", matchReasons: ["Same lesson"] }] });
+  const view = render(<MaterialGalleryPanel {...props({ standalone: true, focus })} />);
+  await card();
+  expect(screen.queryByRole("button", { name: "Adapt to my class" })).toBeNull();
+  mocks.list.mockResolvedValue({ items: [{ ...material, lessonIdentity, matchReasons: ["Same lesson"] }] });
+  view.rerender(<MaterialGalleryPanel {...props({ standalone: true, scope: { classId: "", assignmentId: "" }, lessonNumber: 0, focus })} />);
+  await card();
+  expect(screen.queryByRole("button", { name: "Adapt to my class" })).toBeNull();
 });
 
 it("passes the selected copy mode and metadata to the editor, with an independent material ID", async () => {
   const onUse = vi.fn(); render(<MaterialGalleryPanel {...props({ onUse })} />);
-  fireEvent.click(within(await card()).getByRole("button", { name: "Adapt" }));
+  fireEvent.click(within(await card()).getByRole("button", { name: "Adapt to my class" }));
   await waitFor(() => expect(onUse).toHaveBeenCalledOnce());
   expect(mocks.copy).toHaveBeenCalledWith(scope, material.id, "adapt", expect.any(AbortSignal), expect.objectContaining({ classroomContext: "", teachingContext: {} }));
   expect(onUse.mock.calls[0][0].deck.id).toBe("independent-copy"); expect(onUse.mock.calls[0][1]).toEqual(material);
@@ -212,7 +261,7 @@ it("directs adapted video copies to the actual video editor", async () => {
   mocks.list.mockResolvedValue({ items: [video] });
   mocks.copy.mockResolvedValue({ format: "video", item: { id: "copied-video" }, media: { video: "/video" } });
   render(<MaterialGalleryPanel {...props({ format: "video" })} />);
-  fireEvent.click(within(await card()).getByRole("button", { name: "Adapt" }));
+  fireEvent.click(within(await card()).getByRole("button", { name: "Adapt to my class" }));
   expect(await screen.findByText(/Adapting your copy using the current task settings/)).toBeTruthy();
   expect(screen.queryByText(/Revise with AI/)).toBeNull();
 });

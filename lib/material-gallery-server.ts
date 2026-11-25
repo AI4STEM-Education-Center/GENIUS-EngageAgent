@@ -1,7 +1,7 @@
 import { experienceIdentity } from "./experience-identity";
 import type { GenerationRecord } from "./generation-record";
 import { generationLineage, resolveGeneration } from "./generation-record-server";
-import { canonicalGrade } from "./material-teaching-context";
+import { canonicalGrade, galleryGradeBand } from "./material-teaching-context";
 import { parseTeachingContext, type MaterialTeachingContext } from "./material-teaching-context";
 import { galleryFeedback, galleryFeedbackCache, indexGalleryUse } from "./material-gallery-feedback";
 import { createHash, randomUUID } from "node:crypto";
@@ -861,7 +861,7 @@ export async function galleryGet(request: Request) {
   };
   if (recommendationTags) recommendationTags = { ...recommendationTags, ...recommendationSettings };
   if (params.has("format")) { if (!["slides", "video"].includes(params.get("format")!)) throw new SlideRequestError("Choose slides or video."); filters.format = params.get("format") as "slides" | "video"; }
-  const gradeBand = canonicalGrade(text(params.get("gradeBand") ?? undefined, "Grade band", 80)).toLocaleLowerCase();
+  const gradeBand = galleryGradeBand(text(params.get("gradeBand") ?? undefined, "Grade band", 80)).toLocaleLowerCase();
   const recommendedOnly = params.get("recommendedOnly") === "true";
   if (recommendedOnly && (!recommendLesson || !recommendStrategy || !filters.format)) throw new SlideRequestError("Choose a lesson, strategy and material type for recommendations.");
   const search = text(params.get("search") ?? undefined, "Search", 200).toLocaleLowerCase();
@@ -905,7 +905,7 @@ export async function galleryGet(request: Request) {
   // The top of the unfiltered task Gallery must follow the same order as Step 3.
   const orderKey = (row: Shared) => `${eligibleForTask(row) ? 1 : 0}|${String(ranks.get(row.id)!.score).padStart(2, "0")}|${row.material.createdAt}|${row.id}`;
   const matches = available.filter(row => (params.get("mine") !== "true" || row.ownerId === context.userId)
-    && (!gradeBand || canonicalGrade(row.material.gradeBand).toLocaleLowerCase() === gradeBand)
+    && (!gradeBand || galleryGradeBand(row.material.gradeBand).toLocaleLowerCase() === gradeBand)
     && (!recommendedOnly || eligibleForTask(row))
     && (!filters.lessonNumber || row.material.lessonNumber === filters.lessonNumber) && (!filters.strategy || row.material.strategy === filters.strategy)
     && (!search || [row.material.title, row.material.description, row.material.experienceContext, row.material.gradeBand, row.material.quizPattern, row.material.strategy,
@@ -926,6 +926,6 @@ export async function galleryGet(request: Request) {
       ...(image ? { previewImage: await galleryBlobUrl(image) } : {}),
       ...(recommendLesson || recommendStrategy ? { matchReasons: ranks.get(row.id)!.reasons, matchTags: ranks.get(row.id)!.tags } : {}) };
   })),
-    facets: { lessons: [...new Set(available.map(row => row.material.lessonNumber))].sort((a, b) => a - b), strategies: [...new Set(available.map(row => row.material.strategy))].sort(), grades: [...new Set(available.map(row => canonicalGrade(row.material.gradeBand)).filter(Boolean))].sort() },
+    facets: { lessons: [...new Set(available.map(row => row.material.lessonNumber))].sort((a, b) => a - b), strategies: [...new Set(available.map(row => row.material.strategy))].sort(), grades: [...new Set(available.map(row => galleryGradeBand(row.material.gradeBand)).filter(Boolean))].sort() },
     ...(!recommendedOnly && matches.length > limit && last ? { nextCursor: Buffer.from(JSON.stringify({ fingerprint, after: orderKey(last) })).toString("base64url") } : {}) };
 }

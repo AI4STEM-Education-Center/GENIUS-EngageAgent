@@ -674,7 +674,12 @@ describe("teacher library outside classes and strict Step 3 recommendations", ()
     const id = await share({ metadata: { ...metadata, keywords: ["elasticity", "visual learning", "elasticity"] } });
     const result = await (await libraryGet({ search: "visual learning", gradeBand: "6–8" })).json();
     expect(result.items[0]).toMatchObject({ id, promptTags: { KEYWORDS: "elasticity, visual learning" } });
-    expect(result.facets.grades).toEqual(["6–8"]);
+    expect(result.facets.grades).toEqual(["Middle school"]);
+    expect(result.items[0].gradeBand).toBe("6–8");
+    expect((await (await libraryGet({ gradeBand: "Middle school" })).json()).items[0].id).toBe(id);
+    const ranked = await (await get({ recommendLesson: "3", recommendStrategy: "cognitive conflict", recommendGrade: "Middle school" })).json();
+    expect(ranked.items[0].matchReasons).toContain("Same grade");
+    expect((await (await libraryGet({ gradeBand: "5–7" })).json()).items).toEqual([]);
     expect((await (await libraryGet({ gradeBand: "University" })).json()).items).toEqual([]);
     expect((await post(startBody({ metadata: { ...metadata, keywords: Array(13).fill("tag") } }))).status).toBe(422);
   });

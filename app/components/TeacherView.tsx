@@ -555,6 +555,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     strategy: selectedStrategies[0] || "",
     focus: chosenFocus ? { misconceptions: chosenFocus.misconceptions || [], coreIdeas: chosenFocus.coreIdeas || [] } : undefined,
     teachingContext,
+    classroomContext,
     recommendFormat: materialFormat === "video" ? "video" : "slides",
     recommendContextRef: useReportedActivities ? classInformation.accepted?.id : undefined,
   } satisfies GalleryTaskRecommendation;
@@ -2094,7 +2095,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
 
               {visibleStep === 3 && isHydrated && hasAssignmentContext && selectedLesson && selectedStrategies.length === 1 && hasFocus && <MaterialGalleryPanel
                 scope={{ classId, assignmentId }} {...galleryRecommendation}
-                format={galleryRecommendation.recommendFormat} classroomContext={classroomContext} recommendationsOnly disabled={generationBusy}
+                format={galleryRecommendation.recommendFormat} recommendationsOnly disabled={generationBusy}
                 onBrowse={openGallery} onUse={copy => { setRecommendedCopy(copy); setShowDashboard(false); setShowGallery(true); }} />}
 
               <nav aria-label="Material workflow" className="flex flex-wrap gap-6 border-b border-line pb-3 text-sm font-semibold"><a href="#material-generate" className="text-brand hover:underline">1 · Generate</a><a href={materialFormat === "slides" ? "#materials-review" : "#saved-activities"} className="text-brand hover:underline">2 · Review, send &amp; share</a></nav>
