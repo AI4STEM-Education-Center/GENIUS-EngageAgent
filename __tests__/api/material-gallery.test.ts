@@ -670,6 +670,39 @@ describe("teacher library outside classes and strict Step 3 recommendations", ()
     }
   });
 
+  it("uses the accepted GENIUS v2 check-in for both entry points after the provider data changes", async () => {
+    vi.stubEnv("GENIUS_URL", "https://genius.example.test");
+    vi.stubEnv("GENIUS_CONTEXT_ENDPOINT", "");
+    vi.stubEnv("GENIUS_CONTEXT_MODE", "live");
+    const upstreamClass = "1".repeat(24);
+    const teacherScope = { ...scope, userId: teacher.geniusId };
+    const { linkGeniusClass } = await import("@/lib/genius-context-client");
+    const provider = await vi.importActual<typeof import("@/lib/classroom-context-server")>("@/lib/classroom-context-server");
+    let activity = "Pressing pillows";
+    const transport = vi.spyOn(globalThis, "fetch").mockImplementation(async address => {
+      const url = new URL(String(address));
+      if (url.pathname.endsWith("/classes")) return Response.json({ classes: [{ id: upstreamClass, name: "Test class" }] });
+      expect(url.searchParams.get("classId")).toBe(upstreamClass);
+      return Response.json({ schemaVersion: 2, classId: upstreamClass, version: activity, updatedAt: "2026-11-24T12:00:00Z",
+        checkIn: { responseCount: 3, activities: [{ id: "reported", label: activity, studentCount: 3, didCount: 2, watchedCount: 1,
+          incidents: ["Private check-in example"] }] } });
+    });
+    try {
+      const id = await share({ metadata: { ...metadata, experienceContext: "Press a pillow" } });
+      await linkGeniusClass(teacherScope, upstreamClass);
+      const snapshot = await provider.readClassroomContext(teacherScope);
+      expect(snapshot.experiences.value?.enoughResponses).toBe(true);
+      activity = "Jumping on a trampoline";
+      const task = { recommendLesson: "3", recommendStrategy: "cognitive conflict", recommendFormat: "slides", recommendContextRef: snapshot.id };
+      for (const query of [task, { ...task, recommendedOnly: "true", format: "slides" }]) {
+        mocks.accepted.mockImplementationOnce(provider.acceptedClassroomContext);
+        const result = await (await get(query)).json();
+        expect(result.items[0]).toMatchObject({ id, matchReasons: expect.arrayContaining(["Matches class check-in"]) });
+        expect(JSON.stringify(result)).not.toContain("Private check-in example");
+      }
+    } finally { transport.mockRestore(); }
+  });
+
   it("supports reviewed keywords and grade filters without inventing tags or accepting unlimited text", async () => {
     const id = await share({ metadata: { ...metadata, keywords: ["elasticity", "visual learning", "elasticity"] } });
     const result = await (await libraryGet({ search: "visual learning", gradeBand: "6–8" })).json();
