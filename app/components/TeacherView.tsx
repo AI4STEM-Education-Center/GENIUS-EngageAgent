@@ -2273,7 +2273,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                               </div>
                             </div>
                             {materialFormat === "video" && <div className="flex w-32 shrink-0 flex-col gap-1.5 sm:w-36">
-                              <div className="aspect-square w-full">
+                              <div className={item.strategy === "analogy" ? "aspect-video w-full" : "aspect-square w-full"}>
                                 {!videos[item.id]?.status && images[item.id]?.status !== "ready" && <p className="flex h-full items-center rounded-xl bg-slate-100 p-3 text-xs text-slate-500">Waiting for the source image.</p>}
                                 {!videos[item.id]?.status && images[item.id]?.status === "ready" && (
                                   <button type="button" onClick={() => requestVideo(item)} className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 text-slate-500 transition hover:bg-slate-100">
@@ -2289,7 +2289,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                                 )}
                                 {videos[item.id]?.status === "ready" && videos[item.id]?.url && (
                                   <button type="button" className="block h-full w-full cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-black" onClick={() => setFocusVideo({ url: videos[item.id]?.url ?? "", title: item.title })}>
-                                    <video className="h-full w-full object-cover" src={videos[item.id]?.url} muted playsInline loop autoPlay />
+                                    <video className="h-full w-full object-contain" src={videos[item.id]?.url} muted playsInline loop autoPlay />
                                   </button>
                                 )}
                                 {videos[item.id]?.status === "error" && (

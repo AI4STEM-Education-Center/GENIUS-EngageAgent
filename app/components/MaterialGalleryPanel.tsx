@@ -6,6 +6,7 @@ import { copyGalleryMaterial, listMaterialGallery, previewGalleryMaterial, previ
 import type { GalleryCopy, GalleryFacets, GalleryFilters, GalleryMaterial, GalleryPreviewSource, GalleryScope } from "@/lib/material-gallery";
 import GalleryMetadataEditor from "./GalleryMetadataEditor";
 import GalleryMaterialDetails from "./GalleryMaterialDetails";
+import MaterialActivityView from "./MaterialActivityView";
 import GalleryFirstSlidePreview from "./GalleryFirstSlidePreview";
 import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
 import { loadTaskLesson } from "@/lib/lesson-client";
@@ -198,7 +199,12 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
       {previewItem && <GalleryMaterialDetails scope={scope} {...(preview?.material || previewItem)} showTags />}
       {previewLoading && <p role="status" className="py-10 text-mute">Loading preview…</p>}
       {previewSlide && <>{previewDeck ? <div className="mt-5"><SlidePreview deck={previewDeck} index={previewIndex} /></div> : <div className="mt-5 rounded-xl border border-line bg-canvas p-6"><p className="text-xs font-semibold uppercase text-mute">{previewSlide.stage}</p><h4 className="mt-3 text-2xl font-bold">{previewSlide.title}</h4><p className="mt-4 whitespace-pre-wrap text-lg leading-relaxed">{previewSlide.body}</p><p className="mt-6 font-semibold text-ok">{previewSlide.task}</p></div>}<div className="mt-3 flex items-center justify-between"><button type="button" className={button} disabled={previewIndex === 0} onClick={() => setPreviewIndex(value => value - 1)}><ChevronLeft size={16} />Previous</button><span className="text-sm text-mute">Slide {previewIndex + 1} of {preview?.draft?.slides.length}</span><button type="button" className={button} disabled={previewIndex >= (preview?.draft?.slides.length ?? 0) - 1} onClick={() => setPreviewIndex(value => value + 1)}>Next<ChevronRight size={16} /></button></div></>}
-      {preview?.item && <div className="mt-5 space-y-4">{preview.media?.video && <video aria-label="Shared video preview" src={preview.media.video} poster={preview.media.image} controls playsInline preload="metadata" className="max-h-96 w-full rounded-xl bg-ink" />}<p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-2">{preview.item.body}</p>{preview.item.activity?.stages.map(stage => <div key={stage.id}><h4 className="font-semibold">{stage.title}</h4><p className="mt-1 text-sm text-mute">{stage.text}</p></div>)}</div>}
+      {preview?.item && (preview.item.activity
+        ? <MaterialActivityView activity={preview.item.activity} media={preview.media} preview />
+        : <div className="mt-5 space-y-4">
+          {preview.media?.video && <video aria-label="Shared video preview" src={preview.media.video} poster={preview.media.image} controls playsInline preload="metadata" className="max-h-96 w-full rounded-xl bg-ink object-contain" />}
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-2">{preview.item.body}</p>
+        </div>)}
       {!previewLoading && !previewSlide && !preview?.item && <p className="mt-5 text-sm text-mute">{previewItem?.description || "This material could not be previewed. Please retry."}</p>}
       {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}
       {previewItem && <div className="mt-5 flex flex-wrap gap-2"><button type="button" className={primary} disabled={disabled || !!copying || (!standalone && previewItem.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(previewItem, "use")}>{standalone ? "Open and edit" : "Use as is"}</button>{!standalone && <button type="button" className={button} disabled={disabled || !!copying || previewItem.lessonNumber !== lessonNumber} onClick={() => void selectMaterial(previewItem, "adapt")}>Adapt for my class</button>}</div>}

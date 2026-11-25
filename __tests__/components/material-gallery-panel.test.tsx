@@ -8,6 +8,7 @@ vi.mock("@/app/components/SlidePreview", () => ({ default: ({ deck, index }: { d
 import MaterialGalleryPanel from "@/app/components/MaterialGalleryPanel";
 import type { GalleryMaterial, GalleryPreviewSource } from "@/lib/material-gallery";
 import { deckFixture } from "../fixtures/slides";
+import { analogyActivity } from "../fixtures/material-activities";
 
 const scope = { classId: "ea-class-one", assignmentId: "ea-task-one" };
 const material: GalleryMaterial = { id: "template-one", title: "A shared ball activity", revision: 1, description: "Investigate contact", gradeBand: "Grades 6–8",
@@ -179,6 +180,25 @@ it("previews a saved video without creating a copy", async () => {
   fireEvent.click(within(await card()).getByRole("button", { name: "Preview" }));
   const player = await screen.findByLabelText("Shared video preview");
   expect(player.getAttribute("src")).toBe("/private-video?ticket=temporary"); expect(mocks.copy).not.toHaveBeenCalled(); expect(mocks.previewDeck).not.toHaveBeenCalled();
+});
+
+it("shows a structured analogy video and each teaching stage once in the Gallery preview", async () => {
+  const video = { ...material, format: "video" as const, strategy: "analogy" };
+  mocks.list.mockResolvedValue({ items: [video] });
+  mocks.preview.mockResolvedValue({ material: video, lessonNumber: 3, strategy: "analogy",
+    item: { id: "video-template", title: video.title, body: analogyActivity.stages.map(stage => stage.text).join("\n"),
+      type: "Video", strategy: "analogy", activity: analogyActivity }, media: { video: "/clip.mp4", image: "/comparison.png" } });
+  render(<MaterialGalleryPanel {...props({ format: "video" })} />);
+  fireEvent.click(within(await card()).getByRole("button", { name: "Preview" }));
+  const preview = within(await screen.findByRole("region", { name: "Inquiry activity" }));
+  const player = preview.getByLabelText("Activity video");
+  expect(player.getAttribute("src")).toBe("/clip.mp4");
+  expect(player.getAttribute("poster")).toBeNull();
+  for (const stage of analogyActivity.stages) {
+    expect(preview.getByRole("heading", { name: stage.title })).toBeTruthy();
+    expect(screen.getAllByText(stage.text, { exact: false })).toHaveLength(1);
+  }
+  expect(mocks.copy).not.toHaveBeenCalled();
 });
 
 it("does not call unrelated lessons a focus match just because their local codes overlap", async () => {
