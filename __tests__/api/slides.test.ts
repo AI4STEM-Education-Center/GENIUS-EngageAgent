@@ -55,6 +55,17 @@ it("passes validated teacher focus to slide generation and rejects invalid focus
   expect(mocks.complete).not.toHaveBeenCalled();
 });
 
+it("returns a recoverable class-information error before generating or checking a draft", async () => {
+  vi.stubEnv("GENIUS_CONTEXT_ENDPOINT", "https://genius.example.test/context");
+  for (const response of [await startDraft(req()), await startCheck(req({ ...base, draft: slideFixture(base.strategy as "cognitive conflict") }))]) {
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toMatch(/Class information, select Refresh, then select Use updated information/);
+  }
+  const malformed = await startDraft(req({ ...base, teachingContext: { contextRef: "old format" } }));
+  expect(malformed.status).toBe(422);
+  expect((await malformed.json()).error).toMatch(/select Refresh/);
+  expect(mocks.complete).not.toHaveBeenCalled();
+});
 it("checks the persisted teacher focus and rejects malformed focus before semantic review", async () => {
   mocks.complete.mockResolvedValue(completion({ issues: [] }));
   const draft = slideFixture("engaged critiquing");

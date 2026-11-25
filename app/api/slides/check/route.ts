@@ -1,5 +1,5 @@
 import { REVIEW_RUBRIC } from "@/lib/slides/review-rubric";
-import { parseTeachingContext, materialGenerationContext } from "@/lib/material-teaching-context";
+import { materialGenerationContext } from "@/lib/material-teaching-context";
 import { beginSlideJob } from "@/lib/slides/jobs";
 import { materialClassroomContext } from "@/lib/material-classroom-context";
 import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
@@ -10,7 +10,7 @@ import { slideCheckFormat, slideCheckPrompt, sourceAdaptation } from "@/lib/slid
 import { loadSlideSource } from "@/lib/slides/source-prompts";
 import { textReviewFormat } from "@/lib/slides/review";
 import { existingGenerationKey, resolveSlideModel, slideTextRequestLimits, slideTextSettings } from "@/lib/slides/model-config";
-import { authorizeMaterialLibrary, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, requestFocus, slideContext, slideDiagnosticContext, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
+import { authorizeMaterialLibrary, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, requestFocus, slideContext, slideDiagnosticContext, requestTeachingSettings, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
 
 export const runtime = "nodejs";
 // Submit a background job; generation and polling use separate short requests.
@@ -24,8 +24,7 @@ export async function POST(request: Request) {
     const authorized = await authorizeMaterialLibrary(request, body);
     enterLessonScope(await loadTaskLessons(authorized, body.lessonNumber));
     const { lesson, strategy } = slideContext(body);
-    let settings;
-    try { settings = parseTeachingContext(body.teachingContext); } catch { throw new SlideRequestError("Choose valid teaching settings.", 422); }
+    const settings = requestTeachingSettings(body.teachingContext);
     const taskContext = materialGenerationContext(requestClassroomContext(body.classroomContext), settings);
     const focus = requestFocus(lesson.lessonNumber, strategy, body.focus);
     const draft = requestDraft(body.draft, strategy, true);

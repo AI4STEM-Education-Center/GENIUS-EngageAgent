@@ -1,3 +1,4 @@
+import { WorkspaceError } from "@/lib/workspace";
 import { createHash } from "node:crypto";
 import { recordGeneration } from "@/lib/generation-record-server";
 import { NextResponse } from "next/server";
@@ -107,6 +108,7 @@ export async function POST(request: Request) {
       contentItemId: item.id,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    if (error instanceof WorkspaceError) return NextResponse.json({ error: error.message }, { status: error.status });
     const message =
       error instanceof Error
         ? error.message

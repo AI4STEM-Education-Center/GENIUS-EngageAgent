@@ -1,6 +1,9 @@
 import type { ClassProfile } from "./class-profile";
 import type { TaskInterests } from "./task-interests";
 
+// These instructions name the actions in the teacher's Step 3 Class information panel.
+export const refreshClassInformation = "In Step 3, open Class information, select Refresh, then select Use updated information if shown.";
+
 export type ContextStatus = "not_connected" | "empty" | "ready" | "stale" | "error" | "forbidden";
 export type ContextSource<T> = {
   provider: "genius" | "engageagent";

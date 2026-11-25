@@ -1,10 +1,10 @@
 import { recordGeneration } from "@/lib/generation-record-server";
-import { parseTeachingContext, materialGenerationContext } from "@/lib/material-teaching-context";
+import { materialGenerationContext } from "@/lib/material-teaching-context";
 import { slideRevisionOutputFormat, slideRevisionPrompt, validSlideRevisionIndex } from "@/lib/slides/slide-revision";
 import { listTaskLessons } from "@/lib/lessons-store";
 import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
 import { slideOutputFormat, slidePrompt } from "@/lib/slides/prompts";
-import { authorizeMaterialLibrary, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, requestFocus, slideContext, slideDiagnosticContext, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
+import { authorizeMaterialLibrary, readSlideBody, requestAnalogyMethod, requestClassroomContext, requestDraft, requestFocus, slideContext, slideDiagnosticContext, requestTeachingSettings, slideFailure, slideJson, SlideRequestError } from "@/lib/slides/server";
 import { existingGenerationKey, resolveSlideModel, slideModelCatalog, slideTextRequestLimits, slideTextSettings } from "@/lib/slides/model-config";
 import { analogyPromptRevision, isSlidePromptVersion, SLIDE_PROMPT_REVISION } from "@/lib/slides/prompt-versions";
 import { beginSlideJob } from "@/lib/slides/jobs";
@@ -28,8 +28,7 @@ export async function POST(request: Request) {
     const authorized = await authorizeMaterialLibrary(request, body);
     enterLessonScope(await loadTaskLessons(authorized, body.lessonNumber));
     const { lesson, strategy } = slideContext(body);
-    let settings;
-    try { settings = parseTeachingContext(body.teachingContext); } catch { throw new SlideRequestError("Choose valid teaching settings.", 422); }
+    const settings = requestTeachingSettings(body.teachingContext);
     const taskContext = materialGenerationContext(requestClassroomContext(body.classroomContext), settings);
     const promptVersion = body.promptVersion === undefined ? "optimized" : body.promptVersion;
     if (!isSlidePromptVersion(promptVersion)) throw new SlideRequestError("Unknown slide prompt version.");

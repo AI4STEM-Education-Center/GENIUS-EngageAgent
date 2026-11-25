@@ -578,6 +578,11 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       {busy && job.current && <button className={icon} title="Cancel generation" aria-label="Cancel generation" onClick={() => { job.current?.abort(); job.current = null; setBusy(false); setStatus("Generation cancelled."); }}><X size={17} /></button>}
       {busy && publishJob.current && <button className={icon} title="Cancel publishing" aria-label="Cancel publishing" onClick={() => { publishJob.current?.abort(); publishJob.current = null; setBusy(false); setStatus("Publishing stopped. Your draft is retained."); }}><X size={17} /></button>}
     </div>
+    {deck && embeddedContext?.teachingContext?.contextRef && deck.teachingContext?.contextRef !== embeddedContext.teachingContext.contextRef &&
+      <button type="button" className={`${button} mb-3`} disabled={busy} onClick={() => {
+        setDeck({ ...deck, teachingContext: { ...deck.teachingContext, contextRef: embeddedContext.teachingContext?.contextRef }, checks: undefined, teacherDecision: undefined });
+        setUndoDeck(null); setReviewed(false); setError(""); setReviewWarnings([]); setStatus("Class information updated for this draft.");
+      }}>Use current class information</button>}
     {error && <div role="alert" className="mb-4 whitespace-pre-line break-words border-l-4 border-red-700 bg-red-50 p-3 text-sm text-red-900">{error}{!lessons.length && <button className={`${button} ml-3`} onClick={() => setReload(n => n + 1)}>Retry</button>}</div>}
     {!deck && <div className="border-y border-gray-200 py-16 text-center text-sm text-gray-500">No slide draft yet.</div>}
     {deck && slide && <>

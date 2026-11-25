@@ -25,10 +25,11 @@ export type GalleryTaskRecommendation = {
   classroomContext?: string;
   recommendFormat?: "slides" | "video";
   recommendContextRef?: string;
+  adaptationIssue?: string;
 };
 type Props = GalleryTaskRecommendation & { scope: GalleryScope; format: "all" | "slides" | "video"; disabled?: boolean; onUse: (copy: GalleryCopy, material: GalleryMaterial) => void; refreshKey?: number; browseRequest?: number; standalone?: boolean; recommendationsOnly?: boolean; onBrowse?: () => void };
 
-export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, format, focus, disabled, onUse, refreshKey = 0, browseRequest = 0, standalone = false, recommendationsOnly = false, onBrowse, teachingContext, recommendFormat, recommendContextRef, classroomContext = "" }: Props) {
+export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, format, focus, disabled, onUse, refreshKey = 0, browseRequest = 0, standalone = false, recommendationsOnly = false, onBrowse, teachingContext, recommendFormat, recommendContextRef, adaptationIssue, classroomContext = "" }: Props) {
   const [filter, setFilter] = useState<"topic" | "strategy" | "all" | "mine">(standalone ? "all" : "topic");
   const [expanded, setExpanded] = useState(standalone);
   const [search, setSearch] = useState("");
@@ -104,7 +105,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
   }
 
   async function selectMaterial(material: GalleryMaterial, mode: "use" | "adapt") {
-    if (disabled || copying || (!standalone && material.lessonNumber !== lessonNumber) || (mode === "adapt" && !canAdapt(material))) return;
+    if (disabled || copying || (!standalone && material.lessonNumber !== lessonNumber) || (mode === "adapt" && (adaptationIssue || !canAdapt(material)))) return;
     operation.current?.abort(); const controller = new AbortController(); operation.current = controller;
     setCopying(material.id); setError("");
     try {
@@ -159,6 +160,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
   if (recommendationsOnly && !loading && !error && !items.length) return null;
 
   return <section aria-label="Materials Gallery" className="rounded-xl border border-line bg-canvas/60 p-4 sm:p-5">
+    {adaptationIssue && <p role="status" className="mb-2 text-sm text-mute">{adaptationIssue}</p>}
     {!recommendationsOnly && <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h3 className="flex items-center gap-2 text-base font-semibold"><LayoutGrid size={18} />{standalone ? "Shared materials" : expanded ? "Materials Gallery" : "Matches from the Gallery"}</h3><p className="mt-1 text-xs text-mute">{standalone ? "Open a material to edit your own copy." : "Shared by teachers · use a copy or adapt it to your class"}</p></div>
       {!standalone && <button type="button" className={button} onClick={() => setExpanded(value => !value)}>{expanded ? "Show matches" : "Open Gallery"}<ChevronRight size={16} /></button>}
@@ -206,7 +208,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
         <button type="button" className={primary} disabled={disabled || !!copying || (!standalone && material.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(material, "use")}>
           {copying === material.id ? "Opening…" : standalone && !canAdapt(material) ? "Open" : "Use as is"}
         </button>
-        {(!standalone || canAdapt(material)) && <button type="button" className={button} disabled={disabled || !!copying || !canAdapt(material)} onClick={() => void selectMaterial(material, "adapt")}>Adapt to my class</button>}
+        {(!standalone || canAdapt(material)) && <button type="button" className={button} disabled={disabled || !!copying || !!adaptationIssue || !canAdapt(material)} onClick={() => void selectMaterial(material, "adapt")}>Adapt to my class</button>}
         <button type="button" className={button} onClick={() => void openPreview(material)}>Preview</button>
         {recommendationsOnly && material.isOwner && <details className="text-xs text-mute">
           <summary className="cursor-pointer py-1 font-semibold">Manage sharing</summary>
@@ -237,7 +239,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
       {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}
       {previewMaterial && <div className="mt-5 flex flex-wrap gap-2">
         <button type="button" className={primary} disabled={disabled || !!copying || (!standalone && previewMaterial.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(previewMaterial, "use")}>{standalone && !canAdapt(previewMaterial) ? "Open and edit" : "Use as is"}</button>
-        {(!standalone || canAdapt(previewMaterial)) && <button type="button" className={button} disabled={disabled || !!copying || !canAdapt(previewMaterial)} onClick={() => void selectMaterial(previewMaterial, "adapt")}>Adapt to my class</button>}
+        {(!standalone || canAdapt(previewMaterial)) && <button type="button" className={button} disabled={disabled || !!copying || !!adaptationIssue || !canAdapt(previewMaterial)} onClick={() => void selectMaterial(previewMaterial, "adapt")}>Adapt to my class</button>}
       </div>}
     </dialog>
   </section>;

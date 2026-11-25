@@ -93,6 +93,18 @@ it("keeps current-task match indicators when a shared preview finishes loading",
   expect(within(screen.getByRole("dialog")).getByText("Matches class check-in")).toBeTruthy();
 });
 
+it("allows reuse while the task class information is loading, then passes the accepted snapshot for adaptation", async () => {
+  const wait = "Loading class information before adaptation…";
+  const view = render(<MaterialGalleryPanel {...props({ recommendationsOnly: true, adaptationIssue: wait })} />);
+  const article = await card();
+  fireEvent.click(within(article).getByRole("button", { name: "Adapt to my class" }));
+  expect(mocks.copy).not.toHaveBeenCalled();
+  expect(within(article).getByRole("button", { name: "Use as is" }).hasAttribute("disabled")).toBe(false);
+  const teachingContext = { contextRef: "a".repeat(64) };
+  view.rerender(<MaterialGalleryPanel {...props({ recommendationsOnly: true, teachingContext })} />);
+  fireEvent.click(within(article).getByRole("button", { name: "Adapt to my class" }));
+  await waitFor(() => expect(mocks.copy).toHaveBeenCalledWith(scope, material.id, "adapt", expect.any(AbortSignal), expect.objectContaining({ teachingContext })));
+});
 it.each([false, true])("adapts an identified task match from Browse all using the same private settings (preview: %s)", async preview => {
   const tagged = { ...material, lessonIdentity: { topic: "Forces", learningObjective: "Observe deformation" },
     matchReasons: ["Same lesson", "Same strategy", "Matches class check-in"] };

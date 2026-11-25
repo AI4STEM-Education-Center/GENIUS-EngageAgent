@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
 import { recordGeneration } from "@/lib/generation-record-server";
-import { parseTeachingContext } from "@/lib/material-teaching-context";
 import { isSlideAsset } from "@/lib/slides/model";
 import { resolveAnalogyMethod } from "@/lib/slides/analogy-methods";
 import { slideImagePrompt } from "@/lib/slides/prompts";
-import { authorizeMaterialLibrary, readSlideBody, requestAnalogyMethod, requestDraft, slideContext, slideFailure, SlideRequestError } from "@/lib/slides/server";
+import { authorizeMaterialLibrary, readSlideBody, requestAnalogyMethod, requestDraft, slideContext, requestTeachingSettings, slideFailure, SlideRequestError } from "@/lib/slides/server";
 import { resolveSlideModel } from "@/lib/slides/model-config";
 import { beginSlideJob } from "@/lib/slides/jobs";
 import { enterLessonScope, loadTaskLessons } from "@/lib/lesson-scope";
@@ -40,7 +39,7 @@ export async function POST(request: Request) {
       output_format: "jpeg" as const, output_compression: 85, action: reference ? "edit" as const : "generate" as const };
     const imageInstructions = "Generate exactly one classroom image with the image generation tool. Preserve every scientific constraint, object, contact relationship, comparison and no-text requirement in the supplied image brief. Do not introduce another scene, explanation, label or decorative object. When a reference image is supplied, edit that image as directed while preserving the required apparatus and visual continuity. Return the image without a prose explanation.";
     const imagePrompt = slideImagePrompt(draft, strategy, body.visualId, body.feedback as string | undefined);
-    const generation = await recordGeneration(authorized, { lessonNumber: lesson.lessonNumber, strategy, format: "slides", operation: body.feedback ? "image-revision" : "image", model, prompt: { system: imageInstructions, user: imagePrompt }, settings: parseTeachingContext(body.teachingContext), parentId: typeof body.generationId === "string" ? body.generationId : undefined, parameters: { visualId: body.visualId, tool: imageTool, orchestratorModel: "gpt-4.1", max_output_tokens: 2000, ...(reference ? { referenceSha256: createHash("sha256").update(Buffer.from(reference.split(",")[1], "base64")).digest("hex") } : {}) } });
+    const generation = await recordGeneration(authorized, { lessonNumber: lesson.lessonNumber, strategy, format: "slides", operation: body.feedback ? "image-revision" : "image", model, prompt: { system: imageInstructions, user: imagePrompt }, settings: requestTeachingSettings(body.teachingContext), parentId: typeof body.generationId === "string" ? body.generationId : undefined, parameters: { visualId: body.visualId, tool: imageTool, orchestratorModel: "gpt-4.1", max_output_tokens: 2000, ...(reference ? { referenceSha256: createHash("sha256").update(Buffer.from(reference.split(",")[1], "base64")).digest("hex") } : {}) } });
     return await beginSlideJob(request, authorized, {
       model: "gpt-4.1",
       instructions: imageInstructions,

@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { getClassProfile } from "./nosql";
 import { getTaskInterests, type TaskInterests } from "./task-interests";
 import { classProfileGenerationSummary, parseClassProfileAnswers, type ClassProfile } from "./class-profile";
-import type { ClassroomContextSnapshot, ContextSource } from "./classroom-context";
+import { WorkspaceError } from "./workspace";
+import { refreshClassInformation, type ClassroomContextSnapshot, type ContextSource } from "./classroom-context";
 import { isWorkspaceConflict, workspaceGet, workspacePut } from "./workspace-store";
 import { GeniusContextError, geniusContextOrigin, linkedGeniusClass, liveGeniusContextEnabled, requestGeniusClassroom } from "./genius-context-client";
 
@@ -142,16 +143,16 @@ export async function readClassroomContext(scope: Scope): Promise<ClassroomConte
 
 /** Pin the teacher-accepted version. Never substitute latest data mid-generation. */
 export async function acceptedClassroomContext(scope: Scope, id: string): Promise<ClassroomContextSnapshot> {
-  if (!/^[a-f0-9]{64}$/u.test(id)) throw new Error("Refresh the class information before generating.");
+  if (!/^[a-f0-9]{64}$/u.test(id)) throw new WorkspaceError(`Invalid class information version. ${refreshClassInformation}`, 422);
   const snapshot = await workspaceGet<ClassroomContextSnapshot>(partition(scope.userId), `SNAPSHOT#${id}`);
-  if (!snapshot || (scope.classId && snapshot.classId !== scope.classId) || (scope.assignmentId && snapshot.assignmentId !== scope.assignmentId)) throw new Error("This class information does not belong to the selected task.");
+  if (!snapshot || (scope.classId && snapshot.classId !== scope.classId) || (scope.assignmentId && snapshot.assignmentId !== scope.assignmentId)) throw new WorkspaceError(`The saved class information is unavailable for this task. ${refreshClassInformation}`, 409);
   const sourceScope = { ...scope, classId: snapshot.classId, assignmentId: snapshot.assignmentId };
   const linked = await linkedGeniusClass(sourceScope);
-  if ((snapshot.geniusClassId || null) !== linked) throw new Error("The connected GENIUS class changed. Refresh and accept the class information.");
+  if ((snapshot.geniusClassId || null) !== linked) throw new WorkspaceError(`The connected GENIUS class changed. ${refreshClassInformation}`, 409);
   // Revalidate current ownership before using a pinned version for generation.
   // Fetching newer facts here does not replace the teacher-accepted snapshot.
   if (linked) await readClassroomContext(sourceScope);
   const latest = await workspaceGet<Payload>(partition(scope.userId), `PROVIDER#${digest([snapshot.classId, snapshot.assignmentId, ...(linked ? [linked] : [])])}`);
-  if ([snapshot.profile.status, snapshot.experiences.status, latest?.profile.status, latest?.experiences.status].includes("forbidden")) throw new Error("This class information is not available to this account.");
+  if ([snapshot.profile.status, snapshot.experiences.status, latest?.profile.status, latest?.experiences.status].includes("forbidden")) throw new WorkspaceError("This class information is not available to this account. Open a class you teach in GENIUS and refresh its class information.", 403);
   return snapshot;
 }
