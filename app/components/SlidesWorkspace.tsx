@@ -23,7 +23,7 @@ import { postSlideRequest } from "@/lib/slides/client-transport";
 import { publishSlideDeck } from "@/lib/slides/publish-client";
 import { isSlideDeckPublished, slidePublicationContentKey } from "@/lib/slides/publication-status";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
-import { slideRevisionFeedback } from "@/lib/slides/revision";
+import { slideRevisionFeedback, slideRevisionSummary } from "@/lib/slides/revision";
 import type { StrategyFocus } from "@/lib/strategy-focus";
 import ShareSlidesDialog from "./ShareSlidesDialog";
 
@@ -603,7 +603,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         </div>
         {revisionScope === "slide" && <p className="mt-2 text-xs text-mute">Only this slide&apos;s text and teacher notes change. Other slides and images stay the same.</p>}
         {undoDeck && deck !== undoDeck && !busy && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white p-3 text-sm text-ink-2">
-          <span>{(() => { const changed = deck.draft.slides.flatMap((s, i) => JSON.stringify(s) !== JSON.stringify(undoDeck.draft.slides[i]) ? [i + 1] : []); return changed.length ? `Changed slide${changed.length > 1 ? "s" : ""} ${changed.join(", ")}. ${deck.draft.slides.length - changed.length} unchanged.` : "Revision ready"; })()}</span>
+          <span>{slideRevisionSummary(undoDeck, deck)}</span>
           <button type="button" className={button} onClick={undoRevision}><Undo2 size={15} />Undo revision</button>
         </div>}
       </section>}

@@ -1,10 +1,20 @@
 import { expect, it } from "vitest";
-import { slideRevisionFeedback, SLIDE_REVISION_RULES } from "@/lib/slides/revision";
+import { slideRevisionFeedback, slideRevisionSummary, SLIDE_REVISION_RULES } from "@/lib/slides/revision";
 import { slidePrompt } from "@/lib/slides/prompts";
 import { loadSlideSource } from "@/lib/slides/source-prompts";
 import type { SlideStrategy } from "@/lib/slides/model";
 import type { AnalogyMethod } from "@/lib/slides/analogy-methods";
-import { slideFixture } from "../fixtures/slides";
+import { deckFixture, slideFixture } from "../fixtures/slides";
+
+it("distinguishes a no-op, a teacher-only edit and a visible class adaptation", () => {
+  const source = deckFixture("analogy");
+  const revision = structuredClone(source);
+  expect(slideRevisionSummary(source, revision)).toMatch(/match the previous version/);
+  revision.draft.slides[1].teacherNotes.push("Invite partners to discuss their observations.");
+  expect(slideRevisionSummary(source, revision)).toBe("Teacher notes changed on slide 2.");
+  revision.draft.slides[0].task = "Compare your prediction with a partner.";
+  expect(slideRevisionSummary(source, revision)).toBe("Student-facing content changed on slide 1. Teacher notes changed on slide 2.");
+});
 
 it.each([4000, 6000])("retains the entire maximum-length teacher request within the %i-character endpoint limit", maxLength => {
   const teacherRequest = "T".repeat(2990) + "KEEP RIGHT";

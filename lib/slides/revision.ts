@@ -1,3 +1,28 @@
+import type { SlideDeck } from "./model";
+
+export function slideRevisionSummary(before: SlideDeck, after: SlideDeck): string {
+  const textPages: number[] = [], notesPages: number[] = [];
+  after.draft.slides.forEach((slide, i) => {
+    const previous = before.draft.slides[i];
+    if (!previous || slide.stage !== previous.stage || slide.title !== previous.title || slide.body !== previous.body ||
+      slide.task !== previous.task || slide.videoUrl !== previous.videoUrl) textPages.push(i + 1);
+    if (!previous || JSON.stringify(slide.teacherNotes) !== JSON.stringify(previous.teacherNotes)) notesPages.push(i + 1);
+  });
+  const pages = (numbers: number[]) => `slide${numbers.length === 1 ? "" : "s"} ${numbers.join(", ")}`;
+  const changes: string[] = [];
+  if (before.draft.title !== after.draft.title) changes.push("Deck title changed.");
+  if (before.draft.slides.length !== after.draft.slides.length) changes.push(`Slide count changed from ${before.draft.slides.length} to ${after.draft.slides.length}.`);
+  if (textPages.length) changes.push(`Student-facing content changed on ${pages(textPages)}.`);
+  if (notesPages.length) changes.push(`Teacher notes changed on ${pages(notesPages)}.`);
+  const assetIds = new Set([...Object.keys(before.assets), ...Object.keys(after.assets)]);
+  if ([...assetIds].some(id => before.assets[id]?.data !== after.assets[id]?.data)) changes.push("Illustrations changed.");
+  else if (before.draft.visuals.length !== after.draft.visuals.length || after.draft.visuals.some((visual, i) => {
+    const previous = before.draft.visuals[i];
+    return visual.id !== previous.id || visual.prompt !== previous.prompt || visual.caption !== previous.caption || visual.alt !== previous.alt;
+  })) changes.push("Illustration details changed.");
+  return changes.join(" ") || "Slide text, links, teacher notes and illustrations match the previous version.";
+}
+
 /** Keep the teacher's bounded request ahead of optional AI findings, including
  * when later automatic correction rounds introduce additional findings. */
 export function slideRevisionFeedback(teacherRequest: string, findings: readonly string[], maxLength = 6000): string {
