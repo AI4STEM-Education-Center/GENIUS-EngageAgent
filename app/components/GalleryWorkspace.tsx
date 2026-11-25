@@ -7,11 +7,10 @@ import type { GalleryCopy, GalleryMaterial, SavedGalleryCopySummary } from "@/li
 import { galleryCopyAttribution, prepareGalleryDelivery, listSavedGalleryCopies, loadSavedGalleryCopy, refreshGalleryCopyMedia, saveGalleryCopy } from "@/lib/material-gallery-client";
 import GalleryCopyDetails from "./GalleryCopyDetails";
 import SavedMaterialsPanel from "./SavedMaterialsPanel";
-import type { StrategyFocus } from "@/lib/strategy-focus";
 import { scopedTaskFetch } from "@/lib/client-auth";
 import { useTaskLesson } from "@/lib/lesson-client";
 import type { SlideDeck } from "@/lib/slides/model";
-import MaterialGalleryPanel from "./MaterialGalleryPanel";
+import MaterialGalleryPanel, { type GalleryTaskRecommendation } from "./MaterialGalleryPanel";
 import SlidesWorkspace from "./SlidesWorkspace";
 import VideoMaterialEditor from "./VideoMaterialEditor";
 import VideoAdaptation from "./VideoAdaptation";
@@ -28,7 +27,7 @@ type Editor = { copy: GalleryCopy; revision: number; savedAt?: string };
 type LeaveGuard = (proceed: () => void) => void;
 type HistoryNavigation = EventTarget & { traverseTo: (key: string) => { committed: Promise<unknown>; finished: Promise<unknown> } };
 type HistoryNavigateEvent = Event & { navigationType?: string; destination?: { key?: string; sameDocument?: boolean } };
-type Props = { user: UserContext; initialCopy?: GalleryCopy; taskTitle?: string; recommendation?: { lessonNumber: number; strategy: string; focus?: StrategyFocus }; onBack: () => void; onPublished?: () => void; registerLeaveGuard?: (guard: LeaveGuard | null) => void };
+type Props = { user: UserContext; initialCopy?: GalleryCopy; taskTitle?: string; recommendation?: GalleryTaskRecommendation; onBack: () => void; onPublished?: () => void; registerLeaveGuard?: (guard: LeaveGuard | null) => void };
 
 /** A separate task-scoped library/editor. It never changes the generation workflow's draft or strategy. */
 export default function GalleryWorkspace({ user, initialCopy, taskTitle, recommendation, onBack, onPublished, registerLeaveGuard }: Props) {
@@ -301,7 +300,7 @@ export default function GalleryWorkspace({ user, initialCopy, taskTitle, recomme
         </div>
         <div role="group" aria-label="Gallery material type" className="flex gap-2">{(["all", "slides", "video"] as const).map(value => <button key={value} type="button" className={format === value ? primary : button} aria-pressed={format === value} onClick={() => setFormat(value)}>{value === "all" ? "All types" : value === "slides" ? "Slides" : "Video"}</button>)}</div>
       </div>
-      {tab === "shared" ? <MaterialGalleryPanel scope={{ classId, assignmentId }} lessonNumber={recommendation?.lessonNumber || 0} strategy={recommendation?.strategy || ""} focus={recommendation?.focus} format={format} standalone disabled={busy} onUse={copy => openEditor(copy)} />
+      {tab === "shared" ? <MaterialGalleryPanel scope={{ classId, assignmentId }} {...(recommendation || { lessonNumber: 0, strategy: "" })} format={format} standalone disabled={busy} onUse={copy => openEditor(copy)} />
         : <SavedMaterialsPanel key={format} items={saved} format={format} loading={listLoading} busy={busy} onOpen={id => void openSaved(id)} />}
     </>}
     {sending && <SendMaterialDialog current={classId && assignmentId ? { classId, assignmentId } : undefined} className={user.className} taskTitle={taskTitle} onClose={() => setSending(false)} onSend={sendMaterial} />}

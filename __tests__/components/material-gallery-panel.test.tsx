@@ -62,6 +62,35 @@ it("combines standalone filters with task recommendations and displays author, c
   expect(mocks.copy).not.toHaveBeenCalled();
 });
 
+it("preserves the task settings when browsing all formats, and removes them for newest-first browsing", async () => {
+  const task = { recommendFormat: "slides", recommendContextRef: "a".repeat(64), focus: { misconceptions: ["a"], coreIdeas: [] },
+    teachingContext: { gradeBand: "6–8", quizPattern: "55–70% correct", contextRef: "a".repeat(64) } };
+  const strip = render(<MaterialGalleryPanel {...props({ ...task, recommendationsOnly: true })} />);
+  await card();
+  const step = mocks.list.mock.lastCall?.[1];
+  strip.unmount();
+  render(<MaterialGalleryPanel {...props({ ...task, standalone: true, format: "all" })} />);
+  await card();
+  const all = mocks.list.mock.lastCall?.[1];
+  expect(all.format).toBeUndefined();
+  for (const key of ["recommendLesson", "recommendStrategy", "recommendFocus", "recommendFormat", "recommendGrade", "recommendQuiz", "recommendContextRef"]) {
+    expect(all[key]).toBeDefined();
+    expect(all[key]).toEqual(step[key]);
+  }
+  expect(all.recommendExperience).toBeUndefined();
+  fireEvent.change(screen.getByLabelText("Gallery sort order"), { target: { value: "newest" } });
+  await waitFor(() => expect(Object.keys(mocks.list.mock.lastCall?.[1]).filter(key => key.startsWith("recommend"))).toEqual([]));
+});
+
+it("keeps current-task match indicators when a shared preview finishes loading", async () => {
+  const matchTags = [{ label: "Experience", value: "Pressing a ball", matched: true }];
+  mocks.list.mockResolvedValue({ items: [{ ...material, matchTags, matchReasons: ["Matches class check-in"] }] });
+  render(<MaterialGalleryPanel {...props({ recommendationsOnly: true })} />);
+  fireEvent.click(within(await card()).getByRole("button", { name: "Preview" }));
+  await screen.findByLabelText("Rendered shared slide");
+  expect(within(screen.getByRole("dialog")).getByText("1 of 7 match")).toBeTruthy();
+});
+
 it("passes the selected copy mode and metadata to the editor, with an independent material ID", async () => {
   const onUse = vi.fn(); render(<MaterialGalleryPanel {...props({ onUse })} />);
   fireEvent.click(within(await card()).getByRole("button", { name: "Adapt" }));

@@ -12,6 +12,7 @@ import { enterLessonScope, loadTaskLessons } from "./lesson-scope";
 import { resolveStrategyFocus } from "./strategy-focus";
 import { getMedia } from "./nosql";
 import { parseMaterialActivity } from "./material-activities";
+import { acceptedClassroomContext } from "./classroom-context-server";
 import { galleryLessonIdentity, galleryMatches, galleryPromptTags } from "./material-gallery-tags";
 import { draftVisibleVisualIds, isSlideStrategy, isSlideAsset, type SlideDraft } from "./slides/model";
 import type { ContentItem, TextMode } from "./types";
@@ -850,11 +851,13 @@ export async function galleryGet(request: Request) {
     const lesson = getLesson(recommendLesson);
     if (lesson) recommendationTags = { TOPIC: lesson.topic?.trim() && lesson.target_concept?.trim() ? lesson.topic.trim() : lesson.lesson_title, LEARNING_OBJECTIVE: lesson.learning_objective };
   }
+  const taskFormat = params.get("recommendFormat") || params.get("format") || "";
+  if (taskFormat && taskFormat !== "slides" && taskFormat !== "video") throw new SlideRequestError("Choose slides or video.");
   const recommendationSettings = {
     GRADE_LEVEL: text(params.get("recommendGrade") ?? undefined, "Recommendation grade", 80),
     CURRENT_UNDERSTANDING: text(params.get("recommendQuiz") ?? undefined, "Recommendation quiz pattern", 200),
     EXPERIENCE_CONTEXT: text(params.get("recommendExperience") ?? undefined, "Recommendation experience", 200),
-    FORMAT: params.get("format") || "",
+    FORMAT: taskFormat,
   };
   if (recommendationTags) recommendationTags = { ...recommendationTags, ...recommendationSettings };
   if (params.has("format")) { if (!["slides", "video"].includes(params.get("format")!)) throw new SlideRequestError("Choose slides or video."); filters.format = params.get("format") as "slides" | "video"; }
@@ -865,7 +868,20 @@ export async function galleryGet(request: Request) {
   const requestedLimit = params.has("limit") ? Number(params.get("limit")) : 12;
   const limit = recommendedOnly ? Math.min(requestedLimit, 3) : requestedLimit;
   if (!Number.isInteger(limit) || limit < 1 || limit > 60) throw new SlideRequestError("Page size must be between 1 and 60.");
-  const fingerprint = digest(JSON.stringify([filters, search, params.get("mine") === "true", context.userId, recommendLesson, recommendStrategy, recommendFocus, recommendationTags, recommendedOnly, gradeBand]));
+  const contextRef = params.get("recommendContextRef");
+  let reportedActivities: string[] = [];
+  if (recommendationTags && contextRef && context.classId && context.assignmentId && !recommendationSettings.EXPERIENCE_CONTEXT
+    && (recommendStrategy === "cognitive conflict" || recommendStrategy === "engaged critiquing")) {
+    // This optional signal must not disclose an activity or borrow data from another task.
+    const snapshot = await acceptedClassroomContext(context, contextRef).catch(() => undefined);
+    const source = snapshot?.experiences;
+    if ((source?.status === "ready" || source?.status === "stale") && source.value && source.value.responseCount > 0) {
+      const activities = source.value.activities;
+      const highest = activities.reduce((max, item) => Math.max(max, item.studentCount), 0);
+      if (highest > 0) reportedActivities = activities.filter(item => item.studentCount === highest).map(item => item.activity);
+    }
+  }
+  const fingerprint = digest(JSON.stringify([filters, search, params.get("mine") === "true", context.userId, recommendLesson, recommendStrategy, recommendFocus, recommendationTags, recommendedOnly, gradeBand, reportedActivities]));
   let after = "";
   if (params.has("cursor")) {
     try { const c = JSON.parse(Buffer.from(params.get("cursor")!, "base64url").toString()); if (!record(c) || c.fingerprint !== fingerprint || typeof c.after !== "string" || c.after.length > 90) throw new Error(); after = c.after; }
@@ -879,12 +895,18 @@ export async function galleryGet(request: Request) {
     const name = await originalAuthor(row.material, catalog);
     return name ? { ...row, material: { ...row.material, originalCreatorName: name } } : row;
   }));
-  const rank = (row: Shared) => galleryMatches({ ...row.material, isOwner: row.ownerId === context.userId }, recommendLesson, recommendStrategy, recommendFocus, recommendationTags);
-  const orderKey = (row: Shared) => `${String(rank(row).score).padStart(2, "0")}|${row.material.createdAt}|${row.id}`;
+  const ranks = new Map(available.map(row => [row.id, galleryMatches({ ...row.material, isOwner: row.ownerId === context.userId }, recommendLesson, recommendStrategy, recommendFocus, recommendationTags, reportedActivities)]));
+  const hasRequestedFocus = !!recommendFocus && (recommendFocus.misconceptions.length > 0 || recommendFocus.coreIdeas.length > 0);
+  function eligibleForTask(row: Shared) {
+    const reasons = ranks.get(row.id)!.reasons;
+    return !!recommendationTags && !!row.material.promptTags && (!taskFormat || row.material.format === taskFormat)
+      && reasons.includes("Same lesson") && reasons.includes("Same strategy") && (!hasRequestedFocus || reasons.includes("Same focus"));
+  }
+  // The top of the unfiltered task Gallery must follow the same order as Step 3.
+  const orderKey = (row: Shared) => `${eligibleForTask(row) ? 1 : 0}|${String(ranks.get(row.id)!.score).padStart(2, "0")}|${row.material.createdAt}|${row.id}`;
   const matches = available.filter(row => (params.get("mine") !== "true" || row.ownerId === context.userId)
     && (!gradeBand || canonicalGrade(row.material.gradeBand).toLocaleLowerCase() === gradeBand)
-    && (!recommendedOnly || (!!recommendationTags && !!row.material.promptTags && rank(row).reasons.includes("Same lesson")
-      && rank(row).reasons.includes("Same strategy") && (!recommendFocus || !(recommendFocus.misconceptions.length || recommendFocus.coreIdeas.length) || rank(row).reasons.includes("Same focus"))))
+    && (!recommendedOnly || eligibleForTask(row))
     && (!filters.lessonNumber || row.material.lessonNumber === filters.lessonNumber) && (!filters.strategy || row.material.strategy === filters.strategy)
     && (!search || [row.material.title, row.material.description, row.material.experienceContext, row.material.gradeBand, row.material.quizPattern, row.material.strategy,
       row.material.creatorName, row.material.originalCreatorName, ...Object.values(row.material.promptTags || {})].join(" ").toLocaleLowerCase().includes(search)))
@@ -902,7 +924,7 @@ export async function galleryGet(request: Request) {
     return { ...row.material, isOwner: row.ownerId === context.userId, teacherCount: await teacherCount(row.id), feedback: await galleryFeedback(row.id, feedbackCache),
       ...(firstSlide ? { previewSlide: { stage: firstSlide.stage, title: firstSlide.title, body: firstSlide.body, task: firstSlide.task } } : {}),
       ...(image ? { previewImage: await galleryBlobUrl(image) } : {}),
-      ...(recommendLesson || recommendStrategy ? { matchReasons: rank(row).reasons, matchTags: rank(row).tags } : {}) };
+      ...(recommendLesson || recommendStrategy ? { matchReasons: ranks.get(row.id)!.reasons, matchTags: ranks.get(row.id)!.tags } : {}) };
   })),
     facets: { lessons: [...new Set(available.map(row => row.material.lessonNumber))].sort((a, b) => a - b), strategies: [...new Set(available.map(row => row.material.strategy))].sort(), grades: [...new Set(available.map(row => canonicalGrade(row.material.gradeBand)).filter(Boolean))].sort() },
     ...(!recommendedOnly && matches.length > limit && last ? { nextCursor: Buffer.from(JSON.stringify({ fingerprint, after: orderKey(last) })).toString("base64url") } : {}) };

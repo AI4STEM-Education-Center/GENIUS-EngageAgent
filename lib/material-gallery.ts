@@ -76,7 +76,7 @@ export type GalleryMaterial = {
 };
 export type GalleryFilters = { lessonNumber?: number; strategy?: string; format?: "slides" | "video"; search?: string; cursor?: string; limit?: number; mine?: boolean;
   recommendedOnly?: boolean; gradeBand?: string; recommendLesson?: number; recommendStrategy?: string; recommendFocus?: string;
-  recommendGrade?: string; recommendQuiz?: string; recommendExperience?: string };
+  recommendFormat?: "slides" | "video"; recommendContextRef?: string; recommendGrade?: string; recommendQuiz?: string; recommendExperience?: string };
 export type GalleryFacets = { lessons: number[]; strategies: string[]; grades?: string[] };
 export type GallerySlideSource = { material: GalleryMaterial; draft: SlideDraft; strategy: SlideStrategy; lessonNumber: number; visualIds: string[] };
 export type GalleryPreviewSource = {

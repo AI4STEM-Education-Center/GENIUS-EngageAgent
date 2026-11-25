@@ -3,7 +3,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-const mocks = vi.hoisted(() => ({ session: vi.fn(), context: vi.fn(), media: vi.fn(), complete: vi.fn() }));
+const mocks = vi.hoisted(() => ({ session: vi.fn(), context: vi.fn(), accepted: vi.fn(), media: vi.fn(), complete: vi.fn() }));
+vi.mock("@/lib/classroom-context-server", async original => ({ ...await original<object>(), acceptedClassroomContext: mocks.accepted }));
 vi.mock("openai", () => ({ default: class { chat = { completions: { create: mocks.complete } }; } }));
 vi.mock("@/lib/session", async original => ({ ...await original<object>(), sessionUser: mocks.session }));
 vi.mock("@/lib/workspace", async original => ({ ...await original<object>(), workspaceContext: mocks.context }));
@@ -21,6 +22,7 @@ vi.mock("@/lib/workspace-store", async original => {
   } };
 });
 import { GET, POST } from "@/app/api/material-gallery/route";
+import type { GalleryMaterial } from "@/lib/material-gallery";
 import { GET as mediaGET } from "@/app/api/material-gallery/media/route";
 import { resolveGalleryContentMedia } from "@/lib/material-gallery-server";
 import { POST as adaptVideo } from "@/app/api/material-gallery/adapt-video/route";
@@ -600,6 +602,69 @@ describe("teacher library outside classes and strict Step 3 recommendations", ()
     expect((await (await get({ ...fields, recommendLesson: "1" })).json()).items).toEqual([]);
     expect((await (await get({ ...fields, recommendStrategy: "analogy" })).json()).items).toEqual([]);
     expect((await get({ recommendedOnly: "true" })).status).toBe(400);
+  });
+
+  it("keeps Browse all in Step 3 order, with identical match tags and reasons even with All types selected", async () => {
+    const focused = { misconceptions: ["a"], coreIdeas: [] };
+    for (let i = 0; i < 4; i++) await share({ metadata: { ...metadata, title: `Focused ${i}`, gradeBand: "High school", experienceContext: "", focus: focused } });
+    await share({ metadata: { ...metadata, title: "Outside the selected focus", quizPattern: "Most students answered correctly" } });
+    const item = { id: "video-with-matching-focus", title: "An alternative format", body: "Observe the ball during contact.",
+      strategy: "cognitive conflict", lessonNumber: 3, focus: focused };
+    mocks.media.mockImplementation(async (_c, _a, _s, id, kind) => kind === "video" ? { class_id: scope.classId, assignment_id: scope.assignmentId,
+      student_id: "cohort", content_item_id: id, mime_type: "video/mp4", data_url: "data:video/mp4;base64,dmlkZW8=" } : null);
+    expect((await post({ action: "share-video", lessonNumber: 3, item, metadata: { ...metadata, title: item.title, focus: focused } })).status).toBe(200);
+    const task = { recommendLesson: "3", recommendStrategy: "cognitive conflict", recommendFocus: JSON.stringify(focused),
+      recommendGrade: "6–8", recommendQuiz: "Most students answered correctly", recommendExperience: "Catching a ball", recommendFormat: "slides" };
+    const strip = (await (await get({ ...task, recommendedOnly: "true", format: "slides" })).json()).items;
+    const all = (await (await get(task)).json()).items;
+    expect(strip).toHaveLength(3);
+    expect(all).toHaveLength(6);
+    const matches = ({ id, matchTags, matchReasons }: GalleryMaterial) => ({ id, matchTags, matchReasons });
+    expect(all.slice(0, 3).map(matches)).toEqual(strip.map(matches));
+    expect(all.slice(4).map((item: GalleryMaterial) => item.title)).toEqual(expect.arrayContaining([item.title, "Outside the selected focus"]));
+    expect(all.find((card: GalleryMaterial) => card.format === "video").matchReasons).not.toContain("Same format");
+    expect(strip[0].matchReasons).toContain("Same format");
+    expect((await (await get()).json()).items[0]).not.toHaveProperty("matchReasons");
+  });
+
+  it.each(["cognitive conflict", "engaged critiquing"] as const)("uses the most reported activities for %s without exposing private check-in data", async strategy => {
+    const draft = deckFixture(strategy).draft;
+    async function shareActivity(experienceContext: string) {
+      const assets = Object.fromEntries(draft.visuals.map(visual => [visual.id, { width: 1, height: 1, digest: hash }]));
+      const id = await start({ strategy, draft, assets, metadata: { ...metadata, experienceContext } });
+      for (const visual of draft.visuals) expect((await post({ action: "upload-asset", id, visualId: visual.id, asset: { data: tinyImage, width: 1, height: 1 } })).status).toBe(200);
+      expect((await post({ action: "commit-share", id })).status).toBe(200);
+      return id;
+    }
+    const activity = await shareActivity("Press a pillow");
+    const tie = await shareActivity("Bouncing a ball");
+    const lower = await shareActivity("Stretch a band");
+    const snapshot = { experiences: { status: "ready", value: { responseCount: 8, activities: [
+      { activity: "Pressing pillows", studentCount: 5, incidents: ["PRIVATE account from a student"] },
+      { activity: "Stretching bands", studentCount: 2 }, { activity: "Bounce the balls", studentCount: 5 },
+    ] } } };
+    mocks.accepted.mockResolvedValue(snapshot);
+    const task = { recommendLesson: "3", recommendStrategy: strategy, recommendFormat: "slides", recommendContextRef: "a".repeat(64) };
+    const checked = await (await get(task)).json();
+    expect(mocks.accepted).toHaveBeenCalledWith(expect.objectContaining(scope), task.recommendContextRef);
+    for (const id of [activity, tie]) {
+      const card = checked.items.find((item: { id: string }) => item.id === id);
+      expect(card.matchReasons).toContain("Matches class check-in");
+      expect(card.matchReasons).not.toContain("Same experience");
+      expect(card.matchTags).toContainEqual(expect.objectContaining({ label: "Experience", matched: true }));
+    }
+    expect(checked.items.find((item: { id: string }) => item.id === lower).matchReasons).not.toContain("Matches class check-in");
+    expect(JSON.stringify(checked)).not.toMatch(/PRIVATE|Pressing pillows|Bounce the balls/);
+    mocks.accepted.mockClear();
+    const manual = await (await get({ ...task, recommendExperience: "Stretch a band" })).json();
+    expect(manual.items.find((item: { id: string }) => item.id === lower).matchReasons).toContain("Same experience");
+    expect(JSON.stringify(manual)).not.toContain("Matches class check-in");
+    await get({ ...task, recommendStrategy: "analogy" });
+    expect(mocks.accepted).not.toHaveBeenCalled();
+    mocks.accepted.mockRejectedValueOnce(new Error("Different task"));
+    expect(JSON.stringify(await (await get(task)).json())).not.toContain("Matches class check-in");
+    mocks.accepted.mockResolvedValueOnce({ experiences: { status: "ready", value: { responseCount: 0, activities: snapshot.experiences.value.activities } } });
+    expect(JSON.stringify(await (await get(task)).json())).not.toContain("Matches class check-in");
   });
 
   it("supports reviewed keywords and grade filters without inventing tags or accepting unlimited text", async () => {

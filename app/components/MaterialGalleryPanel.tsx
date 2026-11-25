@@ -16,9 +16,17 @@ import type { StrategyFocus } from "@/lib/strategy-focus";
 
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50";
 const primary = `${button} !border-brand !bg-brand !text-white hover:!bg-brand-dark`;
-type Props = { scope: GalleryScope; lessonNumber: number; strategy: string; format: "all" | "slides" | "video"; focus?: StrategyFocus; disabled?: boolean; onUse: (copy: GalleryCopy, material: GalleryMaterial) => void; refreshKey?: number; browseRequest?: number; standalone?: boolean; recommendationsOnly?: boolean; onBrowse?: () => void; teachingContext?: MaterialTeachingContext; classroomContext?: string };
+export type GalleryTaskRecommendation = {
+  lessonNumber: number;
+  strategy: string;
+  focus?: StrategyFocus;
+  teachingContext?: MaterialTeachingContext;
+  recommendFormat?: "slides" | "video";
+  recommendContextRef?: string;
+};
+type Props = GalleryTaskRecommendation & { scope: GalleryScope; format: "all" | "slides" | "video"; disabled?: boolean; onUse: (copy: GalleryCopy, material: GalleryMaterial) => void; refreshKey?: number; browseRequest?: number; standalone?: boolean; recommendationsOnly?: boolean; onBrowse?: () => void; classroomContext?: string };
 
-export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, format, focus, disabled, onUse, refreshKey = 0, browseRequest = 0, standalone = false, recommendationsOnly = false, onBrowse, teachingContext, classroomContext = "" }: Props) {
+export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, format, focus, disabled, onUse, refreshKey = 0, browseRequest = 0, standalone = false, recommendationsOnly = false, onBrowse, teachingContext, recommendFormat, recommendContextRef, classroomContext = "" }: Props) {
   const [filter, setFilter] = useState<"topic" | "strategy" | "all" | "mine">(standalone ? "all" : "topic");
   const [expanded, setExpanded] = useState(standalone);
   const [search, setSearch] = useState("");
@@ -48,18 +56,20 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
   const request = useRef<AbortController | null>(null);
   const operation = useRef<AbortController | null>(null);
   const previewRequest = useRef<AbortController | null>(null);
-  const scopeKey = JSON.stringify([scope.classId, scope.assignmentId, lessonNumber, strategy, format, focusKey, teachingContext]);
+  const scopeKey = JSON.stringify([scope.classId, scope.assignmentId, lessonNumber, strategy, format, recommendFormat, recommendContextRef, focusKey, teachingContext]);
 
   const load = useCallback(async (nextCursor?: string) => {
     request.current?.abort();
     const controller = new AbortController(); request.current = controller;
     setLoading(true); setError("");
-    const filters: GalleryFilters = { ...(format === "all" ? {} : { format }), recommendGrade: teachingContext?.gradeBand, recommendQuiz: teachingContext?.quizPattern, recommendExperience: teachingContext?.experienceContext, ...(selectedGrade ? { gradeBand: selectedGrade } : {}), search: query || undefined, limit: recommendationsOnly ? 3 : expanded ? 12 : 6, cursor: nextCursor,
+    const filters: GalleryFilters = { ...(format === "all" ? {} : { format }), ...(selectedGrade ? { gradeBand: selectedGrade } : {}), search: query || undefined, limit: recommendationsOnly ? 3 : expanded ? 12 : 6, cursor: nextCursor,
       ...(filter === "topic" && lessonNumber > 0 ? { lessonNumber } : filter === "strategy" && strategy ? { strategy } : filter === "mine" ? { mine: true } : {}),
       ...(standalone && selectedLesson ? { lessonNumber: Number(selectedLesson) } : {}),
       ...(standalone && selectedStrategy ? { strategy: selectedStrategy } : {}),
       ...(recommendationsOnly ? { recommendedOnly: true } : {}),
-      ...((recommendationsOnly || standalone && recommended) && lessonNumber > 0 ? { recommendLesson: lessonNumber, recommendStrategy: strategy || undefined, recommendFocus: focusKey } : {}) };
+      ...((recommendationsOnly || standalone && recommended) && lessonNumber > 0 ? { recommendLesson: lessonNumber, recommendStrategy: strategy || undefined, recommendFocus: focusKey,
+        recommendFormat, recommendGrade: teachingContext?.gradeBand, recommendQuiz: teachingContext?.quizPattern, recommendExperience: teachingContext?.experienceContext,
+        recommendContextRef } : {}) };
     try {
       const result = await listMaterialGallery({ classId: scope.classId, assignmentId: scope.assignmentId }, filters, controller.signal);
       if (controller.signal.aborted) return;
@@ -69,7 +79,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     } catch (reason) {
       if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to load shared materials.");
     } finally { if (!controller.signal.aborted) setLoading(false); }
-  }, [scope.classId, scope.assignmentId, format, query, expanded, filter, lessonNumber, strategy, standalone, selectedLesson, selectedStrategy, recommended, focusKey, recommendationsOnly, selectedGrade, teachingContext?.gradeBand, teachingContext?.quizPattern, teachingContext?.experienceContext]);
+  }, [scope.classId, scope.assignmentId, format, query, expanded, filter, lessonNumber, strategy, standalone, selectedLesson, selectedStrategy, recommended, focusKey, recommendationsOnly, selectedGrade, recommendFormat, recommendContextRef, teachingContext?.gradeBand, teachingContext?.quizPattern, teachingContext?.experienceContext]);
   useEffect(() => { setItems([]); setCursor(undefined); void load(); return () => request.current?.abort(); }, [load, refreshKey, reload]);
   useEffect(() => {
     operation.current?.abort(); previewRequest.current?.abort(); if (dialog.current?.open) dialog.current.close();
@@ -105,7 +115,10 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     try {
       const detail = await previewGalleryMaterial(scope, material.id, controller.signal);
       if (controller.signal.aborted) return;
-      setPreview(detail);
+      // Match tags belong to this task's listing. Keep them when the expanded
+      // preview still represents the same version of the shared material.
+      setPreview(material.metadataRevision === detail.material.metadataRevision
+        ? { ...detail, material: { ...detail.material, matchTags: material.matchTags } } : detail);
       if (material.format === "slides") {
         const deck = await previewGallerySlideDeck(scope, material.id, controller.signal);
         // A lesson added in the app needs loading for its slide heading. If this fails, the preview says it can't show the slide.
