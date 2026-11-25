@@ -55,7 +55,10 @@ export type GalleryMaterial = {
   previewImage?: string;
   previewSlide?: Pick<SlideDraft["slides"][number], "stage" | "title" | "body" | "task">;
   derivedFrom?: Pick<GalleryProvenance, "templateId" | "revision" | "title">;
+  /** Teacher who shared this Gallery version. */
   creatorName?: string;
+  /** First recorded author in this version's public Gallery lineage. */
+  originalCreatorName?: string;
   /** Distinct teachers who completed a private-copy save, not previews/opens. */
   teacherCount?: number;
   generation?: import("./generation-record").GenerationRecord;

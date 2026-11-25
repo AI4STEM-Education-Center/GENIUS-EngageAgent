@@ -7,7 +7,7 @@ type Props = Partial<GalleryMaterial> & { showTags?: boolean; compact?: boolean;
 const meaningful = (value?: string) => value && !/^(Not shared|Not supplied|Not selected|Unknown)/iu.test(value) ? value : undefined;
 const short = (value: string) => value.length > 44 ? `${value.slice(0, 41)}…` : value;
 export default function GalleryMaterialDetails(material: Props) {
-  const { creatorName, teacherCount, promptTags = {}, feedback, showTags = true, compact = false, matchTags, privateMaterial = false } = material;
+  const { creatorName, originalCreatorName, derivedFrom, teacherCount, promptTags = {}, feedback, showTags = true, compact = false, matchTags, privateMaterial = false } = material;
   const focus = meaningful(promptTags.FOCUS_ITEMS) || (material.focus ? [
     ...material.focus.misconceptions.map(code => toMisconceptionIds(material.lessonNumber || 0, code).join(" + ") || `Target ${code}`),
     ...material.focus.coreIdeas.map(index => `Core idea ${index + 1}`),
@@ -32,7 +32,9 @@ export default function GalleryMaterialDetails(material: Props) {
   ].filter((entry): entry is [string, string] => !!entry[1]);
   const result = feedback?.status === "available" ? feedback : undefined;
   return <div className="mt-2 text-sm text-mute">
-    {!privateMaterial && <p>{creatorName ? `By ${creatorName}` : "Author not recorded"}
+    {!privateMaterial && <p>{derivedFrom
+      ? <><span>{originalCreatorName ? `Original author: ${originalCreatorName}` : "Original author not recorded"}</span>{" · "}<span>{creatorName ? `This version shared by ${creatorName}` : "Sharing teacher not recorded"}</span></>
+      : creatorName ? `By ${creatorName}` : "Author not recorded"}
       {teacherCount !== undefined && <span title="Teachers who saved an editable copy. Each teacher is counted once; previews do not count."> · {teacherCount} {teacherCount === 1 ? "teacher has" : "teachers have"} saved a copy</span>}</p>}
     {result?.publishedTeacherCount !== undefined && <p className="mt-1 text-xs text-mute" title="Distinct teachers with a currently published classroom copy. Saving or previewing alone does not count.">{result.publishedTeacherCount} {result.publishedTeacherCount === 1 ? "teacher using" : "teachers using"} with students</p>}
     {matchTags && <p className="mt-2 text-xs font-semibold text-ok">{matchTags.filter(tag => tag.matched).length} of 7 match</p>}

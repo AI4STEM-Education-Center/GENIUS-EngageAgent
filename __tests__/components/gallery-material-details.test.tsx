@@ -21,3 +21,15 @@ it("does not present a data failure as a zero rating or invented learning result
   expect(screen.getByText("Student feedback unavailable")).toBeTruthy();
   expect(screen.queryByText(/0\/5|No student ratings yet/)).toBeNull();
 });
+
+it("distinguishes original authors, version sharers and undocumented ancestry", () => {
+  const derivedFrom = { templateId: "public-parent", revision: 1, title: "Source" };
+  const { rerender } = render(<GalleryMaterialDetails derivedFrom={derivedFrom} originalCreatorName="Avery" creatorName="Blair" />);
+  expect(screen.getByText("Original author: Avery")).toBeTruthy();
+  expect(screen.getByText("This version shared by Blair")).toBeTruthy();
+  rerender(<GalleryMaterialDetails derivedFrom={derivedFrom} creatorName="Blair" />);
+  expect(screen.getByText("Original author not recorded")).toBeTruthy();
+  rerender(<GalleryMaterialDetails creatorName="Avery" />);
+  expect(screen.getByText("By Avery")).toBeTruthy();
+  expect(screen.queryByText(/This version shared by/)).toBeNull();
+});

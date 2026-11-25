@@ -16,12 +16,19 @@ function validFeedback(value: unknown): boolean {
     && ["highRatingPercent", "scienceQuestionPercent"].every(key => value[key] === null || typeof value[key] === "number" && Number(value[key]) >= 0 && Number(value[key]) <= 100)
     && record(value.questionTypes) && Object.values(value.questionTypes).every(n => Number.isSafeInteger(n) && Number(n) >= 0);
 }
+function validCredits(value: { creatorName?: unknown; originalCreatorName?: unknown; derivedFrom?: unknown }) {
+  const parent = value.derivedFrom;
+  return (value.creatorName === undefined || typeof value.creatorName === "string")
+    && (value.originalCreatorName === undefined || typeof value.originalCreatorName === "string")
+    && (parent === undefined || (record(parent) && typeof parent.templateId === "string" && !!parent.templateId
+      && Number.isSafeInteger(parent.revision) && Number(parent.revision) > 0 && typeof parent.title === "string"));
+}
 function isMaterial(value: unknown): value is GalleryMaterial {
   return record(value) && typeof value.id === "string" && !!value.id && Number.isInteger(value.revision) && Number(value.revision) > 0
     && typeof value.title === "string" && typeof value.strategy === "string" && Number.isInteger(value.lessonNumber)
     && ["slides", "video"].includes(String(value.format)) && typeof value.isOwner === "boolean"
     && ["description", "gradeBand", "experienceContext", "quizPattern", "createdAt"].every(key => typeof value[key] === "string")
-    && (value.creatorName === undefined || typeof value.creatorName === "string")
+    && validCredits(value)
     && (value.teacherCount === undefined || (Number.isSafeInteger(value.teacherCount) && Number(value.teacherCount) >= 0))
     && (value.promptTags === undefined || (record(value.promptTags) && Object.values(value.promptTags).every(v => typeof v === "string")))
     && (value.matchTags === undefined || (Array.isArray(value.matchTags) && value.matchTags.length === 7 && value.matchTags.every(tag => record(tag) && typeof tag.label === "string" && typeof tag.value === "string" && typeof tag.matched === "boolean")))
@@ -87,7 +94,7 @@ export async function createPrivateSlideCopy(scope: GalleryScope, deck: SlideDec
     return [visual.id, { width: asset.width, height: asset.height, digest: await checksum(asset.data), ...(asset.generation ? { generation: asset.generation } : {}) }];
   })));
   const { id } = await json<{ id: string }>(scope, { action: "start-private-save", lessonNumber: deck.lessonNumber, strategy: deck.strategy,
-    materialId: deck.id, generation: deck.generation, draft: deck.draft, assets, metadata: { title: deck.draft.title, ...publicTeachingSettings(deck.teachingContext),
+    materialId: deck.id, ...(deck.gallerySource ? { copyId: deck.id } : {}), generation: deck.generation, draft: deck.draft, assets, metadata: { title: deck.draft.title, ...publicTeachingSettings(deck.teachingContext),
       ...(deck.focus ? { focus: { misconceptions: deck.focus.misconceptions || [], coreIdeas: deck.focus.coreIdeas || [] } } : {}) } }, "POST", signal);
   if (typeof id !== "string" || !id) throw invalid();
   for (const visual of deck.draft.visuals) {
@@ -117,9 +124,9 @@ export async function listMaterialGallery(scope: GalleryScope, filters: GalleryF
   return data;
 }
 export async function galleryCopyAttribution(scope: GalleryScope, copyId: string, signal?: AbortSignal) {
-  const value = await json<Pick<GalleryMaterial, "creatorName" | "teacherCount" | "promptTags" | "feedback" | "lessonNumber" | "strategy" | "format" | "focus" | "gradeBand" | "quizPattern" | "experienceContext">>(scope, { action: "copy-attribution", copyId }, "GET", signal);
+  const value = await json<Pick<GalleryMaterial, "creatorName" | "originalCreatorName" | "derivedFrom" | "teacherCount" | "promptTags" | "feedback" | "lessonNumber" | "strategy" | "format" | "focus" | "gradeBand" | "quizPattern" | "experienceContext">>(scope, { action: "copy-attribution", copyId }, "GET", signal);
   if (!validFeedback(value.feedback) || !Number.isSafeInteger(value.teacherCount) || Number(value.teacherCount) < 0
-    || (value.creatorName !== undefined && typeof value.creatorName !== "string")
+    || !validCredits(value)
     || (value.promptTags !== undefined && (!record(value.promptTags) || !Object.values(value.promptTags).every(v => typeof v === "string")))) throw invalid();
   return value;
 }

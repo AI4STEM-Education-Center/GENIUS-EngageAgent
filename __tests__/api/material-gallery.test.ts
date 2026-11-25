@@ -80,6 +80,59 @@ describe("teacher material library", () => {
     expect((await post(startBody({ metadata: { ...metadata, creatorName: "Forged" } }))).status).toBe(400);
   });
 
+  it("credits the original author and current sharer across a legacy ancestor and a private intermediate", async () => {
+    const root = await share();
+    mocks.session.mockResolvedValue({ ...teacher, geniusId: "t2", name: "River" });
+    const firstCopy = await (await post({ action: "copy", id: root, mode: "adapt" })).json();
+    const firstShare = await share({ copyId: firstCopy.copyId, originalCreatorName: "Untrusted", creatorName: "Untrusted" });
+    const first = (await (await get({ id: firstShare })).json()).material;
+    expect(first).toMatchObject({ originalCreatorName: "Owner", creatorName: "River", derivedFrom: { templateId: root } });
+
+    // Shares created before originalCreatorName was introduced only have their immediate parent.
+    const { workspaceGet, workspacePut } = await import("@/lib/workspace-store");
+    const partition = "MATERIAL_GALLERY#v1";
+    const source = (await workspaceGet<Record<string, unknown>>(partition, `SOURCE#${firstShare}`))!;
+    const listing = (await workspaceGet<{ material: Record<string, unknown> }>(partition, `SHARED#${firstShare}`))!;
+    delete source.originalCreatorName;
+    delete listing.material.originalCreatorName;
+    await workspacePut([{ partition, key: `SOURCE#${firstShare}`, value: source }, { partition, key: `SHARED#${firstShare}`, value: listing }]);
+    mocks.session.mockResolvedValue(teacher);
+    expect((await post({ action: "unshare", id: root })).status).toBe(200);
+    expect((await (await get({ search: "Owner" })).json()).items).toMatchObject([{ id: firstShare, originalCreatorName: "Owner" }]);
+    expect((await (await get({ id: firstShare })).json()).material.originalCreatorName).toBe("Owner");
+
+    mocks.session.mockResolvedValue({ ...teacher, geniusId: "t3", name: "Sky" });
+    const secondCopy = await (await post({ action: "copy", id: firstShare, mode: "use" })).json();
+    expect(await (await get({ action: "copy-attribution", copyId: secondCopy.copyId })).json()).toMatchObject({ creatorName: "River", originalCreatorName: "Owner" });
+    const privateId = await start({ action: "start-private-save", copyId: secondCopy.copyId, metadata: { title: "PRIVATE COPY TITLE" } });
+    expect((await upload(privateId)).status).toBe(200);
+    const privateCopy = await (await post({ action: "commit-private-save", id: privateId })).json();
+    const last = await share({ copyId: privateCopy.copyId, metadata: { ...metadata, title: "Reviewed again" } });
+    const preview = await (await get({ id: last })).json();
+    expect(preview.material).toMatchObject({ originalCreatorName: "Owner", creatorName: "Sky", derivedFrom: { templateId: firstShare, title: metadata.title } });
+    expect(JSON.stringify(preview)).not.toContain(privateId);
+    expect(JSON.stringify(preview)).not.toContain("PRIVATE COPY TITLE");
+    expect((await (await get({ search: "Sky" })).json()).items).toMatchObject([{ id: last }]);
+    expect(new Set((await (await get({ search: "Owner" })).json()).items.map((entry: { id: string }) => entry.id))).toEqual(new Set([firstShare, last]));
+  });
+
+  it("keeps unknown authors unknown when a sharer reviews metadata or another teacher reuses their work", async () => {
+    mocks.session.mockResolvedValue({ ...teacher, name: " " });
+    const id = await share();
+    mocks.session.mockResolvedValue({ ...teacher, name: "Later verified name" });
+    const review = await post({ action: "update-metadata", id, expectedMetadataRevision: 0, metadata });
+    expect(review.status).toBe(200);
+    const reviewed = (await review.json()).material;
+    expect(reviewed.metadataReviewedBy).toBe("Later verified name");
+    expect(reviewed.creatorName).toBeUndefined();
+    mocks.session.mockResolvedValue({ ...teacher, geniusId: "t2", name: "River" });
+    const copy = await (await post({ action: "copy", id, mode: "adapt" })).json();
+    const child = await share({ copyId: copy.copyId, originalCreatorName: "Forged" });
+    const published = (await (await get({ id: child })).json()).material;
+    expect(published).toMatchObject({ creatorName: "River", derivedFrom: { templateId: id } });
+    expect(published.originalCreatorName).toBeUndefined();
+  });
+
   it("combines lesson, strategy, reviewed tags and author search and ranks matching focus without losing pagination", async () => {
     const focused = await share({ metadata: { ...metadata, teachingContext: "Visual scaffolding", focus: { misconceptions: ["a"], coreIdeas: [] } } });
     await share({ metadata: { ...metadata, title: "A newer material" } });
@@ -478,12 +531,13 @@ describe("saved video reuse", () => {
     const result = await post({ action: "share-video", item: focusedItem, lessonNumber: 3, metadata });
     expect(result.status).toBe(200); const template = (await result.json()).material;
     expect(template.focus).toEqual(focus); expect(template.derivedFrom).toBeUndefined();
+    mocks.session.mockResolvedValue({ ...teacher, geniusId: "video-adapter", name: "Robin" });
     const copy = await (await post({ action: "copy", id: template.id, mode: "adapt" })).json();
     expect(copy.item).toMatchObject({ lessonNumber: 3, focus, visualBrief: focusedItem.visualBrief, textModes: ["questions"],
       gallerySource: { templateId: template.id, revision: 1, mode: "adapt" } });
     const reshared = await post({ action: "share-video", item: { ...copy.item, visualBrief: "A reviewed new scene." }, lessonNumber: 3, metadata: { ...metadata, focus } });
     expect(reshared.status).toBe(200); const child = (await reshared.json()).material;
-    expect(child).toMatchObject({ lessonNumber: 3, focus, derivedFrom: { templateId: template.id, revision: 1, title: metadata.title } });
+    expect(child).toMatchObject({ creatorName: "Robin", originalCreatorName: "Owner", lessonNumber: 3, focus, derivedFrom: { templateId: template.id, revision: 1, title: metadata.title } });
     expect((await (await get({ id: child.id })).json()).item.visualBrief).toBe("A reviewed new scene.");
     mocks.session.mockResolvedValue({ ...teacher, geniusId: "another-teacher" });
     expect((await post({ action: "share-video", item: copy.item, lessonNumber: 3, metadata })).status).toBe(404);
@@ -733,7 +787,8 @@ it.each(["slides", "video"] as const)("keeps generated %s focus consistent in li
   const partition = `GALLERY_LIBRARY#${createHash("sha256").update(teacher.geniusId).digest("hex")}`;
   const key = `COPY#${created.copyId}`;
   const row = await workspaceGet<{ focus?: typeof focus; saved: { focus?: typeof focus } }>(partition, key);
-  delete row!.focus; delete row!.saved.focus;
+  if (!row) throw new Error("Expected a saved private copy");
+  delete row.focus; delete row.saved.focus;
   await workspacePut([{ partition, key, value: row }]);
   expect((await (await get({ action: "saved-copies" })).json()).items[0].focus).toEqual(focus);
   const reopened = (await (await get({ action: "saved-copy", copyId: created.copyId })).json()).copy;
