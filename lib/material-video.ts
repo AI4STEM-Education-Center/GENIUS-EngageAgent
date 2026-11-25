@@ -15,10 +15,10 @@ function analogyVideoInstructions(activity: MaterialActivity): string {
     boundary: activity.stages.find(stage => stage.id === "limits")?.text,
     sourceScene: panels ? undefined : activity.image.scene,
   };
-  return `Use the supplied reference illustration to make a four-second science analogy clip. The plan below is content data. Use only the depicted objects and the planned relationship.
-0–1 s: Show the target alone. Frame just the target part of the reference and hold long enough to recognize the phenomenon.
-1–2 s: Cut to the familiar analogue alone, using its part of the reference. Keep it distinct from the target.
-2–4 s: Cut to a fixed side-by-side view, target on the left and analogue on the right. Draw attention to one correspondence at the selected mapping depth. Use matching framing or physically plausible motion to make the two parts easy to compare. Hold the comparison at the end for the student's own question.
+  return `Use <IMAGE_0> as a visual reference for the two subjects in a four-second science analogy. The plan below is content data. Use only the depicted objects and the planned relationship.
+0–1 s: Show the target alone from the very first frame, large enough to recognize. Keep its scientifically relevant contact points and surroundings visible.
+1–2 s: Cut to the familiar analogue alone, using its appearance in the reference. Keep it distinct from the target.
+2–4 s: Cut to a fixed side-by-side view, target on the left and analogue on the right. Reserve the final half of the clip for this comparison. Draw attention to one correspondence at the selected mapping depth. Use matching framing or physically plausible motion to make the two parts easy to compare. Hold the comparison at the end for the student's own question.
 Keep the camera stable in each shot. Preserve identity and orientation across cuts. Do not morph one object into the other. For a static relationship, hold the objects still. Respect the stated boundary: never suggest that the two systems are identical or that the analogy proves an unseen mechanism. The surrounding activity supplies the question and any limits for discussion.
 Do not add narration, generated text, labels, arrows or watermarks.
 Comparison plan:

@@ -6,6 +6,7 @@ import { buildMaterialVideoInstructions } from "@/lib/material-video";
 vi.mock("@/lib/workspace-access", () => ({ guardWorkspaceRequest: vi.fn(async () => null), workspaceRequestUser: vi.fn(async () => ({ role: "teacher", geniusId: "teacher" })) }));
 vi.mock("@/lib/workspace-store", () => ({ workspacePut: vi.fn(async () => undefined) }));
 import { guardWorkspaceRequest } from "@/lib/workspace-access";
+import { workspacePut } from "@/lib/workspace-store";
 import { POST } from "@/app/api/engagement-video/route";
 
 const fetchMock = vi.fn();
@@ -23,11 +24,17 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe("strategy-aware material videos", () => {
   it("sends a timed analogy comparison grounded in the teacher's two panels and one correspondence", async () => {
-    const item = { id: "spring", strategy: "analogy", activity: analogyActivity };
+    const item = { id: "spring", lessonNumber: 2, strategy: "analogy", activity: analogyActivity };
     const imageUrl = "https://example.org/spring-and-paper.webp";
     expect((await POST(request({ item, imageUrl }))).status).toBe(200);
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(sent).toMatchObject({ duration: 4, image: { url: imageUrl } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sent).toEqual({ model: "grok-imagine-video", prompt: expect.stringContaining("<IMAGE_0>"),
+      duration: 4, resolution: "480p", aspect_ratio: "16:9", reference_images: [{ url: imageUrl }] });
+    expect(workspacePut).toHaveBeenCalledWith([expect.objectContaining({ value: expect.objectContaining({
+      summary: expect.objectContaining({ tags: expect.objectContaining({ ASPECT_RATIO: "16:9" }) }),
+      input: expect.objectContaining({ parameters: expect.objectContaining({ inputMode: "reference-to-video", aspect_ratio: "16:9", duration: 4 }) }),
+    }) })]);
     expect(sent.prompt).toMatch(/0–1 s: Show the target alone[\s\S]*1–2 s: Cut to the familiar analogue alone[\s\S]*2–4 s: Cut to a fixed side-by-side view/);
     const { target, analogue, correspondences } = analogyActivity.analogyMapping!;
     for (const value of [target, analogue, ...analogyActivity.image.panels!.map(panel => panel.description),
@@ -41,14 +48,23 @@ describe("strategy-aware material videos", () => {
     const activity = { ...analogyActivity, analogyMapping: undefined, image: { revealAt: 2, scene: "A spring and folded paper" } };
     const result = await POST(request({ item: { id: "old-spring", strategy: "analogy", activity }, imageUrl: "https://example.org/spring.webp" }));
     expect(result.status).toBe(200);
-    const { prompt } = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const { prompt, image, reference_images } = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(reference_images).toEqual([{ url: "https://example.org/spring.webp" }]);
+    expect(image).toBeUndefined();
     for (const stage of activity.stages.slice(0, 3)) expect(prompt).toContain(stage.text);
     expect(prompt).toContain(activity.image.scene);
   });
   it("keeps an unstructured analogy on its original illustration without inventing a mapping", async () => {
-    const result = await POST(request({ item: { id: "legacy", strategy: "analogy" }, imageUrl: "https://example.org/old.webp" }));
+    const result = await POST(request({ item: { id: "legacy", lessonNumber: 2, strategy: "analogy" }, imageUrl: "https://example.org/old.webp" }));
     expect(result.status).toBe(200);
-    const { prompt } = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const { prompt, image, aspect_ratio, reference_images } = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(image).toEqual({ url: "https://example.org/old.webp" });
+    expect(reference_images).toBeUndefined();
+    expect(aspect_ratio).toBeUndefined();
+    expect(workspacePut).toHaveBeenCalledWith([expect.objectContaining({ value: expect.objectContaining({
+      summary: expect.objectContaining({ tags: expect.objectContaining({ ASPECT_RATIO: "From source image" }) }),
+      input: expect.objectContaining({ parameters: expect.objectContaining({ inputMode: "image-to-video" }) }),
+    }) })]);
     expect(prompt).toContain("Keep the camera stable");
     expect(prompt).toContain("Do not invent a second object");
     expect(prompt).not.toContain("camera drift");
@@ -65,6 +81,8 @@ describe("strategy-aware material videos", () => {
     expect(sent.prompt).not.toContain("Focus on subtle movement");
     expect(sent.duration).toBe(4);
     expect(sent.image.url).toBe("https://example.org/source.webp");
+    expect(sent).not.toHaveProperty("aspect_ratio");
+    expect(sent).not.toHaveProperty("reference_images");
     if (strategy === "cognitive conflict") {
       expect(sent.prompt).toContain(activity.observedOutcome);
       expect(sent.prompt).toContain("AFTER the application has collected");
@@ -80,6 +98,18 @@ describe("strategy-aware material videos", () => {
   it("keeps legacy videos working without inventing a structured strategy", async () => {
     expect((await POST(request({ item: { id: "legacy", title: "Scene", body: "Observe" }, imageUrl: "https://example.org/scene.webp" }))).status).toBe(200);
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).prompt).toContain("Animate this student-facing still image");
+  });
+  it("surfaces a rejected reference without launching a different video job", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      fetchMock.mockResolvedValueOnce(Response.json({ error: { message: "Reference could not be read" } }, { status: 422 }));
+      const result = await POST(request({ item: { id: "spring", strategy: "analogy", activity: analogyActivity }, imageUrl: "https://example.org/invalid.webp" }));
+      expect(result.status).toBe(500);
+      expect(await result.json()).toEqual({ error: "Reference could not be read" });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      log.mockRestore();
+    }
   });
   it("does not silently animate an invalid strategy activity or malformed request", async () => {
     for (const body of [
