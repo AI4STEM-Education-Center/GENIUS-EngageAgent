@@ -916,8 +916,21 @@ it("links video and image generation to their saved artifacts and exposes a priv
   const history = await (await get({ action: "generation-history", id: material.id })).json();
   expect(history.parts.find((p: { label: string }) => p.label === "Video").records.map((r: { id: string }) => r.id)).toEqual([video.id, text.id]);
   expect(JSON.stringify(history)).not.toContain("PRIVATE");
+  const holder = { ...teacher, geniusId: "copy-holder" };
+  mocks.session.mockResolvedValue(holder);
   const copy = await (await post({ action: "copy", id: material.id, mode: "use" })).json();
-  expect((await get({ action: "generation-history", copyId: copy.copyId })).status).toBe(200);
+  const revision = await recordGeneration({ ...scope, userId: holder.geniusId }, { ...input, operation: "revise" });
+  const stage = await post({ action: "start-save", copyId: copy.copyId, expectedRevision: 0, item: { ...copy.item, generation: revision } });
+  expect(stage.status).toBe(200);
+  expect((await post({ action: "commit-save", copyId: copy.copyId, saveId: (await stage.json()).saveId })).status).toBe(200);
+
+  mocks.session.mockResolvedValue(teacher);
+  expect((await post({ action: "unshare", id: material.id })).status).toBe(200);
+  mocks.session.mockResolvedValue(holder);
+  expect((await get({ action: "generation-history", id: material.id })).status).toBe(404);
+  expect((await (await get({ action: "generation-history", copyId: copy.copyId })).json()).parts[0].records[0].id).toBe(revision.id);
+  expect(await (await get({ action: "generation-history", sourceCopyId: copy.copyId })).json()).toEqual(history);
   mocks.session.mockResolvedValue({ ...teacher, geniusId: "intruder" });
   expect((await get({ action: "generation-history", copyId: copy.copyId })).status).toBe(404);
+  expect((await get({ action: "generation-history", sourceCopyId: copy.copyId })).status).toBe(404);
 });

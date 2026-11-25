@@ -799,9 +799,12 @@ export async function galleryGet(request: Request) {
     return { items: items.sort((a, b) => b.savedAt.localeCompare(a.savedAt)) };
   }
   if (params.get("action") === "generation-history") {
-    const selection = params.has("copyId") ? await copiedSource(context, params.get("copyId")) : { source: await sharedSource(params.get("id")), copy: undefined };
-    const { source, copy } = selection;
-    const snapshot = copy?.saved ? (await savedSnapshot(context, copy.id)).snapshot : source;
+    // A withdrawn template is still the source of an existing teacher-owned
+    // copy. Resolve that source through the copy's access check.
+    const sourceCopyId = params.get("sourceCopyId");
+    const copyId = sourceCopyId ?? params.get("copyId");
+    const { source, copy } = copyId !== null ? await copiedSource(context, copyId) : { source: await sharedSource(params.get("id")), copy: undefined };
+    const snapshot = sourceCopyId === null && copy?.saved ? (await savedSnapshot(context, copy.id)).snapshot : source;
     const heads = [{ label: "Material text", generation: snapshot.generation }, ...materialGenerationParts(snapshot)];
     return { parts: await Promise.all(heads.map(async part => {
       const chain = part.generation ? await generationLineage([context.userId, source.ownerId], part.generation) : { records: [], incomplete: false };
