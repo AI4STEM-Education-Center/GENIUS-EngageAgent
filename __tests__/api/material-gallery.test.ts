@@ -3,7 +3,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-const mocks = vi.hoisted(() => ({ session: vi.fn(), context: vi.fn(), media: vi.fn(), complete: vi.fn() }));
+const mocks = vi.hoisted(() => ({ session: vi.fn(), context: vi.fn(), accepted: vi.fn(), media: vi.fn(), complete: vi.fn() }));
+vi.mock("@/lib/classroom-context-server", async original => ({ ...await original<object>(), acceptedClassroomContext: mocks.accepted }));
 vi.mock("openai", () => ({ default: class { chat = { completions: { create: mocks.complete } }; } }));
 vi.mock("@/lib/session", async original => ({ ...await original<object>(), sessionUser: mocks.session }));
 vi.mock("@/lib/workspace", async original => ({ ...await original<object>(), workspaceContext: mocks.context }));
@@ -21,6 +22,7 @@ vi.mock("@/lib/workspace-store", async original => {
   } };
 });
 import { GET, POST } from "@/app/api/material-gallery/route";
+import type { GalleryMaterial } from "@/lib/material-gallery";
 import { GET as mediaGET } from "@/app/api/material-gallery/media/route";
 import { resolveGalleryContentMedia } from "@/lib/material-gallery-server";
 import { POST as adaptVideo } from "@/app/api/material-gallery/adapt-video/route";
@@ -78,6 +80,59 @@ describe("teacher material library", () => {
     const disk = await fs.readFile(path.join(directory, "workspace.json"), "utf8");
     expect(disk).toContain("original-deck-id"); expect(disk).not.toMatch(/PRIVATE_|Forged name/);
     expect((await post(startBody({ metadata: { ...metadata, creatorName: "Forged" } }))).status).toBe(400);
+  });
+
+  it("credits the original author and current sharer across a legacy ancestor and a private intermediate", async () => {
+    const root = await share();
+    mocks.session.mockResolvedValue({ ...teacher, geniusId: "t2", name: "River" });
+    const firstCopy = await (await post({ action: "copy", id: root, mode: "adapt" })).json();
+    const firstShare = await share({ copyId: firstCopy.copyId, originalCreatorName: "Untrusted", creatorName: "Untrusted" });
+    const first = (await (await get({ id: firstShare })).json()).material;
+    expect(first).toMatchObject({ originalCreatorName: "Owner", creatorName: "River", derivedFrom: { templateId: root } });
+
+    // Shares created before originalCreatorName was introduced only have their immediate parent.
+    const { workspaceGet, workspacePut } = await import("@/lib/workspace-store");
+    const partition = "MATERIAL_GALLERY#v1";
+    const source = (await workspaceGet<Record<string, unknown>>(partition, `SOURCE#${firstShare}`))!;
+    const listing = (await workspaceGet<{ material: Record<string, unknown> }>(partition, `SHARED#${firstShare}`))!;
+    delete source.originalCreatorName;
+    delete listing.material.originalCreatorName;
+    await workspacePut([{ partition, key: `SOURCE#${firstShare}`, value: source }, { partition, key: `SHARED#${firstShare}`, value: listing }]);
+    mocks.session.mockResolvedValue(teacher);
+    expect((await post({ action: "unshare", id: root })).status).toBe(200);
+    expect((await (await get({ search: "Owner" })).json()).items).toMatchObject([{ id: firstShare, originalCreatorName: "Owner" }]);
+    expect((await (await get({ id: firstShare })).json()).material.originalCreatorName).toBe("Owner");
+
+    mocks.session.mockResolvedValue({ ...teacher, geniusId: "t3", name: "Sky" });
+    const secondCopy = await (await post({ action: "copy", id: firstShare, mode: "use" })).json();
+    expect(await (await get({ action: "copy-attribution", copyId: secondCopy.copyId })).json()).toMatchObject({ creatorName: "River", originalCreatorName: "Owner" });
+    const privateId = await start({ action: "start-private-save", copyId: secondCopy.copyId, metadata: { title: "PRIVATE COPY TITLE" } });
+    expect((await upload(privateId)).status).toBe(200);
+    const privateCopy = await (await post({ action: "commit-private-save", id: privateId })).json();
+    const last = await share({ copyId: privateCopy.copyId, metadata: { ...metadata, title: "Reviewed again" } });
+    const preview = await (await get({ id: last })).json();
+    expect(preview.material).toMatchObject({ originalCreatorName: "Owner", creatorName: "Sky", derivedFrom: { templateId: firstShare, title: metadata.title } });
+    expect(JSON.stringify(preview)).not.toContain(privateId);
+    expect(JSON.stringify(preview)).not.toContain("PRIVATE COPY TITLE");
+    expect((await (await get({ search: "Sky" })).json()).items).toMatchObject([{ id: last }]);
+    expect(new Set((await (await get({ search: "Owner" })).json()).items.map((entry: { id: string }) => entry.id))).toEqual(new Set([firstShare, last]));
+  });
+
+  it("keeps unknown authors unknown when a sharer reviews metadata or another teacher reuses their work", async () => {
+    mocks.session.mockResolvedValue({ ...teacher, name: " " });
+    const id = await share();
+    mocks.session.mockResolvedValue({ ...teacher, name: "Later verified name" });
+    const review = await post({ action: "update-metadata", id, expectedMetadataRevision: 0, metadata });
+    expect(review.status).toBe(200);
+    const reviewed = (await review.json()).material;
+    expect(reviewed.metadataReviewedBy).toBe("Later verified name");
+    expect(reviewed.creatorName).toBeUndefined();
+    mocks.session.mockResolvedValue({ ...teacher, geniusId: "t2", name: "River" });
+    const copy = await (await post({ action: "copy", id, mode: "adapt" })).json();
+    const child = await share({ copyId: copy.copyId, originalCreatorName: "Forged" });
+    const published = (await (await get({ id: child })).json()).material;
+    expect(published).toMatchObject({ creatorName: "River", derivedFrom: { templateId: id } });
+    expect(published.originalCreatorName).toBeUndefined();
   });
 
   it("combines lesson, strategy, reviewed tags and author search and ranks matching focus without losing pagination", async () => {
@@ -478,12 +533,13 @@ describe("saved video reuse", () => {
     const result = await post({ action: "share-video", item: focusedItem, lessonNumber: 3, metadata });
     expect(result.status).toBe(200); const template = (await result.json()).material;
     expect(template.focus).toEqual(focus); expect(template.derivedFrom).toBeUndefined();
+    mocks.session.mockResolvedValue({ ...teacher, geniusId: "video-adapter", name: "Robin" });
     const copy = await (await post({ action: "copy", id: template.id, mode: "adapt" })).json();
     expect(copy.item).toMatchObject({ lessonNumber: 3, focus, visualBrief: focusedItem.visualBrief, textModes: ["questions"],
       gallerySource: { templateId: template.id, revision: 1, mode: "adapt" } });
     const reshared = await post({ action: "share-video", item: { ...copy.item, visualBrief: "A reviewed new scene." }, lessonNumber: 3, metadata: { ...metadata, focus } });
     expect(reshared.status).toBe(200); const child = (await reshared.json()).material;
-    expect(child).toMatchObject({ lessonNumber: 3, focus, derivedFrom: { templateId: template.id, revision: 1, title: metadata.title } });
+    expect(child).toMatchObject({ creatorName: "Robin", originalCreatorName: "Owner", lessonNumber: 3, focus, derivedFrom: { templateId: template.id, revision: 1, title: metadata.title } });
     expect((await (await get({ id: child.id })).json()).item.visualBrief).toBe("A reviewed new scene.");
     mocks.session.mockResolvedValue({ ...teacher, geniusId: "another-teacher" });
     expect((await post({ action: "share-video", item: copy.item, lessonNumber: 3, metadata })).status).toBe(404);
@@ -546,6 +602,72 @@ describe("teacher library outside classes and strict Step 3 recommendations", ()
     expect((await (await get({ ...fields, recommendLesson: "1" })).json()).items).toEqual([]);
     expect((await (await get({ ...fields, recommendStrategy: "analogy" })).json()).items).toEqual([]);
     expect((await get({ recommendedOnly: "true" })).status).toBe(400);
+  });
+
+  it("keeps Browse all in Step 3 order, with identical match tags and reasons even with All types selected", async () => {
+    const focused = { misconceptions: ["a"], coreIdeas: [] };
+    for (let i = 0; i < 4; i++) await share({ metadata: { ...metadata, title: `Focused ${i}`, gradeBand: "High school", experienceContext: "", focus: focused } });
+    await share({ metadata: { ...metadata, title: "Outside the selected focus", quizPattern: "Most students answered correctly" } });
+    const item = { id: "video-with-matching-focus", title: "An alternative format", body: "Observe the ball during contact.",
+      strategy: "cognitive conflict", lessonNumber: 3, focus: focused };
+    mocks.media.mockImplementation(async (_c, _a, _s, id, kind) => kind === "video" ? { class_id: scope.classId, assignment_id: scope.assignmentId,
+      student_id: "cohort", content_item_id: id, mime_type: "video/mp4", data_url: "data:video/mp4;base64,dmlkZW8=" } : null);
+    expect((await post({ action: "share-video", lessonNumber: 3, item, metadata: { ...metadata, title: item.title, focus: focused } })).status).toBe(200);
+    const task = { recommendLesson: "3", recommendStrategy: "cognitive conflict", recommendFocus: JSON.stringify(focused),
+      recommendGrade: "6–8", recommendQuiz: "Most students answered correctly", recommendExperience: "Catching a ball", recommendFormat: "slides" };
+    const strip = (await (await get({ ...task, recommendedOnly: "true", format: "slides" })).json()).items;
+    const all = (await (await get(task)).json()).items;
+    expect(strip).toHaveLength(3);
+    expect(all).toHaveLength(6);
+    const matches = ({ id, matchTags, matchReasons }: GalleryMaterial) => ({ id, matchTags, matchReasons });
+    expect(all.slice(0, 3).map(matches)).toEqual(strip.map(matches));
+    expect(all.slice(4).map((item: GalleryMaterial) => item.title)).toEqual(expect.arrayContaining([item.title, "Outside the selected focus"]));
+    expect(all.find((card: GalleryMaterial) => card.format === "video").matchReasons).not.toContain("Same format");
+    expect(strip[0].matchReasons).toContain("Same format");
+    expect((await (await get()).json()).items[0]).not.toHaveProperty("matchReasons");
+  });
+
+  it.each(["cognitive conflict", "engaged critiquing"] as const)("uses the most reported activities for %s without exposing private check-in data", async strategy => {
+    const draft = deckFixture(strategy).draft;
+    async function shareActivity(experienceContext: string) {
+      const assets = Object.fromEntries(draft.visuals.map(visual => [visual.id, { width: 1, height: 1, digest: hash }]));
+      const id = await start({ strategy, draft, assets, metadata: { ...metadata, experienceContext } });
+      for (const visual of draft.visuals) expect((await post({ action: "upload-asset", id, visualId: visual.id, asset: { data: tinyImage, width: 1, height: 1 } })).status).toBe(200);
+      expect((await post({ action: "commit-share", id })).status).toBe(200);
+      return id;
+    }
+    const activity = await shareActivity("Press a pillow");
+    const tie = await shareActivity("Bouncing a ball");
+    const lower = await shareActivity("Stretch a band");
+    const snapshot = { experiences: { status: "ready", value: { enoughResponses: true, responseCount: 8, activities: [
+      { activity: "Pressing pillows", studentCount: 5, incidents: ["PRIVATE account from a student"] },
+      { activity: "Stretching bands", studentCount: 2 }, { activity: "Bounce the balls", studentCount: 5 },
+    ] } } };
+    mocks.accepted.mockResolvedValue(snapshot);
+    const task = { recommendLesson: "3", recommendStrategy: strategy, recommendFormat: "slides", recommendContextRef: "a".repeat(64) };
+    const checked = await (await get(task)).json();
+    expect(mocks.accepted).toHaveBeenCalledWith(expect.objectContaining(scope), task.recommendContextRef);
+    for (const id of [activity, tie]) {
+      const card = checked.items.find((item: { id: string }) => item.id === id);
+      expect(card.matchReasons).toContain("Matches class check-in");
+      expect(card.matchReasons).not.toContain("Same experience");
+      expect(card.matchTags).toContainEqual(expect.objectContaining({ label: "Experience", matched: true }));
+    }
+    expect(checked.items.find((item: { id: string }) => item.id === lower).matchReasons).not.toContain("Matches class check-in");
+    expect(JSON.stringify(checked)).not.toMatch(/PRIVATE|Pressing pillows|Bounce the balls/);
+    mocks.accepted.mockClear();
+    const manual = await (await get({ ...task, recommendExperience: "Stretch a band" })).json();
+    expect(manual.items.find((item: { id: string }) => item.id === lower).matchReasons).toContain("Same experience");
+    expect(JSON.stringify(manual)).not.toContain("Matches class check-in");
+    await get({ ...task, recommendStrategy: "analogy" });
+    expect(mocks.accepted).not.toHaveBeenCalled();
+    mocks.accepted.mockRejectedValueOnce(new Error("Different task"));
+    expect(JSON.stringify(await (await get(task)).json())).not.toContain("Matches class check-in");
+    for (const responseCount of [0, 1, 2]) {
+      mocks.accepted.mockResolvedValueOnce({ experiences: { status: "ready", value: { enoughResponses: false, responseCount,
+        activities: [{ activity: "Pressing pillows", studentCount: responseCount }] } } });
+      expect(JSON.stringify(await (await get(task)).json())).not.toContain("Matches class check-in");
+    }
   });
 
   it("supports reviewed keywords and grade filters without inventing tags or accepting unlimited text", async () => {
@@ -733,7 +855,8 @@ it.each(["slides", "video"] as const)("keeps generated %s focus consistent in li
   const partition = `GALLERY_LIBRARY#${createHash("sha256").update(teacher.geniusId).digest("hex")}`;
   const key = `COPY#${created.copyId}`;
   const row = await workspaceGet<{ focus?: typeof focus; saved: { focus?: typeof focus } }>(partition, key);
-  delete row!.focus; delete row!.saved.focus;
+  if (!row) throw new Error("Expected a saved private copy");
+  delete row.focus; delete row.saved.focus;
   await workspacePut([{ partition, key, value: row }]);
   expect((await (await get({ action: "saved-copies" })).json()).items[0].focus).toEqual(focus);
   const reopened = (await (await get({ action: "saved-copy", copyId: created.copyId })).json()).copy;

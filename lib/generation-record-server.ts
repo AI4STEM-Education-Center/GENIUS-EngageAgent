@@ -2,27 +2,63 @@ import { createHash, randomUUID } from "node:crypto";
 import { workspaceGet, workspacePut } from "./workspace-store";
 import { GALLERY_TAG_LABELS } from "./material-gallery";
 import type { MaterialTeachingContext } from "./material-teaching-context";
-import type { GenerationRecord } from "./generation-record";
+import type { GenerationFocus, GenerationRecord } from "./generation-record";
+import type { ResolvedFocus } from "./strategy-focus";
+import { toMisconceptionIds } from "./misconceptions";
 import { SlideRequestError } from "./slides/server";
 import { acceptedClassroomContext } from "./classroom-context-server";
 
 type Scope = { userId: string; classId: string; assignmentId: string };
 type Input = { lessonNumber: number; strategy: string; format: "slides" | "video"; operation: string; model: string;
   prompt: { system: string; user: string }; variables?: Record<string, unknown>; settings?: MaterialTeachingContext;
-  focus?: unknown; parentId?: string; parameters?: Record<string, unknown> };
+  focus?: ResolvedFocus | null; focusSelection?: unknown; parentId?: string; parameters?: Record<string, unknown> };
 type Stored = { schemaVersion: 1; ownerId: string; classId: string; assignmentId: string; summary: GenerationRecord; input: Input };
 const partition = (userId: string) => `GENERATION_INPUTS#${createHash("sha256").update(userId).digest("hex")}`;
 const privateKeys = new Set(["CURRENT_UNDERSTANDING", "LEARNER_CONTEXT", "CLASS_PROFILE"]);
 
+// Use the wording resolved in the lesson at generation time. In particular,
+// never look up an old core-idea index in today's edited curriculum.
+function capturedFocus(input: Input): GenerationFocus | undefined {
+  const focus = input.focus;
+  if (!focus || !["coreIdeas", "misconceptions"].includes(focus.kind) ||
+    !Array.isArray(focus.items) || !focus.items.length || focus.items.length > 2 ||
+    !focus.items.every(item => typeof item === "string" && item.trim())) return undefined;
+  const selection = input.focusSelection as Partial<Record<ResolvedFocus["kind"], unknown[]>> | undefined;
+  const ids = selection?.[focus.kind];
+  const items = focus.items.map((label, index) => {
+    const key = Array.isArray(ids) && ids.length === focus.items.length ? ids[index] : undefined;
+    let id: string | undefined;
+    if (focus.kind === "coreIdeas" && typeof key === "number" && Number.isSafeInteger(key) && key >= 0) id = `Core idea ${key + 1}`;
+    if (focus.kind === "misconceptions" && typeof key === "string") id = toMisconceptionIds(input.lessonNumber, key)[0];
+    return { label, ...(id ? { id } : {}) };
+  });
+  return { kind: focus.kind, origin: "operation", items };
+}
+
+function storedFocus(stored: Stored) {
+  return stored.summary.focus ?? capturedFocus(stored.input);
+}
+
+function carriesMaterialFocus(operation: string) {
+  return ["image", "image-revision", "video", "review", "review-slide"].includes(operation);
+}
+
 export async function recordGeneration(scope: Scope, input: Input): Promise<GenerationRecord> {
   let parentTags: Record<string, string> | undefined;
+  let focus = capturedFocus(input);
   // A copied public material has its own source receipt. Only link a private
   // generation parent when it is owned by this teacher and matches this format.
   if (input.parentId) {
     const parent = /^[a-f0-9-]{36}$/u.test(input.parentId) ? await workspaceGet<Stored>(partition(scope.userId), input.parentId) : null;
     input = { ...input };
     if (!parent || parent.ownerId !== scope.userId || parent.summary.lessonNumber !== input.lessonNumber || parent.summary.strategy !== input.strategy || parent.summary.format !== input.format) delete input.parentId;
-    else parentTags = parent.summary.tags;
+    else {
+      parentTags = parent.summary.tags;
+      const prior = storedFocus(parent);
+      if (!focus && input.focus === undefined && prior && carriesMaterialFocus(input.operation)) {
+        focus = { ...prior, origin: "source-material" };
+      }
+    }
   }
   if (input.settings?.contextRef) {
     const context = await acceptedClassroomContext(scope, input.settings.contextRef);
@@ -48,7 +84,7 @@ export async function recordGeneration(scope: Scope, input: Input): Promise<Gene
   }
   const summary: GenerationRecord = { id: randomUUID(), capturedAt: tags.INPUT_CAPTURED_AT, lessonNumber: input.lessonNumber, strategy: input.strategy,
     format: input.format, operation: input.operation, model: input.model, promptHash: createHash("sha256").update(JSON.stringify(input.prompt)).digest("hex"),
-    ...(input.parentId ? { parentId: input.parentId } : {}), tags };
+    ...(input.parentId ? { parentId: input.parentId } : {}), ...(focus ? { focus } : {}), tags };
   const stored = JSON.parse(JSON.stringify({ schemaVersion: 1, ownerId: scope.userId, classId: scope.classId, assignmentId: scope.assignmentId, summary, input })) as Stored;
   if (Buffer.byteLength(JSON.stringify(stored), "utf8") > 340_000) throw new SlideRequestError("The generation inputs are too large. Shorten the material or context.", 413);
   await workspacePut([{ partition: partition(scope.userId), key: summary.id, value: stored, createOnly: true }]);
@@ -72,13 +108,26 @@ export async function generationLineage(owners: string[], head: GenerationRecord
   const records: GenerationRecord[] = [];
   const seen = new Set<string>();
   let current: GenerationRecord | undefined = head;
+  const partitions = [...new Set(owners)].map(partition);
+  async function retained(id: string) {
+    const candidates = await Promise.all(partitions.map(p => workspaceGet<Stored>(p, id)));
+    return candidates.find(value => value && value.summary.id === id && owners.includes(value.ownerId) &&
+      value.summary.lessonNumber === head.lessonNumber && value.summary.strategy === head.strategy && value.summary.format === head.format);
+  }
+  // Existing material heads predate focus snapshots. Only recover what their
+  // authorized, original receipts actually contain, without updating the asset.
+  if (!head.focus) {
+    const original = await retained(head.id);
+    const focus = original && storedFocus(original);
+    if (focus) current = { ...head, focus };
+  }
   while (current && records.length < 50 && !seen.has(current.id)) {
     records.push(current); seen.add(current.id);
     if (!current.parentId) return { records, incomplete: false };
-    const candidates = await Promise.all([...new Set(owners)].map(owner => workspaceGet<Stored>(partition(owner), current!.parentId!)));
-    const parent = candidates.find(value => value && owners.includes(value.ownerId) && value.summary.lessonNumber === head.lessonNumber && value.summary.strategy === head.strategy && value.summary.format === head.format);
+    const parent = await retained(current.parentId);
     if (!parent) return { records, incomplete: true };
-    current = parent.summary;
+    const focus = storedFocus(parent);
+    current = focus ? { ...parent.summary, focus } : parent.summary;
   }
   return { records, incomplete: !!current };
 }

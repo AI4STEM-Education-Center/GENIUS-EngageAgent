@@ -50,7 +50,7 @@ export function galleryLessonIdentity(tags?: Record<string, string>): GalleryMat
   return tags?.TOPIC && tags.LEARNING_OBJECTIVE ? { topic: tags.TOPIC, learningObjective: tags.LEARNING_OBJECTIVE } : undefined;
 }
 
-export function galleryMatches(material: GalleryMaterial, lesson: number, strategy: string, focus?: { misconceptions: string[]; coreIdeas: number[] }, contextTags?: Record<string, string>) {
+export function galleryMatches(material: GalleryMaterial, lesson: number, strategy: string, focus?: { misconceptions: string[]; coreIdeas: number[] }, contextTags?: Record<string, string>, reportedActivities: readonly string[] = []) {
   const reasons: string[] = [];
   const identity = material.lessonIdentity || galleryLessonIdentity(material.generation?.tags) || galleryLessonIdentity(material.promptTags);
   const sameLesson = material.lessonNumber === lesson && (!contextTags || (identity
@@ -61,19 +61,20 @@ export function galleryMatches(material: GalleryMaterial, lesson: number, strate
     ? material.focus.misconceptions.filter(id => focus.misconceptions.includes(id)).length + material.focus.coreIdeas.filter(id => focus.coreIdeas.includes(id)).length : 0;
   const normalize = (value?: string) => value?.trim().toLocaleLowerCase().replace(/[–—]/gu, "-").replace(/\s+/gu, " ") || "";
   const equal = (a?: string, b?: string) => Boolean(normalize(a) && normalize(b) && !/^(not |unknown)/u.test(normalize(a)) && normalize(a) === normalize(b));
+  const checkInMatch = !contextTags?.EXPERIENCE_CONTEXT && reportedActivities.some(label => sameExperience(material.experienceContext, label));
   const tags = [
     { label: "Lesson", value: `Lesson ${material.lessonNumber}`, matched: sameLesson },
     { label: "Strategy", value: getEngagementStrategyLabel(material.strategy), matched: sameStrategy },
     { label: "Focus", value: material.promptTags?.FOCUS_ITEMS || (material.focus ? [...material.focus.misconceptions.map(id => `Target ${id}`), ...material.focus.coreIdeas.map(i => `Core idea ${i + 1}`)].join(" · ") : "Not recorded"), matched: overlappingFocus > 0 },
     { label: "Grade", value: material.gradeBand || "Not provided", matched: equal(canonicalGrade(material.gradeBand), canonicalGrade(contextTags?.GRADE_LEVEL || "")) },
     { label: "Prior quiz", value: material.quizPattern || "Not recorded", matched: equal(material.quizPattern, contextTags?.CURRENT_UNDERSTANDING) },
-    { label: "Experience", value: material.experienceContext || "Not provided", matched: sameExperience(material.experienceContext, contextTags?.EXPERIENCE_CONTEXT) },
+    { label: "Experience", value: material.experienceContext || "Not provided", matched: checkInMatch || sameExperience(material.experienceContext, contextTags?.EXPERIENCE_CONTEXT) },
     { label: "Format", value: material.format === "video" ? "Animated video" : "Slide deck", matched: equal(material.format, contextTags?.FORMAT) },
   ];
   if (sameLesson) reasons.push("Same lesson");
   if (sameStrategy) reasons.push("Same strategy");
   if (overlappingFocus) reasons.push("Same focus");
-  for (const tag of tags.slice(3)) if (tag.matched) reasons.push(`Same ${tag.label.toLowerCase()}`);
+  for (const tag of tags.slice(3)) if (tag.matched) reasons.push(tag.label === "Experience" && checkInMatch ? "Matches class check-in" : `Same ${tag.label.toLowerCase()}`);
   // Each known matching dimension has equal weight, like the prototype.
   // Two shared focus items break ties without outweighing another dimension.
   return { score: tags.filter(tag => tag.matched).length * 10 + Math.max(0, overlappingFocus - 1), reasons, tags };

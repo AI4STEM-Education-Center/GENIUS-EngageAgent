@@ -3,7 +3,7 @@ import { recordGeneration } from "@/lib/generation-record-server";
 import { NextResponse } from "next/server";
 import type { ContentItem } from "@/lib/types";
 import { buildMaterialVideoInstructions } from "@/lib/material-video";
-import { parseMaterialActivity } from "@/lib/material-activities";
+import { MATERIAL_STRATEGIES } from "@/lib/material-activities";
 import { saveMaterialVideoJob, validVideoRequestId, validVideoScopeId } from "@/lib/material-video-jobs";
 import { workspaceRequestUser } from "@/lib/workspace-access";
 
@@ -57,12 +57,12 @@ export async function POST(request: Request) {
     if (!item || typeof item !== "object" || !validVideoScopeId(item.id)) {
       return NextResponse.json({ error: "A content item is required." }, { status: 400 });
     }
-    if ((item.strategy === "cognitive conflict" || item.strategy === "experience bridging" || item.strategy === "engaged critiquing") &&
-        item.activity !== undefined && !parseMaterialActivity(item.activity, item.strategy)) {
+    const instructions = buildMaterialVideoInstructions(item);
+    if (item.activity !== undefined && MATERIAL_STRATEGIES.includes(item.strategy) && !instructions) {
       return NextResponse.json({ error: "The activity does not meet its stage and media requirements." }, { status: 400 });
     }
 
-    const animationPrompt = buildMaterialVideoInstructions(item) || buildAnimationPrompt();
+    const animationPrompt = instructions || buildAnimationPrompt();
 
     const generation = typeof item.lessonNumber === "number" ? await recordGeneration({ userId: user.geniusId, classId, assignmentId }, { lessonNumber: item.lessonNumber, strategy: item.strategy, format: "video", operation: "video", model: "grok-imagine-video", prompt: { system: "", user: animationPrompt }, settings: item.teachingContext, parentId: item.generation?.id,
       parameters: { contentItemId: item.id, duration: 4, aspect_ratio: "1:1", resolution: "480p", referenceSha256: createHash("sha256").update(imageUrl).digest("hex") } }) : undefined;

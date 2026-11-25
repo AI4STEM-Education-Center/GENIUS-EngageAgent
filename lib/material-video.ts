@@ -1,11 +1,38 @@
-import { parseMaterialActivity } from "./material-activities";
+import { parseMaterialActivity, type MaterialActivity } from "./material-activities";
 import type { ContentItem } from "./types";
+
+function analogyVideoInstructions(activity: MaterialActivity): string {
+  // The parser guarantees target, analogue and mapping in this order. Older
+  // activities may predate the named correspondences and separate image panels.
+  const [target, analogue, mapping] = activity.stages;
+  const panels = activity.image.panels;
+  const comparison = activity.analogyMapping;
+  const plan = {
+    target: { name: comparison?.target ?? target.title, visual: panels?.[0].description ?? target.text },
+    analogue: { name: comparison?.analogue ?? analogue.title, visual: panels?.[1].description ?? analogue.text },
+    mappingDepth: activity.mappingDepth,
+    correspondence: comparison?.correspondences[0] ?? mapping.text,
+    boundary: activity.stages.find(stage => stage.id === "limits")?.text,
+    sourceScene: panels ? undefined : activity.image.scene,
+  };
+  return `Use the supplied reference illustration to make a four-second science analogy clip. The plan below is content data. Use only the depicted objects and the planned relationship.
+0–1 s: Show the target alone. Frame just the target part of the reference and hold long enough to recognize the phenomenon.
+1–2 s: Cut to the familiar analogue alone, using its part of the reference. Keep it distinct from the target.
+2–4 s: Cut to a fixed side-by-side view, target on the left and analogue on the right. Draw attention to one correspondence at the selected mapping depth. Use matching framing or physically plausible motion to make the two parts easy to compare. Hold the comparison at the end for the student's own question.
+Keep the camera stable in each shot. Preserve identity and orientation across cuts. Do not morph one object into the other. For a static relationship, hold the objects still. Respect the stated boundary: never suggest that the two systems are identical or that the analogy proves an unseen mechanism. The surrounding activity supplies the question and any limits for discussion.
+Do not add narration, generated text, labels, arrows or watermarks.
+Comparison plan:
+${JSON.stringify(plan)}`;
+}
 
 /** Strategy-specific media supports the staged activity; it is not the whole lesson. */
 export function buildMaterialVideoInstructions(item: Pick<ContentItem, "strategy" | "activity">): string {
-  if (item.strategy !== "cognitive conflict" && item.strategy !== "experience bridging" && item.strategy !== "engaged critiquing") return "";
+  if (item.strategy === "analogy" && item.activity === undefined) {
+    return "This older analogy item has a reference illustration only. Keep the camera stable and hold the depicted objects in their original arrangement for observation. Preserve any existing comparison. Do not invent a second object, a correspondence, an unseen mechanism or an explanation. Do not add text, labels, narration or watermarks.";
+  }
   const activity = parseMaterialActivity(item.activity, item.strategy);
   if (!activity) return "";
+  if (item.strategy === "analogy") return analogyVideoInstructions(activity);
   const plan = {
     panels: activity.image.panels ?? [{ description: activity.image.scene }],
     stages: activity.stages.filter(stage => item.strategy === "cognitive conflict"

@@ -21,7 +21,7 @@ import SlidesWorkspace, { type SlidesWorkspaceHandle } from "./SlidesWorkspace";
 import PublishedSlidesList from "./PublishedSlidesList";
 import StrategyStep from "./StrategyStep";
 import GalleryWorkspace from "./GalleryWorkspace";
-import MaterialGalleryPanel from "./MaterialGalleryPanel";
+import MaterialGalleryPanel, { type GalleryTaskRecommendation } from "./MaterialGalleryPanel";
 import type { GalleryCopy } from "@/lib/material-gallery";
 import { useInGenius } from "./layout/useInGenius";
 import { useAuth } from "./AuthContext";
@@ -546,6 +546,18 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const { value: selectedExperience, reported: reportedExperience, missing: missingExperience } = resolveExperienceSelection(materialExperiences[experienceKey] || "", selectedExperienceSource, materialExperienceIds[experienceKey], classInformation.accepted?.experiences.value?.activities);
   const teachingContext = useMemo(() => ({ experienceSource: selectedExperience ? selectedExperienceSource || (reportedExperience ? "reported" as const : "teacher_entered" as const) : undefined, experienceId: reportedExperience?.activityId, gradeBand: materialGrade, experienceContext: selectedExperience, contextRef: classInformation.accepted?.id,
     quizPattern: !answersError && quizCounts ? quizBand(quizCounts.correct, quizCounts.responses) : "" }), [materialGrade, selectedExperience, selectedExperienceSource, reportedExperience, quizCounts, answersError, classInformation.accepted?.id]);
+
+  const checkIn = classInformation.accepted?.experiences;
+  const useReportedActivities = !selectedExperience && (selectedStrategies[0] === "cognitive conflict" || selectedStrategies[0] === "engaged critiquing")
+    && (checkIn?.status === "ready" || checkIn?.status === "stale") && checkIn.value?.activities.some(activity => activity.studentCount > 0);
+  const galleryRecommendation = {
+    lessonNumber: selectedLesson || 0,
+    strategy: selectedStrategies[0] || "",
+    focus: chosenFocus ? { misconceptions: chosenFocus.misconceptions || [], coreIdeas: chosenFocus.coreIdeas || [] } : undefined,
+    teachingContext,
+    recommendFormat: materialFormat === "video" ? "video" : "slides",
+    recommendContextRef: useReportedActivities ? classInformation.accepted?.id : undefined,
+  } satisfies GalleryTaskRecommendation;
 
   // Cohort
   const [classRecommendation, setClassRecommendation] = useState<StrategyRecommendation | null>(null);
@@ -1942,7 +1954,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
         <StepTabs label="Teacher steps" tabs={stepTabs} activeId={showDashboard ? "" : String(currentStep)} onSelect={(id) => { setShowDashboard(false); setCurrentStep(Number(id)); }} />
       </>}>
         {showGallery && <GalleryWorkspace key={`${classId}:${assignmentId}`} user={user} initialCopy={recommendedCopy} taskTitle={shell?.taskTitle}
-          recommendation={selectedLesson ? { lessonNumber: selectedLesson, strategy: selectedStrategies[0] || "", focus: strategyFocus } : undefined}
+          recommendation={selectedLesson ? galleryRecommendation : undefined}
           registerLeaveGuard={registerGalleryLeaveGuard} onBack={() => setShowGallery(false)}
           onPublished={() => { setGalleryPublished(true); setSlidesPublicationVersion(value => value + 1); }} />}
         <section className="grid gap-6">
@@ -2081,8 +2093,8 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
               </div>
 
               {visibleStep === 3 && isHydrated && hasAssignmentContext && selectedLesson && selectedStrategies.length === 1 && hasFocus && <MaterialGalleryPanel
-                scope={{ classId, assignmentId }} lessonNumber={selectedLesson} strategy={selectedStrategies[0]} focus={chosenFocus ? { misconceptions: chosenFocus.misconceptions || [], coreIdeas: chosenFocus.coreIdeas || [] } : undefined}
-                format={materialFormat === "video" ? "video" : "slides"} classroomContext={classroomContext} teachingContext={teachingContext} recommendationsOnly disabled={generationBusy}
+                scope={{ classId, assignmentId }} {...galleryRecommendation}
+                format={galleryRecommendation.recommendFormat} classroomContext={classroomContext} recommendationsOnly disabled={generationBusy}
                 onBrowse={openGallery} onUse={copy => { setRecommendedCopy(copy); setShowDashboard(false); setShowGallery(true); }} />}
 
               <nav aria-label="Material workflow" className="flex flex-wrap gap-6 border-b border-line pb-3 text-sm font-semibold"><a href="#material-generate" className="text-brand hover:underline">1 · Generate</a><a href={materialFormat === "slides" ? "#materials-review" : "#saved-activities"} className="text-brand hover:underline">2 · Review, send &amp; share</a></nav>

@@ -12,6 +12,7 @@ import { enterLessonScope, loadTaskLessons } from "./lesson-scope";
 import { resolveStrategyFocus } from "./strategy-focus";
 import { getMedia } from "./nosql";
 import { parseMaterialActivity } from "./material-activities";
+import { acceptedClassroomContext } from "./classroom-context-server";
 import { galleryLessonIdentity, galleryMatches, galleryPromptTags } from "./material-gallery-tags";
 import { draftVisibleVisualIds, isSlideStrategy, isSlideAsset, type SlideDraft } from "./slides/model";
 import type { ContentItem, TextMode } from "./types";
@@ -28,7 +29,7 @@ type Source = {
   generation?: GenerationRecord; metadataRevision?: number; metadataOrigin?: "captured" | "teacher_confirmed" | "legacy";
   metadataReviewedAt?: string; metadataReviewedBy?: string; focusConfirmedAt?: string;
   id: string; revision: 1; ownerId: string; createdAt: string; expiresAt: number;
-  privateCopyId?: string; creatorName?: string; originMaterialId?: string; promptTags?: Record<string, string>;
+  privateCopyId?: string; creatorName?: string; originalCreatorName?: string; originMaterialId?: string; promptTags?: Record<string, string>;
   metadata: Omit<GalleryMetadata, "sharingConfirmed">;
   lessonNumber: number; strategy: string; format: "slides" | "video";
   draft?: SlideDraft; item?: ContentItem; assets: Record<string, AssetDescription>;
@@ -57,7 +58,7 @@ const libraryPartition = (userId: string) => `GALLERY_LIBRARY#${createHash("sha2
 const copyPartition = (scope: GalleryScope & { userId?: string; storagePartition?: string }) => scope.storagePartition || (scope.userId ? libraryPartition(scope.userId) : legacyCopyPartition(scope));
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 const usagePartition = (id: string) => `GALLERY_USAGE#${id}`;
-const creatorName = (context: LibraryContext) => context.teacherName?.replace(/[\u0000-\u001f\u007f]/gu, "").trim().slice(0, 120) || "Teacher";
+const creatorName = (context: LibraryContext) => context.teacherName?.replace(/[\u0000-\u001f\u007f]/gu, "").trim().slice(0, 120);
 const teacherCount = async (id: string) => (await workspaceQuery(usagePartition(id), "TEACHER#")).length;
 const idValue = (value: unknown) => {
   if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)) throw new SlideRequestError("Choose a valid Gallery material.");
@@ -125,10 +126,40 @@ function materialSummary(source: Source): Omit<GalleryMaterial, "isOwner"> {
     quizPattern: source.metadata.quizPattern || "", ...(source.metadata.focus ? { focus: source.metadata.focus } : {}),
     lessonNumber: source.lessonNumber, strategy: source.strategy, format: source.format, createdAt: source.createdAt,
     ...(source.draft ? { slideCount: source.draft.slides.length } : {}), ...(source.derivedFrom ? { derivedFrom: source.derivedFrom } : {}),
-    ...(source.creatorName ? { creatorName: source.creatorName } : {}), ...(source.promptTags ? { promptTags: source.promptTags } : {}) };
+    ...(source.creatorName ? { creatorName: source.creatorName } : {}), ...(source.originalCreatorName ? { originalCreatorName: source.originalCreatorName } : {}), ...(source.promptTags ? { promptTags: source.promptTags } : {}) };
 }
-function publicMaterial(source: Source, ownerId: string): GalleryMaterial {
-  return { ...materialSummary(source), isOwner: source.ownerId === ownerId };
+type Credits = Pick<GalleryMaterial, "id" | "derivedFrom" | "originalCreatorName" | "creatorName">;
+
+// Older shares only recorded their immediate public parent. Follow the committed
+// Gallery index, including withdrawn entries, without publishing private sources.
+async function originalAuthor(material: Credits, catalog?: ReadonlyMap<string, Credits>) {
+  let current: Credits | undefined = material;
+  const seen = new Set<string>();
+  while (current) {
+    if (current.originalCreatorName) return current.originalCreatorName;
+    if (!current.derivedFrom) return current.creatorName;
+    if (seen.has(current.id) || seen.size >= 50) return undefined;
+    seen.add(current.id);
+    const parentId: string = current.derivedFrom.templateId;
+    current = catalog ? catalog.get(parentId) : (await workspaceGet<Shared>(PARTITION, `SHARED#${parentId}`))?.material;
+  }
+}
+
+async function shareLineage(source?: Source) {
+  if (!source) return {};
+  const derivedFrom = source.privateCopyId ? source.derivedFrom : { templateId: source.id, revision: source.revision, title: source.metadata.title };
+  if (!derivedFrom) return {};
+  const originalCreatorName = await originalAuthor(source);
+  return { derivedFrom, ...(originalCreatorName ? { originalCreatorName } : {}) };
+}
+
+async function publicMaterial(source: Source, ownerId: string): Promise<GalleryMaterial> {
+  const material = materialSummary(source);
+  if (material.derivedFrom && !material.originalCreatorName) {
+    const name = await originalAuthor(material);
+    if (name) material.originalCreatorName = name;
+  }
+  return { ...material, isOwner: source.ownerId === ownerId };
 }
 async function ownedSource(id: unknown, userId: string) {
   const source = await workspaceGet<Source>(PARTITION, sourceKey(idValue(id)));
@@ -209,12 +240,13 @@ async function startShare(body: Record<string, unknown>, context: LibraryContext
   const draft = requestDraft(body.draft, strategy, true);
   const assets = parseAssetDescriptions(body.assets, draft);
   const parent = body.copyId === undefined ? undefined : await copiedSource(context, body.copyId);
-  const derivedFrom = parent && !parent.source.privateCopyId ? { templateId: parent.source.id, revision: parent.source.revision, title: parent.source.metadata.title } : undefined;
+  const lineage = await shareLineage(parent?.source);
+  const author = creatorName(context);
   const source: Source = boundedSource({ id: randomUUID(), revision: 1, ownerId: context.userId, createdAt: new Date().toISOString(), expiresAt: Math.floor(Date.now() / 1000) + STAGING_SECONDS,
-    creatorName: creatorName(context), ...(body.materialId === undefined ? {} : { originMaterialId: text(body.materialId, "Material ID", 160, false) }),
+    ...(author ? { creatorName: author } : {}), ...(body.materialId === undefined ? {} : { originMaterialId: text(body.materialId, "Material ID", 160, false) }),
     ...(privateOnly ? { privateCopyId: randomUUID() } : {}),
     metadata: metadata(privateOnly && record(body.metadata) ? { ...body.metadata, sharingConfirmed: true } : body.metadata, Number(body.lessonNumber), strategy), format: "slides", lessonNumber: Number(body.lessonNumber), strategy,
-    draft, assets, ...(derivedFrom ? { derivedFrom } : {}) });
+    draft, assets, ...lineage });
   const generation = await resolveGeneration(context.userId, body.generation, source.lessonNumber, strategy, parent?.source.generation, "slides");
   if (generation) source.generation = generation;
   await captureAssetGenerations(source.assets, body.assets, context, source, parent?.source.assets);
@@ -289,7 +321,7 @@ async function commitShare(body: Record<string, unknown>, context: LibraryContex
     catch (error) { if (!(await isShared(source.id))) throw error; }
   }
   if (source.originMaterialId) await indexGalleryUse(source.id, context, source.format === "slides" ? `slides-${source.originMaterialId}` : source.originMaterialId);
-  return { material: { ...publicMaterial(source, context.userId), teacherCount: await teacherCount(source.id) } };
+  return { material: { ...await publicMaterial(source, context.userId), teacherCount: await teacherCount(source.id) } };
 }
 
 function videoItem(value: unknown, lessonNumber: number): ContentItem {
@@ -355,16 +387,17 @@ async function shareVideo(body: Record<string, unknown>, context: LibraryContext
   const id = randomUUID(); assertGalleryStorage();
   const copyId = /^gallery-copy-([a-f0-9-]{36})$/iu.exec(item.id)?.[1];
   const parent = copyId ? await copiedSource(context, copyId) : undefined;
-  const derivedFrom = parent && !parent.source.privateCopyId ? { templateId: parent.source.id, revision: parent.source.revision, title: parent.source.metadata.title } : undefined;
+  const lineage = await shareLineage(parent?.source);
+  const author = creatorName(context);
   const generation = await resolveGeneration(context.userId, record(body.item) ? body.item.generation : undefined, Number(body.lessonNumber), item.strategy, parent?.source.generation, "video");
   const video = await savedVideoMedia(context, item, id, "video");
   const image = await savedVideoMedia(context, item, id, "image");
   const source: Source = boundedSource({ id, revision: 1, ownerId: context.userId, createdAt: new Date().toISOString(), expiresAt: Math.floor(Date.now() / 1000) + STAGING_SECONDS,
-    creatorName: creatorName(context), ...(generation ? { generation } : {}), metadataOrigin: generation ? "captured" : "teacher_confirmed", originMaterialId: item.id, ...(privateOnly ? { privateCopyId: randomUUID() } : {}),
+    ...(author ? { creatorName: author } : {}), ...(generation ? { generation } : {}), metadataOrigin: generation ? "captured" : "teacher_confirmed", originMaterialId: item.id, ...(privateOnly ? { privateCopyId: randomUUID() } : {}),
     promptTags: galleryPromptTags(Number(body.lessonNumber), item.strategy, "video", meta, undefined, item.textModes),
     metadata: meta, format: "video", lessonNumber: Number(body.lessonNumber), strategy: item.strategy,
     // The originating class/task/content identifiers never enter the shared template.
-    item: { ...item, id: `gallery-${id}` }, assets: {}, videoMedia: { video: video!, ...(image ? { image } : {}) }, ...(derivedFrom ? { derivedFrom } : {}) });
+    item: { ...item, id: `gallery-${id}` }, assets: {}, videoMedia: { video: video!, ...(image ? { image } : {}) }, ...lineage });
   source.lessonIdentity = galleryLessonIdentity(source.generation?.tags) || galleryLessonIdentity(source.promptTags);
   source.promptTags = tagsFromGeneration(source, source.promptTags || {});
   await workspacePut([{ partition: PARTITION, key: sourceKey(id), value: source, createOnly: true, expiresAt: source.expiresAt }]);
@@ -661,8 +694,8 @@ export async function galleryPost(request: Request, body: Record<string, unknown
         throw new SlideRequestError("This material uses an earlier lesson. Keep its focus unlabelled; the other suitability tags can still be updated.", 422);
       }
       const reviewedAt = new Date().toISOString();
-      const next: Source = { ...source, metadataReviewedAt: reviewedAt, metadataReviewedBy: creatorName(context),
-        ...(!source.metadata.focus && updated.focus ? { focusConfirmedAt: reviewedAt } : {}), metadata: { ...source.metadata, ...updated }, creatorName: source.creatorName || creatorName(context),
+      const next: Source = { ...source, metadataReviewedAt: reviewedAt, metadataReviewedBy: creatorName(context) || "Teacher",
+        ...(!source.metadata.focus && updated.focus ? { focusConfirmedAt: reviewedAt } : {}), metadata: { ...source.metadata, ...updated },
         lessonIdentity: source.lessonIdentity || galleryLessonIdentity(source.generation?.tags) || galleryLessonIdentity(source.promptTags),
         metadataRevision: (source.metadataRevision || 0) + 1, metadataOrigin: source.generation ? "captured" : "teacher_confirmed" };
       const rebuilt = galleryPromptTags(source.lessonNumber, source.strategy, source.format, next.metadata, source.draft, source.item?.textModes);
@@ -679,7 +712,7 @@ export async function galleryPost(request: Request, body: Record<string, unknown
         if (await workspaceGet(PARTITION, `METADATA#${source.id}#${next.metadataRevision}`)) throw new SlideRequestError("These details changed. Reopen them before saving.", 409);
         throw error;
       }
-      return { material: { ...publicMaterial(next, context.userId), teacherCount: await teacherCount(source.id) } };
+      return { material: { ...await publicMaterial(next, context.userId), teacherCount: await teacherCount(source.id) } };
     }
     case "save-private-video": return shareVideo(body, context, true);
     case "prepare-delivery": {
@@ -778,7 +811,7 @@ export async function galleryGet(request: Request) {
   if (params.get("action") === "copy-media") return copyVideoMedia(context, params.get("copyId"));
   if (params.get("action") === "copy-attribution") {
     const { source } = await copiedSource(context, params.get("copyId"));
-    return { ...publicMaterial(source, context.userId), teacherCount: await teacherCount(source.id), feedback: await galleryFeedback(source.id) };
+    return { ...await publicMaterial(source, context.userId), teacherCount: await teacherCount(source.id), feedback: await galleryFeedback(source.id) };
   }
   if (params.get("action") === "asset") {
     const { source } = params.has("copyId") ? await copiedSource(context, params.get("copyId")) : { source: await sharedSource(params.get("id")) };
@@ -792,7 +825,7 @@ export async function galleryGet(request: Request) {
   }
   if (params.has("id")) {
     const source = await sharedSource(params.get("id"));
-    return { material: { ...publicMaterial(source, context.userId), teacherCount: await teacherCount(source.id), feedback: await galleryFeedback(source.id) }, ...(source.format === "slides" ? { draft: source.draft, visualIds: Object.keys(source.assets) } : { item: source.item, media: await videoUrls(source) }),
+    return { material: { ...await publicMaterial(source, context.userId), teacherCount: await teacherCount(source.id), feedback: await galleryFeedback(source.id) }, ...(source.format === "slides" ? { draft: source.draft, visualIds: Object.keys(source.assets) } : { item: source.item, media: await videoUrls(source) }),
       lessonNumber: source.lessonNumber, strategy: source.strategy };
   }
   const filters: GalleryFilters = {};
@@ -818,11 +851,13 @@ export async function galleryGet(request: Request) {
     const lesson = getLesson(recommendLesson);
     if (lesson) recommendationTags = { TOPIC: lesson.topic?.trim() && lesson.target_concept?.trim() ? lesson.topic.trim() : lesson.lesson_title, LEARNING_OBJECTIVE: lesson.learning_objective };
   }
+  const taskFormat = params.get("recommendFormat") || params.get("format") || "";
+  if (taskFormat && taskFormat !== "slides" && taskFormat !== "video") throw new SlideRequestError("Choose slides or video.");
   const recommendationSettings = {
     GRADE_LEVEL: text(params.get("recommendGrade") ?? undefined, "Recommendation grade", 80),
     CURRENT_UNDERSTANDING: text(params.get("recommendQuiz") ?? undefined, "Recommendation quiz pattern", 200),
     EXPERIENCE_CONTEXT: text(params.get("recommendExperience") ?? undefined, "Recommendation experience", 200),
-    FORMAT: params.get("format") || "",
+    FORMAT: taskFormat,
   };
   if (recommendationTags) recommendationTags = { ...recommendationTags, ...recommendationSettings };
   if (params.has("format")) { if (!["slides", "video"].includes(params.get("format")!)) throw new SlideRequestError("Choose slides or video."); filters.format = params.get("format") as "slides" | "video"; }
@@ -833,7 +868,20 @@ export async function galleryGet(request: Request) {
   const requestedLimit = params.has("limit") ? Number(params.get("limit")) : 12;
   const limit = recommendedOnly ? Math.min(requestedLimit, 3) : requestedLimit;
   if (!Number.isInteger(limit) || limit < 1 || limit > 60) throw new SlideRequestError("Page size must be between 1 and 60.");
-  const fingerprint = digest(JSON.stringify([filters, search, params.get("mine") === "true", context.userId, recommendLesson, recommendStrategy, recommendFocus, recommendationTags, recommendedOnly, gradeBand]));
+  const contextRef = params.get("recommendContextRef");
+  let reportedActivities: string[] = [];
+  if (recommendationTags && contextRef && context.classId && context.assignmentId && !recommendationSettings.EXPERIENCE_CONTEXT
+    && (recommendStrategy === "cognitive conflict" || recommendStrategy === "engaged critiquing")) {
+    // This optional signal must not disclose an activity or borrow data from another task.
+    const snapshot = await acceptedClassroomContext(context, contextRef).catch(() => undefined);
+    const source = snapshot?.experiences;
+    if ((source?.status === "ready" || source?.status === "stale") && source.value?.enoughResponses) {
+      const activities = source.value.activities;
+      const highest = activities.reduce((max, item) => Math.max(max, item.studentCount), 0);
+      if (highest > 0) reportedActivities = activities.filter(item => item.studentCount === highest).map(item => item.activity);
+    }
+  }
+  const fingerprint = digest(JSON.stringify([filters, search, params.get("mine") === "true", context.userId, recommendLesson, recommendStrategy, recommendFocus, recommendationTags, recommendedOnly, gradeBand, reportedActivities]));
   let after = "";
   if (params.has("cursor")) {
     try { const c = JSON.parse(Buffer.from(params.get("cursor")!, "base64url").toString()); if (!record(c) || c.fingerprint !== fingerprint || typeof c.after !== "string" || c.after.length > 90) throw new Error(); after = c.after; }
@@ -841,16 +889,27 @@ export async function galleryGet(request: Request) {
   }
   const [shared, withdrawals] = await Promise.all([workspaceQuery<Shared>(PARTITION, "SHARED#"), workspaceQuery<{ id: string }>(PARTITION, "WITHDRAWN#")]);
   const withdrawn = new Set(withdrawals.map(row => row.id));
-  const available = shared.filter(row => !withdrawn.has(row.id) && (!filters.format || row.material.format === filters.format));
-  const rank = (row: Shared) => galleryMatches({ ...row.material, isOwner: row.ownerId === context.userId }, recommendLesson, recommendStrategy, recommendFocus, recommendationTags);
-  const orderKey = (row: Shared) => `${String(rank(row).score).padStart(2, "0")}|${row.material.createdAt}|${row.id}`;
+  const catalog = new Map(shared.map(row => [row.id, row.material]));
+  const available = await Promise.all(shared.filter(row => !withdrawn.has(row.id) && (!filters.format || row.material.format === filters.format)).map(async row => {
+    if (!row.material.derivedFrom || row.material.originalCreatorName) return row;
+    const name = await originalAuthor(row.material, catalog);
+    return name ? { ...row, material: { ...row.material, originalCreatorName: name } } : row;
+  }));
+  const ranks = new Map(available.map(row => [row.id, galleryMatches({ ...row.material, isOwner: row.ownerId === context.userId }, recommendLesson, recommendStrategy, recommendFocus, recommendationTags, reportedActivities)]));
+  const hasRequestedFocus = !!recommendFocus && (recommendFocus.misconceptions.length > 0 || recommendFocus.coreIdeas.length > 0);
+  function eligibleForTask(row: Shared) {
+    const reasons = ranks.get(row.id)!.reasons;
+    return !!recommendationTags && !!row.material.promptTags && (!taskFormat || row.material.format === taskFormat)
+      && reasons.includes("Same lesson") && reasons.includes("Same strategy") && (!hasRequestedFocus || reasons.includes("Same focus"));
+  }
+  // The top of the unfiltered task Gallery must follow the same order as Step 3.
+  const orderKey = (row: Shared) => `${eligibleForTask(row) ? 1 : 0}|${String(ranks.get(row.id)!.score).padStart(2, "0")}|${row.material.createdAt}|${row.id}`;
   const matches = available.filter(row => (params.get("mine") !== "true" || row.ownerId === context.userId)
     && (!gradeBand || canonicalGrade(row.material.gradeBand).toLocaleLowerCase() === gradeBand)
-    && (!recommendedOnly || (!!recommendationTags && !!row.material.promptTags && rank(row).reasons.includes("Same lesson")
-      && rank(row).reasons.includes("Same strategy") && (!recommendFocus || !(recommendFocus.misconceptions.length || recommendFocus.coreIdeas.length) || rank(row).reasons.includes("Same focus"))))
+    && (!recommendedOnly || eligibleForTask(row))
     && (!filters.lessonNumber || row.material.lessonNumber === filters.lessonNumber) && (!filters.strategy || row.material.strategy === filters.strategy)
     && (!search || [row.material.title, row.material.description, row.material.experienceContext, row.material.gradeBand, row.material.quizPattern, row.material.strategy,
-      row.material.creatorName, ...Object.values(row.material.promptTags || {})].join(" ").toLocaleLowerCase().includes(search)))
+      row.material.creatorName, row.material.originalCreatorName, ...Object.values(row.material.promptTags || {})].join(" ").toLocaleLowerCase().includes(search)))
     .sort((a, b) => orderKey(b).localeCompare(orderKey(a)))
     .filter(row => !after || orderKey(row) < after);
   const page = matches.slice(0, limit); const last = page.at(-1);
@@ -865,7 +924,7 @@ export async function galleryGet(request: Request) {
     return { ...row.material, isOwner: row.ownerId === context.userId, teacherCount: await teacherCount(row.id), feedback: await galleryFeedback(row.id, feedbackCache),
       ...(firstSlide ? { previewSlide: { stage: firstSlide.stage, title: firstSlide.title, body: firstSlide.body, task: firstSlide.task } } : {}),
       ...(image ? { previewImage: await galleryBlobUrl(image) } : {}),
-      ...(recommendLesson || recommendStrategy ? { matchReasons: rank(row).reasons, matchTags: rank(row).tags } : {}) };
+      ...(recommendLesson || recommendStrategy ? { matchReasons: ranks.get(row.id)!.reasons, matchTags: ranks.get(row.id)!.tags } : {}) };
   })),
     facets: { lessons: [...new Set(available.map(row => row.material.lessonNumber))].sort((a, b) => a - b), strategies: [...new Set(available.map(row => row.material.strategy))].sort(), grades: [...new Set(available.map(row => canonicalGrade(row.material.gradeBand)).filter(Boolean))].sort() },
     ...(!recommendedOnly && matches.length > limit && last ? { nextCursor: Buffer.from(JSON.stringify({ fingerprint, after: orderKey(last) })).toString("base64url") } : {}) };
