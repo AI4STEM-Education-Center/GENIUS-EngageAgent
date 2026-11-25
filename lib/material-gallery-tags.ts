@@ -1,6 +1,6 @@
 import { canonicalGrade } from "./material-teaching-context";
 import { sameExperience } from "./experience-identity";
-import { GALLERY_TAG_LABELS, type GalleryMaterial, type GalleryMetadata } from "./material-gallery";
+import { GALLERY_TAG_LABELS, type GalleryFocus, type GalleryMaterial, type GalleryMetadata } from "./material-gallery";
 import { toMisconceptionIds } from "./misconceptions";
 import { getLesson } from "./quiz-data";
 import { getEngagementStrategyLabel } from "./engagement-strategies";
@@ -50,15 +50,25 @@ export function galleryLessonIdentity(tags?: Record<string, string>): GalleryMat
   return tags?.TOPIC && tags.LEARNING_OBJECTIVE ? { topic: tags.TOPIC, learningObjective: tags.LEARNING_OBJECTIVE } : undefined;
 }
 
-export function galleryMatches(material: GalleryMaterial, lesson: number, strategy: string, focus?: { misconceptions: string[]; coreIdeas: number[] }, contextTags?: Record<string, string>, reportedActivities: readonly string[] = []) {
+function focusKeys(lesson: number, focus: GalleryFocus) {
+  // Generation accepts either the local quiz code or its shared misconception ID.
+  return new Set([
+    ...focus.misconceptions.map(code => `misconception:${toMisconceptionIds(lesson, code)[0] || code}`),
+    ...focus.coreIdeas.map(index => `core:${index}`),
+  ]);
+}
+
+export function galleryMatches(material: GalleryMaterial, lesson: number, strategy: string, focus?: GalleryFocus, contextTags?: Record<string, string>, reportedActivities: readonly string[] = []) {
   const reasons: string[] = [];
   const identity = material.lessonIdentity || galleryLessonIdentity(material.generation?.tags) || galleryLessonIdentity(material.promptTags);
-  const sameLesson = material.lessonNumber === lesson && (!contextTags || (identity
-    ? identity.topic === contextTags.TOPIC && identity.learningObjective === contextTags.LEARNING_OBJECTIVE
-    : !material.promptTags));
+  const sameLesson = material.lessonNumber === lesson && !!identity && !!contextTags &&
+    identity.topic === contextTags.TOPIC && identity.learningObjective === contextTags.LEARNING_OBJECTIVE;
   const sameStrategy = material.strategy === strategy;
-  const overlappingFocus = sameLesson && material.focus && focus
-    ? material.focus.misconceptions.filter(id => focus.misconceptions.includes(id)).length + material.focus.coreIdeas.filter(id => focus.coreIdeas.includes(id)).length : 0;
+  let overlappingFocus = 0;
+  if (sameLesson && material.focus && focus) {
+    const selected = focusKeys(lesson, focus);
+    for (const key of focusKeys(lesson, material.focus)) if (selected.has(key)) overlappingFocus++;
+  }
   const normalize = (value?: string) => value?.trim().toLocaleLowerCase().replace(/[–—]/gu, "-").replace(/\s+/gu, " ") || "";
   const equal = (a?: string, b?: string) => Boolean(normalize(a) && normalize(b) && !/^(not |unknown)/u.test(normalize(a)) && normalize(a) === normalize(b));
   const checkInMatch = !contextTags?.EXPERIENCE_CONTEXT && reportedActivities.some(label => sameExperience(material.experienceContext, label));
