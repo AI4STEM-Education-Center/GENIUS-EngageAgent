@@ -30,9 +30,9 @@ export default function MaterialGenerationHistory({ scope, id, copyId, revision 
           <p className="font-semibold">{record.focus?.origin === "source-material" ? "Focus of the source material" : "Teaching focus at generation"}</p>
           {record.focus ? <ul className="mt-1 list-disc space-y-1 pl-4">{record.focus.items.map((item, index) =>
             <li key={index}>{item.id && <strong>{item.id} · </strong>}{item.label}</li>)}</ul>
-            : <p className="mt-1 text-mute">{record.tags.FOCUS_ITEMS || "Not recorded for this operation."}</p>}
+            : <p className="mt-1 text-mute">Not recorded for this operation.</p>}
         </div>
-        <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2">{Object.entries(record.tags).filter(([key]) => key !== "FOCUS_ITEMS").map(([key, value]) => <div key={key}><dt className="font-semibold">{GALLERY_TAG_LABELS[key] || key}</dt><dd className="mt-1 break-words text-mute">{value}</dd></div>)}</dl>
+        <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2">{Object.entries(record.tags).filter(([key]) => key !== "FOCUS_ITEMS" || !record.focus).map(([key, value]) => <div key={key}><dt className="font-semibold">{key === "FOCUS_ITEMS" ? "Retained focus tag" : GALLERY_TAG_LABELS[key] || key}</dt><dd className="mt-1 break-words text-mute">{value}</dd></div>)}</dl>
         <p className="mt-3 break-all text-xs text-mute">Record {record.id} · Input fingerprint {record.promptHash.slice(0, 16)}</p>
       </details>)}
       {part.incomplete && <p className="mt-2 text-xs text-mute">Earlier records are unavailable in this material’s retained history.</p>}
