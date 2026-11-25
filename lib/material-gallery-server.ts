@@ -875,7 +875,7 @@ export async function galleryGet(request: Request) {
     // This optional signal must not disclose an activity or borrow data from another task.
     const snapshot = await acceptedClassroomContext(context, contextRef).catch(() => undefined);
     const source = snapshot?.experiences;
-    if ((source?.status === "ready" || source?.status === "stale") && source.value && source.value.responseCount > 0) {
+    if ((source?.status === "ready" || source?.status === "stale") && source.value?.enoughResponses) {
       const activities = source.value.activities;
       const highest = activities.reduce((max, item) => Math.max(max, item.studentCount), 0);
       if (highest > 0) reportedActivities = activities.filter(item => item.studentCount === highest).map(item => item.activity);

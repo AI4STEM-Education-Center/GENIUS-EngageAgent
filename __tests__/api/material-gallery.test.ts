@@ -639,7 +639,7 @@ describe("teacher library outside classes and strict Step 3 recommendations", ()
     const activity = await shareActivity("Press a pillow");
     const tie = await shareActivity("Bouncing a ball");
     const lower = await shareActivity("Stretch a band");
-    const snapshot = { experiences: { status: "ready", value: { responseCount: 8, activities: [
+    const snapshot = { experiences: { status: "ready", value: { enoughResponses: true, responseCount: 8, activities: [
       { activity: "Pressing pillows", studentCount: 5, incidents: ["PRIVATE account from a student"] },
       { activity: "Stretching bands", studentCount: 2 }, { activity: "Bounce the balls", studentCount: 5 },
     ] } } };
@@ -663,8 +663,11 @@ describe("teacher library outside classes and strict Step 3 recommendations", ()
     expect(mocks.accepted).not.toHaveBeenCalled();
     mocks.accepted.mockRejectedValueOnce(new Error("Different task"));
     expect(JSON.stringify(await (await get(task)).json())).not.toContain("Matches class check-in");
-    mocks.accepted.mockResolvedValueOnce({ experiences: { status: "ready", value: { responseCount: 0, activities: snapshot.experiences.value.activities } } });
-    expect(JSON.stringify(await (await get(task)).json())).not.toContain("Matches class check-in");
+    for (const responseCount of [0, 1, 2]) {
+      mocks.accepted.mockResolvedValueOnce({ experiences: { status: "ready", value: { enoughResponses: false, responseCount,
+        activities: [{ activity: "Pressing pillows", studentCount: responseCount }] } } });
+      expect(JSON.stringify(await (await get(task)).json())).not.toContain("Matches class check-in");
+    }
   });
 
   it("supports reviewed keywords and grade filters without inventing tags or accepting unlimited text", async () => {
