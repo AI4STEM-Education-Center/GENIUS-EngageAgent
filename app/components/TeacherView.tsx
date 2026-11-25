@@ -550,7 +550,12 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
   const checkIn = classInformation.accepted?.experiences;
   const useReportedActivities = !selectedExperience && (selectedStrategies[0] === "cognitive conflict" || selectedStrategies[0] === "engaged critiquing")
     && (checkIn?.status === "ready" || checkIn?.status === "stale") && checkIn.value?.activities.some(activity => activity.studentCount > 0);
+  const contextForbidden = [classInformation.accepted?.profile.status, classInformation.accepted?.experiences.status].includes("forbidden");
+  const firstContextLoading = classInformation.loading && !classInformation.accepted;
+  const adaptationIssue = firstContextLoading ? "Loading class information before adaptation…"
+    : contextForbidden ? "Class information is unavailable to this account. Refresh access in the class task before adapting." : undefined;
   const galleryRecommendation = {
+    adaptationIssue,
     lessonNumber: selectedLesson || 0,
     strategy: selectedStrategies[0] || "",
     focus: chosenFocus ? { misconceptions: chosenFocus.misconceptions || [], coreIdeas: chosenFocus.coreIdeas || [] } : undefined,
@@ -1894,8 +1899,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
     || Object.values(videos).some((state) => state.status === "loading" || state.status === "polling");
   const selectedFocusKind = focusKind(selectedStrategies[0]);
   const hasFocus = !selectedFocusKind || selectedFocus[selectedFocusKind].length > 0;
-  const contextForbidden = [classInformation.accepted?.profile.status, classInformation.accepted?.experiences.status].includes("forbidden");
-  const canGenerateMaterials = !missingExperience && !contextForbidden && hasFocus && isHydrated && !isRestoringStep3State && !generationBusy && Boolean(selectedLesson) && selectedStrategies.length === 1
+  const canGenerateMaterials = !missingExperience && !firstContextLoading && !contextForbidden && hasFocus && isHydrated && !isRestoringStep3State && !generationBusy && Boolean(selectedLesson) && selectedStrategies.length === 1
     && (materialFormat !== "slides" || (slidesAvailable && !unsupportedSlideStrategies.length && slideStrategies.every((strategy) => slideReady[strategy])));
   const canPublishSelectedContent = selectedForPublish.size > 0
     && Array.from(selectedForPublish).every((id) => content.some((item) => item.id === id)
@@ -2164,6 +2168,7 @@ export default function TeacherView({ user, initialMaterialFormat, initialStep, 
                 </button>
               </div>
               {missingExperience && <p role="alert" className="text-sm text-warn">The selected experience is from earlier check-in information. Return to Step 2 to choose a current experience or keep it as your own example.</p>}
+              {firstContextLoading && <p role="status" className="text-sm text-mute">Loading class information before generation…</p>}
               {contextForbidden && <p role="alert" className="text-sm text-bad">Class information is not available to this account. Refresh access before generating or adapting materials.</p>}
               {generationBusy && <p role="status" className="text-sm text-mute">Please wait for the current operation to finish. Progress appears below.</p>}
               {materialFormat === "slides" && !slidesAvailable && <p role="status" className="text-sm text-amber-800">Open a class task in GENIUS or My classes to generate slides.</p>}

@@ -23,7 +23,7 @@ import { postSlideRequest } from "@/lib/slides/client-transport";
 import { publishSlideDeck } from "@/lib/slides/publish-client";
 import { isSlideDeckPublished, slidePublicationContentKey } from "@/lib/slides/publication-status";
 import { scopedClientAuthHeaders } from "@/lib/client-auth";
-import { slideRevisionFeedback } from "@/lib/slides/revision";
+import { slideRevisionFeedback, slideRevisionSummary } from "@/lib/slides/revision";
 import type { StrategyFocus } from "@/lib/strategy-focus";
 import ShareSlidesDialog from "./ShareSlidesDialog";
 
@@ -578,6 +578,11 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
       {busy && job.current && <button className={icon} title="Cancel generation" aria-label="Cancel generation" onClick={() => { job.current?.abort(); job.current = null; setBusy(false); setStatus("Generation cancelled."); }}><X size={17} /></button>}
       {busy && publishJob.current && <button className={icon} title="Cancel publishing" aria-label="Cancel publishing" onClick={() => { publishJob.current?.abort(); publishJob.current = null; setBusy(false); setStatus("Publishing stopped. Your draft is retained."); }}><X size={17} /></button>}
     </div>
+    {deck && embeddedContext?.teachingContext?.contextRef && deck.teachingContext?.contextRef !== embeddedContext.teachingContext.contextRef &&
+      <button type="button" className={`${button} mb-3`} disabled={busy} onClick={() => {
+        setDeck({ ...deck, teachingContext: { ...deck.teachingContext, contextRef: embeddedContext.teachingContext?.contextRef }, checks: undefined, teacherDecision: undefined });
+        setUndoDeck(null); setReviewed(false); setError(""); setReviewWarnings([]); setStatus("Class information updated for this draft.");
+      }}>Use current class information</button>}
     {error && <div role="alert" className="mb-4 whitespace-pre-line break-words border-l-4 border-red-700 bg-red-50 p-3 text-sm text-red-900">{error}{!lessons.length && <button className={`${button} ml-3`} onClick={() => setReload(n => n + 1)}>Retry</button>}</div>}
     {!deck && <div className="border-y border-gray-200 py-16 text-center text-sm text-gray-500">No slide draft yet.</div>}
     {deck && slide && <>
@@ -603,7 +608,7 @@ const SlidesWorkspaceEditor = forwardRef<SlidesWorkspaceHandle, SlidesWorkspaceP
         </div>
         {revisionScope === "slide" && <p className="mt-2 text-xs text-mute">Only this slide&apos;s text and teacher notes change. Other slides and images stay the same.</p>}
         {undoDeck && deck !== undoDeck && !busy && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white p-3 text-sm text-ink-2">
-          <span>{(() => { const changed = deck.draft.slides.flatMap((s, i) => JSON.stringify(s) !== JSON.stringify(undoDeck.draft.slides[i]) ? [i + 1] : []); return changed.length ? `Changed slide${changed.length > 1 ? "s" : ""} ${changed.join(", ")}. ${deck.draft.slides.length - changed.length} unchanged.` : "Revision ready"; })()}</span>
+          <span>{slideRevisionSummary(undoDeck, deck)}</span>
           <button type="button" className={button} onClick={undoRevision}><Undo2 size={15} />Undo revision</button>
         </div>}
       </section>}

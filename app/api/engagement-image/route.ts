@@ -1,3 +1,4 @@
+import { WorkspaceError } from "@/lib/workspace";
 import { createHash } from "node:crypto";
 import { recordGeneration } from "@/lib/generation-record-server";
 import { workspaceRequestUser } from "@/lib/workspace-access";
@@ -255,6 +256,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ url: dataUrl });
   } catch (error) {
+    if (error instanceof WorkspaceError) return NextResponse.json({ error: error.message }, { status: error.status });
     const message =
       error instanceof Error ? error.message : "Failed to generate image.";
     const isSafety = isSafetyRejection(error);

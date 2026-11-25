@@ -50,7 +50,7 @@ it("syncs real class-wide v2 data into a task-bound immutable snapshot and gener
   expect(context.profile.value?.locale).toBe("rural"); expect(context.experiences.value?.activities[0].activityId).toBe("genius:bike");
   expect(await materialClassroomContext(scope.classId, "Keep this note", { ...scope, contextRef: context.id })).toContain("Keep this note");
   await expect(materialClassroomContext(scope.classId, "Keep this note", scope)).rejects.toThrow(/Refresh and accept/);
-  await expect(acceptedClassroomContext({ ...scope, assignmentId: "other-task" }, context.id)).rejects.toThrow();
+  await expect(acceptedClassroomContext({ ...scope, assignmentId: "other-task" }, context.id)).rejects.toMatchObject({ status: 409 });
 });
 it("embedded MongoDB class scopes sync directly without a native class connection", async () => {
   const context = await readClassroomContext({ ...scope, classId });
@@ -74,7 +74,7 @@ it("invalidates previously accepted data after changing or removing the class co
 it("revalidates ownership before generation and clears revoked provider data", async () => {
   await linkGeniusClass(scope, classId); const context = await readClassroomContext(scope);
   fetcher.mockImplementation(async () => new Response(null, { status: 403 }));
-  await expect(acceptedClassroomContext(scope, context.id)).rejects.toThrow(/not available/);
+  await expect(acceptedClassroomContext(scope, context.id)).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/not available/) });
   const latest = await readClassroomContext(scope); expect(latest.summary).toBe(""); expect(latest.profile.value).toBeUndefined();
 });
 it("keeps native class linking optional and provides an explicit rollout rollback", () => {

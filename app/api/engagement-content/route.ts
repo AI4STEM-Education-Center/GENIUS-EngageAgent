@@ -1,3 +1,4 @@
+import { WorkspaceError } from "@/lib/workspace";
 import { recordGeneration } from "@/lib/generation-record-server";
 import { parseTeachingContext, materialGenerationContext, type MaterialTeachingContext } from "@/lib/material-teaching-context";
 import OpenAI from "openai";
@@ -287,6 +288,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ items });
   } catch (error) {
+    if (error instanceof WorkspaceError) return NextResponse.json({ error: error.message }, { status: error.status });
     const message =
       error instanceof Error ? error.message : "Failed to generate content.";
     console.error("engagement-content error:", message);

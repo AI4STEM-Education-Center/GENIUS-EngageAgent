@@ -1,3 +1,4 @@
+import { refreshClassInformation } from "./classroom-context";
 /** Teaching choices travel with a material, independently of its delivery class. */
 export type MaterialTeachingContext = { gradeBand?: string; experienceContext?: string; quizPattern?: string; contextRef?: string; experienceId?: string; experienceSource?: "reported" | "ai_suggested" | "teacher_entered" };
 export const GRADE_BANDS = ["Elementary school", "Middle school", "High school", "Higher education"] as const;
@@ -17,10 +18,10 @@ export function parseTeachingContext(value: unknown): MaterialTeachingContext | 
   for (const [key, limit] of [["gradeBand", 80], ["experienceContext", 200], ["quizPattern", 200], ["contextRef", 64], ["experienceId", 160]] as const) {
     const text = input[key];
     if (text === undefined) continue;
+    if (key === "contextRef" && (typeof text !== "string" || (text.trim() && !/^[a-f0-9]{64}$/u.test(text)))) throw new Error(`Invalid class information version. ${refreshClassInformation}`);
     if (typeof text !== "string" || text.length > limit || /[\u0000-\u001f\u007f]/u.test(text)) throw new Error(`Invalid ${key}.`);
     if (text.trim()) result[key] = text.trim();
   }
-  if (result.contextRef && !/^[a-f0-9]{64}$/u.test(result.contextRef)) throw new Error("Invalid class information version.");
   if (input.experienceSource !== undefined) {
     if (!["reported", "ai_suggested", "teacher_entered"].includes(String(input.experienceSource))) throw new Error("Invalid experience source.");
     result.experienceSource = input.experienceSource as MaterialTeachingContext["experienceSource"];

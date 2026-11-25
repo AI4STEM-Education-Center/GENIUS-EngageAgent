@@ -6,8 +6,8 @@ import type { GalleryScope } from "@/lib/material-gallery";
 import type { MaterialAdaptation } from "@/lib/material-teaching-context";
 import type { ContentItem } from "@/lib/types";
 
-export default function VideoAdaptation({ scope, item, adaptation, disabled, onChange, onBusyChange }: {
-  scope: GalleryScope; item: ContentItem; adaptation?: MaterialAdaptation; disabled?: boolean;
+export default function VideoAdaptation({ scope, item, adaptation, currentContextRef, disabled, onChange, onBusyChange }: {
+  scope: GalleryScope; item: ContentItem; adaptation?: MaterialAdaptation; currentContextRef?: string; disabled?: boolean;
   onChange: (item: ContentItem) => void; onBusyChange: (busy: boolean) => void;
 }) {
   const request = useRef<AbortController | null>(null);
@@ -18,16 +18,17 @@ export default function VideoAdaptation({ scope, item, adaptation, disabled, onC
   const latest = useRef({ scope, item, adaptation, onChange, onBusyChange });
   latest.current = { scope, item, adaptation, onChange, onBusyChange };
   useEffect(() => () => { request.current?.abort(); request.current = null; latest.current.onBusyChange(false); }, []);
-  async function adapt() {
+  async function adapt(selectedContextRef?: string, incoming?: MaterialAdaptation) {
     if (request.current) return;
     const { scope, item, adaptation, onChange, onBusyChange } = latest.current;
+    const settings = incoming?.teachingContext ?? item.teachingContext ?? adaptation?.teachingContext;
     const controller = new AbortController(); request.current = controller;
     setBusy(true); onBusyChange(true); setError("");
     try {
       const response = await fetch("/api/material-gallery/adapt-video", { method: "POST", signal: controller.signal,
         headers: { ...scopedClientAuthHeaders(scope), "Content-Type": "application/json" },
         body: JSON.stringify({ ...scope, ...(!scope.classId && !scope.assignmentId ? { library: true } : {}), copyId: item.id.replace(/^gallery-copy-/u, ""), item,
-          classroomContext: adaptation?.classroomContext ?? item.classroomContext ?? "", teachingContext: adaptation?.teachingContext ?? item.teachingContext }) });
+          classroomContext: incoming?.classroomContext ?? item.classroomContext ?? adaptation?.classroomContext ?? "", teachingContext: selectedContextRef ? { ...settings, contextRef: selectedContextRef } : settings }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to adapt the text. Your original is retained.");
       if (result.item?.id !== item.id || typeof result.item.body !== "string" || typeof result.item.title !== "string") throw new Error("The adapted text was incomplete. Your original is retained.");
@@ -38,11 +39,13 @@ export default function VideoAdaptation({ scope, item, adaptation, disabled, onC
   }
   useEffect(() => {
     if (!adaptation || started.current.has(adaptation.requestId)) return;
-    const timer = setTimeout(() => { started.current.add(adaptation.requestId); void adapt(); }, 0);
+    const timer = setTimeout(() => { started.current.add(adaptation.requestId); void adapt(undefined, adaptation); }, 0);
     return () => clearTimeout(timer);
   }, [adaptation]);
   return <details open={!!adaptation || busy || !!error || !!undo} className="my-4 rounded-lg border border-line p-3">
     <summary className="cursor-pointer text-sm font-semibold">Adapt with AI</summary>
+    {currentContextRef && currentContextRef !== (item.teachingContext ?? adaptation?.teachingContext)?.contextRef &&
+      <button type="button" disabled={disabled || busy} className="mt-2 text-sm font-semibold text-brand disabled:opacity-50" onClick={() => void adapt(currentContextRef)}>Adapt using current class information</button>}
     <p className="my-3 text-sm text-mute">Adjust the language and questions to your class. The video stays the same; review it alongside the adapted text.</p>
     <div className="flex flex-wrap gap-3"><button type="button" disabled={disabled || busy} onClick={() => void adapt()} className="min-h-10 rounded-lg border border-line px-3 text-sm font-semibold disabled:opacity-50">{busy ? "Adapting activity text…" : "Adapt activity text"}</button>
       {undo && undo.result === item && <button type="button" disabled={disabled || busy} onClick={() => { onChange(undo.previous); setUndo(null); }} className="text-sm font-semibold text-brand">Undo AI edit</button>}</div>

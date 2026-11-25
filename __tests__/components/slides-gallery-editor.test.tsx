@@ -202,3 +202,17 @@ it("allows offline editing and download but never reports successful save or sen
   await screen.findByRole("link", { name: "Save PPTX file" });
   expect((mocks.download.mock.calls[0][0] as SlideDeck).draft.slides[0].title).toBe("Offline edit");
 });
+
+it("pins only the accepted class snapshot on request, even when the current task and copy have different teaching settings", async () => {
+  const deck = copy();
+  const contextRef = "a".repeat(64);
+  deck.teachingContext = { gradeBand: "Earlier grade", experienceContext: "Copy-specific experience" };
+  const changed = vi.fn();
+  render(<SlidesWorkspace user={user} embeddedContext={{ ...context, teachingContext: { contextRef, gradeBand: "Current grade" } }}
+    incomingDeck={deck} onDraftChange={changed} compactEditor />);
+  const use = await screen.findByRole("button", { name: "Use current class information" });
+  expect(deck.teachingContext.contextRef).toBeUndefined();
+  fireEvent.click(use);
+  await waitFor(() => expect(changed).toHaveBeenCalledWith(expect.objectContaining({ id: deck.id, draft: deck.draft, teachingContext: { ...deck.teachingContext, contextRef } })));
+  expect(screen.queryByRole("button", { name: "Use current class information" })).toBeNull();
+});

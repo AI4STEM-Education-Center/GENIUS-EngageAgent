@@ -1,3 +1,4 @@
+import { parseTeachingContext } from "../material-teaching-context";
 import { NextResponse } from "next/server";
 import { decodeJwt } from "jose";
 import { verifySSOToken } from "../auth";
@@ -150,6 +151,10 @@ export function requestDraft(value: unknown, strategy: Parameters<typeof parseDr
   }
   try { return parseDraft(value, strategy, editable); }
   catch (error) { throw new SlideRequestError(error instanceof Error ? error.message : "Invalid slide draft.", 422); }
+}
+export function requestTeachingSettings(value: unknown) {
+  try { return parseTeachingContext(value); }
+  catch (error) { throw new SlideRequestError(error instanceof Error ? error.message : "Choose valid teaching settings.", 422); }
 }
 export function slideFailure(error: unknown) {
   if (error instanceof SlideRequestError || error instanceof WorkspaceError) return slideJson({ error: error.message,
