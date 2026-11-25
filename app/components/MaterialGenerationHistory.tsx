@@ -8,7 +8,8 @@ export function GenerationFocusDetails({ record }: { record: import("@/lib/gener
     <p className="font-semibold">{record.focus?.origin === "source-material" ? "Focus of the source material" : "Teaching focus at generation"}</p>
     {record.focus ? <ul className="mt-1 list-disc space-y-1 pl-4">{record.focus.items.map((item, index) =>
       <li key={index}>{item.id && <strong>{item.id} · </strong>}{item.label}</li>)}</ul>
-      : <p className="mt-1 text-mute">{record.tags.FOCUS_ITEMS ? `Retained focus tag: ${record.tags.FOCUS_ITEMS}` : "Not recorded for this operation."}</p>}
+      : <><p className="mt-1 text-mute">Not recorded for this operation.</p>
+        {record.tags.FOCUS_ITEMS && <p className="mt-1 text-mute">Retained focus tag: {record.tags.FOCUS_ITEMS}</p>}</>}
   </div>;
 }
 
