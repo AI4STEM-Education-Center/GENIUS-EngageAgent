@@ -6,6 +6,7 @@ import { copyGalleryMaterial, listMaterialGallery, previewGalleryMaterial, previ
 import type { GalleryCopy, GalleryFacets, GalleryFilters, GalleryMaterial, GalleryPreviewSource, GalleryScope } from "@/lib/material-gallery";
 import GalleryMetadataEditor from "./GalleryMetadataEditor";
 import GalleryMaterialDetails from "./GalleryMaterialDetails";
+import MaterialActivityView from "./MaterialActivityView";
 import GalleryFirstSlidePreview from "./GalleryFirstSlidePreview";
 import { getEngagementStrategyLabel } from "@/lib/engagement-strategies";
 import { loadTaskLesson } from "@/lib/lesson-client";
@@ -21,10 +22,11 @@ export type GalleryTaskRecommendation = {
   strategy: string;
   focus?: StrategyFocus;
   teachingContext?: MaterialTeachingContext;
+  classroomContext?: string;
   recommendFormat?: "slides" | "video";
   recommendContextRef?: string;
 };
-type Props = GalleryTaskRecommendation & { scope: GalleryScope; format: "all" | "slides" | "video"; disabled?: boolean; onUse: (copy: GalleryCopy, material: GalleryMaterial) => void; refreshKey?: number; browseRequest?: number; standalone?: boolean; recommendationsOnly?: boolean; onBrowse?: () => void; classroomContext?: string };
+type Props = GalleryTaskRecommendation & { scope: GalleryScope; format: "all" | "slides" | "video"; disabled?: boolean; onUse: (copy: GalleryCopy, material: GalleryMaterial) => void; refreshKey?: number; browseRequest?: number; standalone?: boolean; recommendationsOnly?: boolean; onBrowse?: () => void };
 
 export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, format, focus, disabled, onUse, refreshKey = 0, browseRequest = 0, standalone = false, recommendationsOnly = false, onBrowse, teachingContext, recommendFormat, recommendContextRef, classroomContext = "" }: Props) {
   const [filter, setFilter] = useState<"topic" | "strategy" | "all" | "mine">(standalone ? "all" : "topic");
@@ -56,7 +58,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
   const request = useRef<AbortController | null>(null);
   const operation = useRef<AbortController | null>(null);
   const previewRequest = useRef<AbortController | null>(null);
-  const scopeKey = JSON.stringify([scope.classId, scope.assignmentId, lessonNumber, strategy, format, recommendFormat, recommendContextRef, focusKey, teachingContext]);
+  const scopeKey = JSON.stringify([scope.classId, scope.assignmentId, lessonNumber, strategy, format, recommendFormat, recommendContextRef, focusKey, teachingContext, classroomContext]);
 
   const load = useCallback(async (nextCursor?: string) => {
     request.current?.abort();
@@ -92,19 +94,29 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     previewRequest.current?.abort(); setPreviewLoading(false); if (dialog.current?.open) dialog.current.close();
   }
 
+  function canAdapt(material: GalleryMaterial) {
+    if (!standalone) return material.lessonNumber === lessonNumber;
+    // A task can browse other curricula. Only use its focus/settings with a
+    // material that the server matched against this lesson's identity.
+    const hasLessonIdentity = material.lessonIdentity || (material.promptTags?.TOPIC && material.promptTags?.LEARNING_OBJECTIVE);
+    return Boolean(recommended && scope.classId && scope.assignmentId && focus && (focus.coreIdeas.length || focus.misconceptions.length)
+      && material.lessonNumber === lessonNumber && material.strategy === strategy && hasLessonIdentity && material.matchReasons?.includes("Same lesson"));
+  }
+
   async function selectMaterial(material: GalleryMaterial, mode: "use" | "adapt") {
-    if (disabled || copying || (!standalone && material.lessonNumber !== lessonNumber)) return;
+    if (disabled || copying || (!standalone && material.lessonNumber !== lessonNumber) || (mode === "adapt" && !canAdapt(material))) return;
     operation.current?.abort(); const controller = new AbortController(); operation.current = controller;
     setCopying(material.id); setError("");
     try {
-      const copy = standalone ? await copyGalleryMaterial(scope, material.id, mode, controller.signal)
-        : await copyGalleryMaterial(scope, material.id, mode, controller.signal, { classroomContext, teachingContext: teachingContext || {}, ...(focus ? { focus } : {}) });
+      const copy = mode === "adapt"
+        ? await copyGalleryMaterial(scope, material.id, mode, controller.signal, { classroomContext, teachingContext: teachingContext || {}, ...(focus ? { focus } : {}) })
+        : await copyGalleryMaterial(scope, material.id, mode, controller.signal);
       if (controller.signal.aborted) return;
       onUse(copy, material);
       closePreview();
-      setNotice(standalone ? "Your copy is ready to edit." : mode === "adapt"
+      setNotice(mode === "adapt"
         ? "Adapting your copy using the current task settings. Review the result before saving."
-        : "Your own copy is ready to review below. The Gallery original is unchanged.");
+        : standalone ? "Your copy is ready to edit." : "Your own copy is ready to review below. The Gallery original is unchanged.");
     } catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to copy this material."); }
     finally { if (!controller.signal.aborted) setCopying(""); }
   }
@@ -118,7 +130,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
       // Match tags belong to this task's listing. Keep them when the expanded
       // preview still represents the same version of the shared material.
       setPreview(material.metadataRevision === detail.material.metadataRevision
-        ? { ...detail, material: { ...detail.material, matchTags: material.matchTags } } : detail);
+        ? { ...detail, material: { ...detail.material, matchTags: material.matchTags, matchReasons: material.matchReasons } } : detail);
       if (material.format === "slides") {
         const deck = await previewGallerySlideDeck(scope, material.id, controller.signal);
         // A lesson added in the app needs loading for its slide heading. If this fails, the preview says it can't show the slide.
@@ -142,6 +154,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     finally { if (!controller.signal.aborted) setCopying(""); }
   }
   const focusMatches = (item: GalleryMaterial) => item.lessonNumber === lessonNumber && !!focus && !!item.focus && (item.focus.misconceptions.some(id => focus.misconceptions.includes(id)) || item.focus.coreIdeas.some(id => focus.coreIdeas.includes(id)));
+  const previewMaterial = preview?.material || previewItem;
   const previewSlide = preview?.draft?.slides[previewIndex];
   if (recommendationsOnly && !loading && !error && !items.length) return null;
 
@@ -150,7 +163,7 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
       <div><h3 className="flex items-center gap-2 text-base font-semibold"><LayoutGrid size={18} />{standalone ? "Shared materials" : expanded ? "Materials Gallery" : "Matches from the Gallery"}</h3><p className="mt-1 text-xs text-mute">{standalone ? "Open a material to edit your own copy." : "Shared by teachers · use a copy or adapt it to your class"}</p></div>
       {!standalone && <button type="button" className={button} onClick={() => setExpanded(value => !value)}>{expanded ? "Show matches" : "Open Gallery"}<ChevronRight size={16} /></button>}
     </div>}
-    {recommendationsOnly && <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-bold">Recommended from Gallery</h3><p className="mt-1 text-sm text-mute">Matched to your lesson, focus and teaching context.</p></div>{onBrowse && <button type="button" className={button} onClick={onBrowse}>Browse all materials</button>}</div>}
+    {recommendationsOnly && <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="flex items-center gap-2 text-lg font-bold"><LayoutGrid size={18} />Matches from the Gallery</h3><p className="mt-1 text-sm text-mute">Shared by teachers</p></div>{onBrowse && <button type="button" className={button} onClick={onBrowse}>Browse all materials</button>}</div>}
     {standalone && <div className="mt-4 flex flex-wrap gap-3">
       <label className="text-xs font-semibold text-mute">Lesson<select aria-label="Filter Gallery by lesson" value={selectedLesson} onChange={event => setSelectedLesson(event.target.value)} className="ml-2 min-h-10 rounded-lg border border-line bg-white px-3 text-sm text-ink">
         <option value="">All lessons</option>{[...new Set([...facets.lessons, ...(selectedLesson ? [Number(selectedLesson)] : [])])].sort((a, b) => a - b).map(n => <option key={n} value={n}>Lesson {n}</option>)}
@@ -173,35 +186,59 @@ export default function MaterialGalleryPanel({ scope, lessonNumber, strategy, fo
     {error && <div role="alert" className="mt-4 rounded-lg bg-bad-light p-3 text-sm text-bad">{error}<button type="button" className={`${button} ml-3`} onClick={() => setReload(value => value + 1)}>Try again</button></div>}
     {notice && <p role="status" className="mt-4 rounded-lg bg-ok-light p-3 text-sm text-ok">{notice}</p>}
     {!loading && !error && !items.length && <div className="py-8 text-center"><p className="font-semibold text-ink">No shared materials match yet</p><p className="mt-2 text-sm text-mute">{standalone ? "Try another filter or search. Materials shared by teachers will appear here." : "Try another filter, or generate a new material below. You can share it after reviewing."}</p></div>}
-    <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4">{(recommendationsOnly ? items.slice(0, 3) : items).map(material => <article key={material.id} className="flex min-w-0 flex-col rounded-xl border border-line bg-white p-4">
-      <GalleryFirstSlidePreview material={material} imageFailed={failedPreviews[material.id] === material.previewImage} onImageError={() => setFailedPreviews(current => ({ ...current, [material.id]: material.previewImage! }))} />
-      <div className="flex justify-between gap-2 text-xs text-mute"><span>{material.format === "slides" ? `${material.slideCount ?? ""} slides` : "Animated video"}</span>{material.isOwner && <span className="font-semibold">Shared by you</span>}</div>
-      <h4 className="mt-3 text-lg font-bold text-ink">{material.title}</h4>
-      <GalleryMaterialDetails scope={scope} {...material} compact={recommendationsOnly} />
-      {material.description && <p className="mt-3 text-sm leading-6 text-ink-2">{material.description}</p>}
-      <div className="my-3 flex flex-wrap gap-2 text-xs font-semibold">
-        {(standalone || recommendationsOnly) ? material.matchReasons?.map(reason => <span key={reason} className="rounded-full bg-ok-light px-2.5 py-1 text-ok">{reason}</span>) : <>
-          {material.lessonNumber === lessonNumber && <span className="rounded-full bg-ok-light px-2.5 py-1 text-ok">Same topic</span>}
-          {material.strategy === strategy && <span className="rounded-full bg-info-light px-2.5 py-1 text-info">Same strategy</span>}
-          {focusMatches(material) && <span className="rounded-full bg-ai-light px-2.5 py-1 text-ai">Same focus</span>}</>}
+    <div className={recommendationsOnly ? "mt-4 grid gap-3" : "mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4"}>{(recommendationsOnly ? items.slice(0, 3) : items).map(material => <article key={material.id} className={`min-w-0 rounded-xl border border-line bg-white p-4 ${recommendationsOnly ? "grid content-start gap-3 md:grid-cols-[8rem_minmax(0,1fr)_auto] md:items-start" : "flex flex-col"}`}>
+      <div className={recommendationsOnly ? "max-w-48 md:max-w-none" : undefined}>
+        <GalleryFirstSlidePreview material={material} imageFailed={failedPreviews[material.id] === material.previewImage} onImageError={() => setFailedPreviews(current => ({ ...current, [material.id]: material.previewImage! }))} />
+        <div className="flex justify-between gap-2 text-xs text-mute"><span>{material.format === "slides" ? `${material.slideCount ?? ""} slides` : "Animated video"}</span>{material.isOwner && <span className="font-semibold">Shared by you</span>}</div>
       </div>
-      <div className="mt-auto flex flex-wrap gap-2 pt-3"><button type="button" className={primary} disabled={disabled || !!copying || (!standalone && material.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(material, "use")}>{copying === material.id ? "Opening…" : standalone ? "Open" : "Use as is"}</button>{!standalone && <button type="button" className={button} disabled={disabled || !!copying || material.lessonNumber !== lessonNumber} onClick={() => void selectMaterial(material, "adapt")}>Adapt</button>}<button type="button" className={button} onClick={() => void openPreview(material)}>Preview</button></div>
+      <div className="min-w-0">
+        <h4 className={`text-lg font-bold text-ink ${recommendationsOnly ? "" : "mt-3"}`}>{material.title}</h4>
+        <GalleryMaterialDetails scope={scope} {...material} compact={recommendationsOnly} />
+        {!recommendationsOnly && material.description && <p className="mt-3 text-sm leading-6 text-ink-2">{material.description}</p>}
+        <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold">
+          {(standalone || recommendationsOnly) ? material.matchReasons?.filter(reason => !material.matchTags || reason === "Matches class check-in").map(reason => <span key={reason} className="rounded-full bg-ok-light px-2.5 py-1 text-ok">{reason}</span>) : <>
+            {material.lessonNumber === lessonNumber && <span className="rounded-full bg-ok-light px-2.5 py-1 text-ok">Same topic</span>}
+            {material.strategy === strategy && <span className="rounded-full bg-info-light px-2.5 py-1 text-info">Same strategy</span>}
+            {focusMatches(material) && <span className="rounded-full bg-ai-light px-2.5 py-1 text-ai">Same focus</span>}</>}
+        </div>
+      </div>
+      <div className={recommendationsOnly ? "flex flex-wrap gap-2 md:flex-col md:items-stretch" : "mt-auto flex flex-wrap gap-2 pt-3"}>
+        <button type="button" className={primary} disabled={disabled || !!copying || (!standalone && material.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(material, "use")}>
+          {copying === material.id ? "Opening…" : standalone && !canAdapt(material) ? "Open" : "Use as is"}
+        </button>
+        {(!standalone || canAdapt(material)) && <button type="button" className={button} disabled={disabled || !!copying || !canAdapt(material)} onClick={() => void selectMaterial(material, "adapt")}>Adapt to my class</button>}
+        <button type="button" className={button} onClick={() => void openPreview(material)}>Preview</button>
+        {recommendationsOnly && material.isOwner && <details className="text-xs text-mute">
+          <summary className="cursor-pointer py-1 font-semibold">Manage sharing</summary>
+          <button type="button" className="block py-1 font-semibold text-brand underline" disabled={!!copying} onClick={() => setEditDetails(material)}>Edit details</button>
+          <button type="button" className="block py-1 font-semibold underline" disabled={!!copying} onClick={() => setRemoveTarget(material)}>Remove from Gallery</button>
+        </details>}
+      </div>
       {!standalone && material.lessonNumber !== lessonNumber && <p className="mt-2 text-xs text-mute">Choose Lesson {material.lessonNumber} in Assessment to use this material.</p>}
-      {material.isOwner && <button type="button" className="mt-3 self-start text-xs font-semibold text-brand underline" disabled={!!copying} onClick={() => setEditDetails(material)}>Edit details</button>}
-      {material.isOwner && <button type="button" className="mt-3 self-start text-xs font-semibold text-mute underline" disabled={!!copying} onClick={() => setRemoveTarget(material)}>Remove from Gallery</button>}
+      {!recommendationsOnly && material.isOwner && <button type="button" className="mt-3 self-start text-xs font-semibold text-brand underline" disabled={!!copying} onClick={() => setEditDetails(material)}>Edit details</button>}
+      {!recommendationsOnly && material.isOwner && <button type="button" className="mt-3 self-start text-xs font-semibold text-mute underline" disabled={!!copying} onClick={() => setRemoveTarget(material)}>Remove from Gallery</button>}
     </article>)}</div>
     {cursor && !recommendationsOnly && <button type="button" className={`${button} mt-4`} disabled={loading} onClick={() => void load(cursor)}>{loading ? "Loading…" : "Load more"}</button>}
     {editDetails && <GalleryMetadataEditor material={editDetails} scope={scope} onClose={() => setEditDetails(null)} onSaved={value => { setItems(items => items.map(item => item.id === value.id ? value : item)); setEditDetails(null); setReload(n => n + 1); setNotice("Material details updated. Existing classroom copies are unchanged."); }} />}
     {removeTarget && <div role="alertdialog" aria-label="Remove shared material" className="mt-4 rounded-lg border border-warn bg-warn-light p-4 text-sm"><p>Remove “{removeTarget.title}” from the Gallery? Teachers who already copied it keep their copies.</p><div className="mt-3 flex gap-2"><button className={button} type="button" onClick={() => setRemoveTarget(null)}>Keep shared</button><button className={button} type="button" disabled={!!copying} onClick={() => void remove()}>Remove shared material</button></div></div>}
     <dialog ref={dialog} aria-label="Gallery material preview" onCancel={closePreview} className="fixed inset-0 m-auto max-h-[90vh] w-[94vw] max-w-3xl overflow-auto rounded-2xl border border-line bg-white p-6 backdrop:bg-ink/50">
       <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-mute">Gallery preview</p><h3 className="mt-1 text-xl font-bold">{previewItem?.title}</h3></div><button type="button" className={button} aria-label="Close Gallery preview" onClick={closePreview}><X size={18} /></button></div>
-      {previewItem && <GalleryMaterialDetails scope={scope} {...(preview?.material || previewItem)} showTags />}
+      {previewMaterial && <GalleryMaterialDetails scope={scope} {...previewMaterial} showTags />}
+      {previewMaterial?.matchReasons?.includes("Matches class check-in") && <p className="mt-2 text-xs font-semibold text-ok">Matches class check-in</p>}
       {previewLoading && <p role="status" className="py-10 text-mute">Loading preview…</p>}
       {previewSlide && <>{previewDeck ? <div className="mt-5"><SlidePreview deck={previewDeck} index={previewIndex} /></div> : <div className="mt-5 rounded-xl border border-line bg-canvas p-6"><p className="text-xs font-semibold uppercase text-mute">{previewSlide.stage}</p><h4 className="mt-3 text-2xl font-bold">{previewSlide.title}</h4><p className="mt-4 whitespace-pre-wrap text-lg leading-relaxed">{previewSlide.body}</p><p className="mt-6 font-semibold text-ok">{previewSlide.task}</p></div>}<div className="mt-3 flex items-center justify-between"><button type="button" className={button} disabled={previewIndex === 0} onClick={() => setPreviewIndex(value => value - 1)}><ChevronLeft size={16} />Previous</button><span className="text-sm text-mute">Slide {previewIndex + 1} of {preview?.draft?.slides.length}</span><button type="button" className={button} disabled={previewIndex >= (preview?.draft?.slides.length ?? 0) - 1} onClick={() => setPreviewIndex(value => value + 1)}>Next<ChevronRight size={16} /></button></div></>}
-      {preview?.item && <div className="mt-5 space-y-4">{preview.media?.video && <video aria-label="Shared video preview" src={preview.media.video} poster={preview.media.image} controls playsInline preload="metadata" className="max-h-96 w-full rounded-xl bg-ink" />}<p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-2">{preview.item.body}</p>{preview.item.activity?.stages.map(stage => <div key={stage.id}><h4 className="font-semibold">{stage.title}</h4><p className="mt-1 text-sm text-mute">{stage.text}</p></div>)}</div>}
+      {preview?.item && (preview.item.activity
+        ? <MaterialActivityView activity={preview.item.activity} media={preview.media} preview />
+        : <div className="mt-5 space-y-4">
+          {preview.media?.video && <video aria-label="Shared video preview" src={preview.media.video} poster={preview.media.image} controls playsInline preload="metadata" className="max-h-96 w-full rounded-xl bg-ink object-contain" />}
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-2">{preview.item.body}</p>
+        </div>)}
       {!previewLoading && !previewSlide && !preview?.item && <p className="mt-5 text-sm text-mute">{previewItem?.description || "This material could not be previewed. Please retry."}</p>}
       {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}
-      {previewItem && <div className="mt-5 flex flex-wrap gap-2"><button type="button" className={primary} disabled={disabled || !!copying || (!standalone && previewItem.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(previewItem, "use")}>{standalone ? "Open and edit" : "Use as is"}</button>{!standalone && <button type="button" className={button} disabled={disabled || !!copying || previewItem.lessonNumber !== lessonNumber} onClick={() => void selectMaterial(previewItem, "adapt")}>Adapt for my class</button>}</div>}
+      {previewMaterial && <div className="mt-5 flex flex-wrap gap-2">
+        <button type="button" className={primary} disabled={disabled || !!copying || (!standalone && previewMaterial.lessonNumber !== lessonNumber)} onClick={() => void selectMaterial(previewMaterial, "use")}>{standalone && !canAdapt(previewMaterial) ? "Open and edit" : "Use as is"}</button>
+        {(!standalone || canAdapt(previewMaterial)) && <button type="button" className={button} disabled={disabled || !!copying || !canAdapt(previewMaterial)} onClick={() => void selectMaterial(previewMaterial, "adapt")}>Adapt to my class</button>}
+      </div>}
     </dialog>
   </section>;
 }

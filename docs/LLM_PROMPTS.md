@@ -242,36 +242,19 @@ Do not render words, letters, numbers, symbols, labels, captions, signs, or wate
 **API:** Grok / x.ai Video (`https://api.x.ai/v1/videos/generations`)
 **Model:** `grok-imagine-video`
 **Auth:** `GROK_API_KEY` env var
-**Output:** 4 seconds, 1:1 aspect ratio, 480p
+**Output:** The request specifies four seconds at 480p. Structured analogies request 16:9. Clips that animate a still inherit its aspect ratio.
 
-### Prompt
+### Prompt and visual input
 
-```
-Animate this still image with natural motion only.
-Keep the same scene, style, and subjects.
+| Material | xAI visual input | Intended sequence |
+|---|---|---|
+| Staged analogy | `reference_images: [{ url: imageUrl }]` and `aspect_ratio: "16:9"` | Start with the target alone, cut to the familiar analogue, then hold both side by side to show one correspondence. Both subjects use the teacher's selected illustration as a visual reference. |
+| Other staged activities | `image: { url: imageUrl }` | Start on the supplied image and follow the strategy-specific activity and reveal stage. |
+| Older items without stages | `image: { url: imageUrl }` | Preserve the original scene. Older analogies hold the depicted comparison for observation. |
 
-Focus on subtle movement (camera drift, object motion, lighting/parallax), cinematic and smooth.
-Continue the scene as it would unfold in the real world, with physically plausible actions and timing.
-Show a complete micro-sequence with a clear beginning, middle, and natural ending within the clip.
-Hard requirement: no text anywhere in the video.
-Do not add words, letters, numbers, symbols, subtitles, captions, logos, signs, labels, or watermarks.
-Do not add narration or lesson explanation.
-```
+The strategy prompts live in `lib/material-video.ts`. The timings guide the model. Actual cuts may vary. Using a reference image permits a target-only opening because the provider does not pin the entire comparison illustration to frame zero. In image-to-video mode the provider pins that illustration and derives the aspect ratio from it. See the [xAI video mode table](https://docs.x.ai/developers/model-capabilities/video/overview) and [reference-image request format](https://docs.x.ai/developers/model-capabilities/video/reference-to-video).
 
-### Input
-
-| Parameter | Value |
-|-----------|-------|
-| `image.url` | URL of the previously generated image |
-| `duration` | 4 seconds |
-| `aspect_ratio` | 1:1 |
-| `resolution` | 480p |
-
-### Notes
-
-- This prompt is **static** (no dynamic variables).
-- The video is generated asynchronously; the client polls `app/api/engagement-video/status/route.ts` for completion.
-- There is **no audio generation** — the video is a silent animation of the still image.
+The request starts a single asynchronous job. The client polls `app/api/engagement-video/status/route.ts` for completion.
 
 ---
 

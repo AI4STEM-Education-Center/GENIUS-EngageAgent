@@ -80,7 +80,7 @@ function ActivityReader({ activity, media, preview = false, questionInput = true
               </figcaption>
             </figure>
           )}
-          {index === activity.image.revealAt && media?.video && <video src={media.video} controls playsInline preload="metadata" aria-label="Activity video" className="mt-3 aspect-square w-full max-w-md rounded-md bg-black" onError={event => onVideoError?.(event.currentTarget.getAttribute("src") ?? "")} />}
+          {index === activity.image.revealAt && media?.video && <video src={media.video} controls playsInline preload="metadata" aria-label="Activity video" className={`mt-3 w-full rounded-md bg-black object-contain ${activity.mappingDepth ? "aspect-video max-w-xl" : "aspect-square max-w-md"}`} onError={event => onVideoError?.(event.currentTarget.getAttribute("src") ?? "")} />}
           {!preview && stage.id === "question" && !questionInput && <p className="mt-3 text-sm font-medium text-slate-700">Record your scientific question in Your questions below.</p>}
           {!preview && (stage.id === "prediction" || (stage.id === "question" && questionInput)) && (
             <div className="mt-3">
@@ -105,7 +105,7 @@ function ActivityReader({ activity, media, preview = false, questionInput = true
 
 export default function MaterialActivityView(props: Props) {
   if (props.preview && props.media?.video) return <section aria-label="Inquiry activity" className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-    <div className="min-w-0"><video src={props.media.video} poster={props.media.image} controls playsInline preload="metadata" aria-label="Activity video" className="aspect-video w-full rounded-xl bg-black" />
+    <div className="min-w-0"><video src={props.media.video} poster={props.activity.mappingDepth ? undefined : props.media.image} controls playsInline preload="metadata" aria-label="Activity video" className="aspect-video w-full rounded-xl bg-black object-contain" />
       <p className="mt-2 text-xs text-mute">Preview the video and the student activity together.</p>
       {props.media.image && <details className="mt-3"><summary className="cursor-pointer text-sm font-semibold">Accompanying illustration</summary><img src={props.media.image} alt={props.activity.image.scene} className="mt-2 max-h-72 w-full rounded-lg object-contain" /></details>}</div>
     <div className="min-w-0 space-y-4">{props.activity.stages.map((stage, index) => <section key={stage.id} aria-label={stage.title} className="rounded-xl border border-line bg-white p-4"><p className="text-xs font-semibold uppercase tracking-wide text-mute">Step {index + 1}</p><h4 className="mt-1 font-semibold">{stage.title}</h4><p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ink-2">{stage.text}</p></section>)}</div>

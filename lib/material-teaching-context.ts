@@ -49,3 +49,19 @@ export function canonicalGrade(value = "") {
   if (/^(elementary school|primary school|grades? (k-5|1-5|1|2|3|4|5))$/u.test(s)) return "Elementary school";
   return GRADE_BANDS.find(grade => grade.toLowerCase() === s) || value.trim();
 }
+
+/** Compare common K–12 grade ranges without changing a material's recorded grade. */
+export function galleryGradeBand(value = "") {
+  const label = value.trim().toLowerCase().replace(/[–—]/gu, "-");
+  const grades = /^(?:grades?\s+)?(k|[1-9]|1[0-2])(?:st|nd|rd|th)?(?:\s*-\s*(k|[1-9]|1[0-2])(?:st|nd|rd|th)?)?(?:\s+grades?)?$/u.exec(label);
+  if (grades) {
+    const first = grades[1] === "k" ? 0 : Number(grades[1]);
+    const last = grades[2] === undefined ? first : grades[2] === "k" ? 0 : Number(grades[2]);
+    if (first <= last) {
+      if (last <= 5) return "Elementary school";
+      if (first >= 6 && last <= 8) return "Middle school";
+      if (first >= 9) return "High school";
+    }
+  }
+  return canonicalGrade(value);
+}

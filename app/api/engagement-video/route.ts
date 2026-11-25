@@ -63,9 +63,17 @@ export async function POST(request: Request) {
     }
 
     const animationPrompt = instructions || buildAnimationPrompt();
+    // In image-to-video, xAI pins the source as frame zero and inherits its size.
+    // A staged analogy needs both depicted subjects available without opening on both.
+    const stagedAnalogy = item.strategy === "analogy" && item.activity !== undefined;
+    const visualInput = stagedAnalogy
+      ? { reference_images: [{ url: imageUrl }] }
+      : { image: { url: imageUrl } };
+    const output = { duration: 4, resolution: "480p", ...(stagedAnalogy ? { aspect_ratio: "16:9" } : {}) };
 
     const generation = typeof item.lessonNumber === "number" ? await recordGeneration({ userId: user.geniusId, classId, assignmentId }, { lessonNumber: item.lessonNumber, strategy: item.strategy, format: "video", operation: "video", model: "grok-imagine-video", prompt: { system: "", user: animationPrompt }, settings: item.teachingContext, parentId: item.generation?.id,
-      parameters: { contentItemId: item.id, duration: 4, aspect_ratio: "1:1", resolution: "480p", referenceSha256: createHash("sha256").update(imageUrl).digest("hex") } }) : undefined;
+      parameters: { contentItemId: item.id, ...output, aspect_ratio: output.aspect_ratio ?? "From source image",
+        inputMode: stagedAnalogy ? "reference-to-video" : "image-to-video", referenceSha256: createHash("sha256").update(imageUrl).digest("hex") } }) : undefined;
 
     const res = await fetch(`${XAI_VIDEO_BASE}/generations`, {
       method: "POST",
@@ -76,10 +84,8 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         model: "grok-imagine-video",
         prompt: animationPrompt,
-        image: { url: imageUrl },
-        duration: 4,
-        aspect_ratio: "1:1",
-        resolution: "480p",
+        ...visualInput,
+        ...output,
       }),
     });
 

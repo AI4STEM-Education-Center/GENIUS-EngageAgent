@@ -269,6 +269,6 @@ export async function updateGalleryMetadata(scope: GalleryScope, id: string, exp
 }
 
 export type MaterialGenerationHistory = { parts: { label: string; records: import("./generation-record").GenerationRecord[]; incomplete: boolean }[] };
-export function galleryGenerationHistory(scope: GalleryScope, target: { id?: string; copyId?: string }, signal?: AbortSignal) {
+export function galleryGenerationHistory(scope: GalleryScope, target: { id?: string; copyId?: string; sourceCopyId?: string }, signal?: AbortSignal) {
   return json<MaterialGenerationHistory>(scope, { action: "generation-history", ...target }, "GET", signal);
 }

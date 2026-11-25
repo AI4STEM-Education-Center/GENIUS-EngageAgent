@@ -22,6 +22,15 @@ it("separates current copy settings from source attribution and aggregate feedba
   expect(within(original).getByText("Catching a ball")).toBeInTheDocument();
   expect(within(original).getByText(/combine its linked classroom copies/)).toBeInTheDocument();
 });
+it("identifies the immediate source sharer separately from the original author and keeps unsaved copies unnumbered", () => {
+  const deck = { ...deckFixture("analogy"), gallerySource: source };
+  render(<GalleryCopyDetails copy={{ format: "slides", deck, source }} revision={0} dirty={false} owner="Current teacher"
+    source={{ creatorName: "Adapter", originalCreatorName: "Original author", derivedFrom: { title: "First version", templateId: "first", revision: 1 } }} />);
+  expect(screen.getByText("Your current copy · Not saved yet")).toBeTruthy();
+  const details = screen.getByText("Source material · Shared by Adapter").closest("details")!;
+  expect(within(details).getByText("Original author: Original author")).toBeTruthy();
+  expect(within(details).getByText(source.title)).toBeTruthy();
+});
 it("filters and searches private materials without presenting source ratings as private ratings", () => {
   const first: SavedGalleryCopySummary = { copyId: "a", revision: 2, title: "Bicycle lesson", savedAt: "2026-11-18T00:00:00Z", format: "slides", lessonNumber: 3,
     strategy: "analogy", source, gradeBand: "Middle school", experienceContext: "Riding a bicycle", previewSlide: { stage: "phenomenon", title: "A turning wheel", body: "Observe the wheel", task: "What changed?" } };

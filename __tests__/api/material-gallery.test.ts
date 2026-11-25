@@ -670,11 +670,49 @@ describe("teacher library outside classes and strict Step 3 recommendations", ()
     }
   });
 
+  it("uses the accepted GENIUS v2 check-in for both entry points after the provider data changes", async () => {
+    vi.stubEnv("GENIUS_URL", "https://genius.example.test");
+    vi.stubEnv("GENIUS_CONTEXT_ENDPOINT", "");
+    vi.stubEnv("GENIUS_CONTEXT_MODE", "live");
+    const upstreamClass = "1".repeat(24);
+    const teacherScope = { ...scope, userId: teacher.geniusId };
+    const { linkGeniusClass } = await import("@/lib/genius-context-client");
+    const provider = await vi.importActual<typeof import("@/lib/classroom-context-server")>("@/lib/classroom-context-server");
+    let activity = "Pressing pillows";
+    const transport = vi.spyOn(globalThis, "fetch").mockImplementation(async address => {
+      const url = new URL(String(address));
+      if (url.pathname.endsWith("/classes")) return Response.json({ classes: [{ id: upstreamClass, name: "Test class" }] });
+      expect(url.searchParams.get("classId")).toBe(upstreamClass);
+      return Response.json({ schemaVersion: 2, classId: upstreamClass, version: activity, updatedAt: "2026-11-24T12:00:00Z",
+        checkIn: { responseCount: 3, activities: [{ id: "reported", label: activity, studentCount: 3, didCount: 2, watchedCount: 1,
+          incidents: ["Private check-in example"] }] } });
+    });
+    try {
+      const id = await share({ metadata: { ...metadata, experienceContext: "Press a pillow" } });
+      await linkGeniusClass(teacherScope, upstreamClass);
+      const snapshot = await provider.readClassroomContext(teacherScope);
+      expect(snapshot.experiences.value?.enoughResponses).toBe(true);
+      activity = "Jumping on a trampoline";
+      const task = { recommendLesson: "3", recommendStrategy: "cognitive conflict", recommendFormat: "slides", recommendContextRef: snapshot.id };
+      for (const query of [task, { ...task, recommendedOnly: "true", format: "slides" }]) {
+        mocks.accepted.mockImplementationOnce(provider.acceptedClassroomContext);
+        const result = await (await get(query)).json();
+        expect(result.items[0]).toMatchObject({ id, matchReasons: expect.arrayContaining(["Matches class check-in"]) });
+        expect(JSON.stringify(result)).not.toContain("Private check-in example");
+      }
+    } finally { transport.mockRestore(); }
+  });
+
   it("supports reviewed keywords and grade filters without inventing tags or accepting unlimited text", async () => {
     const id = await share({ metadata: { ...metadata, keywords: ["elasticity", "visual learning", "elasticity"] } });
     const result = await (await libraryGet({ search: "visual learning", gradeBand: "6–8" })).json();
     expect(result.items[0]).toMatchObject({ id, promptTags: { KEYWORDS: "elasticity, visual learning" } });
-    expect(result.facets.grades).toEqual(["6–8"]);
+    expect(result.facets.grades).toEqual(["Middle school"]);
+    expect(result.items[0].gradeBand).toBe("6–8");
+    expect((await (await libraryGet({ gradeBand: "Middle school" })).json()).items[0].id).toBe(id);
+    const ranked = await (await get({ recommendLesson: "3", recommendStrategy: "cognitive conflict", recommendGrade: "Middle school" })).json();
+    expect(ranked.items[0].matchReasons).toContain("Same grade");
+    expect((await (await libraryGet({ gradeBand: "5–7" })).json()).items).toEqual([]);
     expect((await (await libraryGet({ gradeBand: "University" })).json()).items).toEqual([]);
     expect((await post(startBody({ metadata: { ...metadata, keywords: Array(13).fill("tag") } }))).status).toBe(422);
   });
@@ -878,8 +916,21 @@ it("links video and image generation to their saved artifacts and exposes a priv
   const history = await (await get({ action: "generation-history", id: material.id })).json();
   expect(history.parts.find((p: { label: string }) => p.label === "Video").records.map((r: { id: string }) => r.id)).toEqual([video.id, text.id]);
   expect(JSON.stringify(history)).not.toContain("PRIVATE");
+  const holder = { ...teacher, geniusId: "copy-holder" };
+  mocks.session.mockResolvedValue(holder);
   const copy = await (await post({ action: "copy", id: material.id, mode: "use" })).json();
-  expect((await get({ action: "generation-history", copyId: copy.copyId })).status).toBe(200);
+  const revision = await recordGeneration({ ...scope, userId: holder.geniusId }, { ...input, operation: "revise" });
+  const stage = await post({ action: "start-save", copyId: copy.copyId, expectedRevision: 0, item: { ...copy.item, generation: revision } });
+  expect(stage.status).toBe(200);
+  expect((await post({ action: "commit-save", copyId: copy.copyId, saveId: (await stage.json()).saveId })).status).toBe(200);
+
+  mocks.session.mockResolvedValue(teacher);
+  expect((await post({ action: "unshare", id: material.id })).status).toBe(200);
+  mocks.session.mockResolvedValue(holder);
+  expect((await get({ action: "generation-history", id: material.id })).status).toBe(404);
+  expect((await (await get({ action: "generation-history", copyId: copy.copyId })).json()).parts[0].records[0].id).toBe(revision.id);
+  expect(await (await get({ action: "generation-history", sourceCopyId: copy.copyId })).json()).toEqual(history);
   mocks.session.mockResolvedValue({ ...teacher, geniusId: "intruder" });
   expect((await get({ action: "generation-history", copyId: copy.copyId })).status).toBe(404);
+  expect((await get({ action: "generation-history", sourceCopyId: copy.copyId })).status).toBe(404);
 });
